@@ -1,3 +1,12 @@
 [submodule "thirdparty/Vulkan-Docs"]
 	path = thirdparty/Vulkan-Docs
 	url = https://github.com/KhronosGroup/Vulkan-Docs.git
+[submodule "thirdparty/vma/VulkanMemoryAllocator"]
+	path = thirdparty/vma/VulkanMemoryAllocator
+	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+[submodule "thirdparty/Vulkan-Headers"]
+	path = thirdparty/Vulkan-Headers
+	url = https://github.com/KhronosGroup/Vulkan-Headers.git
+[submodule "thirdparty/stb/stb"]
+	path = thirdparty/stb/stb
+	url = https://github.com/nothings/stb.git
