@@ -287,12 +287,14 @@ pub fn run2() !void {
 
     const window_ctx = WindowCtx{ .window = window };
 
-    const vk_backend = try Vulkan.init(
+    var vk_backend = try Vulkan.init(
         allocator,
         @as(vk.PfnGetInstanceProcAddr, @ptrCast(&glfw.getInstanceProcAddress)),
         &window_ctx.child,
     );
     defer vk_backend.deinit();
+
+    std.log.info("vk_backend size: {}", .{@sizeOf(@TypeOf(vk_backend))});
 
     vk_backend.loop();
 }

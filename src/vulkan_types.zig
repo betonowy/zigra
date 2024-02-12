@@ -4,18 +4,72 @@ const builtin = @import("builtin");
 const meta = @import("./meta.zig");
 const vk = @import("./vk.zig");
 
-pub const SpriteData = struct {
-    pivot: @Vector(2, f32),
+pub const SpriteData = extern struct {
     offset: @Vector(2, f32),
-    uv_source: @Vector(2, f32),
+    pivot: @Vector(2, f32),
+    color: @Vector(4, f16),
+    uv_source: @Vector(2, u16),
+    depth: f32,
 };
 
-pub fn TypedBuffer(comptime T: type) type {
+pub const LineData = extern struct {
+    points: [2]@Vector(2, f32),
+    color_a: @Vector(4, f16),
+    color_b: @Vector(4, f16),
+};
+
+pub const PointData = extern struct {
+    point: @Vector(3, f32),
+    color: @Vector(4, f16),
+};
+
+pub const DrawData = extern union {
+    sprite: SpriteData,
+    line: LineData,
+    point: PointData,
+};
+
+test "DrawDataLayout" {
+    try comptime std.testing.expectEqual(32, @sizeOf(DrawData));
+    try comptime std.testing.expectEqual(32, @sizeOf(SpriteData));
+    try comptime std.testing.expectEqual(32, @sizeOf(LineData));
+    try comptime std.testing.expectEqual(32, @sizeOf(PointData));
+
+    try comptime std.testing.expectEqual(16, @alignOf(DrawData));
+    try comptime std.testing.expectEqual(8, @alignOf(SpriteData));
+    try comptime std.testing.expectEqual(8, @alignOf(LineData));
+    try comptime std.testing.expectEqual(16, @alignOf(PointData));
+
+    const data: DrawData = undefined; // extern unions are never type checked
+    try std.testing.expectEqual(@intFromPtr(&data), @intFromPtr(&data.sprite));
+    try std.testing.expectEqual(@intFromPtr(&data), @intFromPtr(&data.line));
+    try std.testing.expectEqual(@intFromPtr(&data), @intFromPtr(&data.point));
+}
+
+pub fn BufferVisible(comptime T: type) type {
     return struct {
-        handle: vk.Buffer,
-        memory: vk.DeviceMemory,
-        requirements: vk.MemoryRequirements,
-        map: []T,
+        handle: vk.Buffer = .null_handle,
+        memory: vk.DeviceMemory = .null_handle,
+        requirements: vk.MemoryRequirements = std.mem.zeroes(vk.MemoryRequirements),
+        map: []T = &.{},
+    };
+}
+
+pub const ImageData = struct {
+    handle: vk.Image = .null_handle,
+    memory: vk.DeviceMemory = .null_handle,
+    requirements: vk.MemoryRequirements = std.mem.zeroes(vk.MemoryRequirements),
+    view: vk.ImageView = .null_handle,
+    format: vk.Format = .undefined,
+    aspect_mask: vk.ImageAspectFlags = .{},
+};
+
+pub fn ImageDataVisible(comptime T: type) type {
+    return struct {
+        handle: vk.Image = .null_handle,
+        memory: vk.DeviceMemory = .null_handle,
+        requirements: vk.MemoryRequirements = std.mem.zeroes(vk.MemoryRequirements),
+        map: []T = &.{},
     };
 }
 
@@ -26,19 +80,11 @@ pub const FrameData = struct {
     semaphore_ui_render_finished: vk.Semaphore = .null_handle,
     semaphore_present_render_finished: vk.Semaphore = .null_handle,
 
-    image_color_main: vk.Image = .null_handle,
-    image_depth_main: vk.Image = .null_handle,
-
-    view_color_main: vk.ImageView = .null_handle,
-    view_depth_main: vk.ImageView = .null_handle,
+    image_color: ImageData = .{},
+    image_depth: ImageData = .{},
 
     descriptor_set: vk.DescriptorSet = .null_handle,
-
-    draw_buffer: TypedBuffer(u32),
-
-    // ssb_sprite_draw_buffer_opaque
-    // ssb_sprite_draw_buffer_blend
-    // ssb_ui_draw_buffer
+    draw_buffer: BufferVisible(DrawData) = .{},
 };
 
 pub const SwapchainBasicData = struct {

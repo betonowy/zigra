@@ -510,3 +510,16 @@ fn createImageViews(
 
     return views;
 }
+
+pub fn findMemoryType(vki: types.InstanceDispatch, vk_physical_device: vk.PhysicalDevice, type_filter: u32, properties: vk.MemoryPropertyFlags) !u32 {
+    const props = vki.getPhysicalDeviceMemoryProperties(vk_physical_device);
+
+    for (0..props.memory_type_count) |i| {
+        const properties_match = vk.MemoryPropertyFlags.contains(props.memory_types[i].property_flags, properties);
+        const type_match = type_filter & @as(u32, 1) << @intCast(i) != 0;
+
+        if (type_match and properties_match) return @intCast(i);
+    }
+
+    return error.MemoryTypeNotFound;
+}

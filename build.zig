@@ -6,6 +6,10 @@ fn vulkanIncludeDir(b: *std.Build) []const u8 {
     return b.pathFromRoot("thirdparty/Vulkan-Headers/include");
 }
 
+fn compileGlsl(b: *std.Build, comptime path: []const u8) void {
+    _ = b.run(&.{ "glslc", "-I", "shaders", path, "-o", path ++ ".spv" });
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -48,8 +52,8 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(exe);
 
-    _ = b.run(&.{ "glslc", "shaders/triangle.frag", "-o", "shaders/triangle.frag.spv" });
-    _ = b.run(&.{ "glslc", "shaders/triangle.vert", "-o", "shaders/triangle.vert.spv" });
+    compileGlsl(b, "shaders/triangle.frag");
+    compileGlsl(b, "shaders/triangle.vert");
 
     const run_cmd = b.addRunArtifact(exe);
 
@@ -74,10 +78,18 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const vulkan_types_tests = b.addTest(.{
+        .root_source_file = .{ .path = "src/vulkan_types.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
     const run_meta_unit_tests = b.addRunArtifact(meta_tests);
+    const run_vulkan_types_unit_tests = b.addRunArtifact(vulkan_types_tests);
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_meta_unit_tests.step);
+    test_step.dependOn(&run_vulkan_types_unit_tests.step);
 }
