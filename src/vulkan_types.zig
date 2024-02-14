@@ -4,6 +4,20 @@ const builtin = @import("builtin");
 const meta = @import("./meta.zig");
 const vk = @import("./vk.zig");
 
+pub const Pipeline = struct {
+    handle: vk.Pipeline = .null_handle,
+    layout: vk.PipelineLayout = .null_handle,
+};
+
+pub const Pipelines = struct {
+    pipeline_present: Pipeline = .{},
+    pipeline_sprite_opaque: Pipeline = .{},
+    descriptor_set_layout: vk.DescriptorSetLayout = .null_handle,
+    resolved_depth_format: vk.Format = .undefined,
+    resolved_depth_layout: vk.ImageLayout = .undefined,
+    resolved_depth_aspect: vk.ImageAspectFlags = .undefined,
+};
+
 pub const SpriteData = extern struct {
     offset: @Vector(2, f32),
     pivot: @Vector(2, f32),
@@ -62,6 +76,8 @@ pub const ImageData = struct {
     view: vk.ImageView = .null_handle,
     format: vk.Format = .undefined,
     aspect_mask: vk.ImageAspectFlags = .{},
+    extent: vk.Extent2D = std.mem.zeroes(vk.Extent2D),
+    map: ?*anyopaque = null,
 };
 
 pub fn ImageDataVisible(comptime T: type) type {
@@ -75,22 +91,35 @@ pub fn ImageDataVisible(comptime T: type) type {
 
 pub const FrameData = struct {
     fence_busy: vk.Fence = .null_handle,
-    semaphore_opaque_render_finished: vk.Semaphore = .null_handle,
-    semaphore_blend_render_finished: vk.Semaphore = .null_handle,
-    semaphore_ui_render_finished: vk.Semaphore = .null_handle,
-    semaphore_present_render_finished: vk.Semaphore = .null_handle,
+    semaphore_swapchain_image_acquired: vk.Semaphore = .null_handle,
+    semaphore_finished: vk.Semaphore = .null_handle,
 
+    image_color_sampler: vk.Sampler = .null_handle,
     image_color: ImageData = .{},
     image_depth: ImageData = .{},
 
     descriptor_set: vk.DescriptorSet = .null_handle,
     draw_buffer: BufferVisible(DrawData) = .{},
+
+    command_buffer: vk.CommandBuffer = .null_handle,
 };
 
 pub const SwapchainBasicData = struct {
     handle: vk.SwapchainKHR = .null_handle,
     format: vk.Format = .undefined,
     extent: vk.Extent2D = .{ .width = 0, .height = 0 },
+};
+
+pub const NextSwapchainImage = struct {
+    handle: vk.SwapchainKHR,
+    format: vk.Format,
+    extent: vk.Extent2D,
+
+    index: u32,
+
+    image: vk.Image,
+    view: vk.ImageView,
+    semaphore_image_acquired: vk.Semaphore,
 };
 
 pub const SwapchainData = struct {
@@ -101,8 +130,6 @@ pub const SwapchainData = struct {
     images: std.BoundedArray(vk.Image, max_images),
     views: std.BoundedArray(vk.ImageView, max_images),
 
-    semaphores_image_acquired: std.BoundedArray(vk.Semaphore, max_images),
-
     const max_images = 3;
 
     pub fn init(basic_data: SwapchainBasicData) @This() {
@@ -112,18 +139,17 @@ pub const SwapchainData = struct {
             .extent = basic_data.extent,
             .images = std.BoundedArray(vk.Image, max_images).init(0) catch unreachable,
             .views = std.BoundedArray(vk.ImageView, max_images).init(0) catch unreachable,
-            .semaphores_image_acquired = std.BoundedArray(vk.Semaphore, max_images).init(0) catch unreachable,
         };
     }
 };
 
 pub const QueueFamilyIndicesIncomplete = struct {
-    graphicsFamily: ?u32 = null,
-    presentFamily: ?u32 = null,
+    graphics: ?u32 = null,
+    present: ?u32 = null,
 
     pub fn isComplete(self: @This()) bool {
-        _ = self.graphicsFamily orelse return false;
-        _ = self.presentFamily orelse return false;
+        _ = self.graphics orelse return false;
+        _ = self.present orelse return false;
         return true;
     }
 
@@ -260,4 +286,5 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .cmdBindDescriptorSets = true,
     .cmdPushConstants = true,
     .cmdClearDepthStencilImage = true,
+    .cmdCopyImage2 = true,
 });

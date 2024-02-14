@@ -48,3 +48,15 @@ test "unwrapOptionals" {
     try std.testing.expectEqual(incomplete.a.?, complete.a);
     try std.testing.expectEqual(incomplete.b, complete.b);
 }
+
+fn AsArrayType(comptime T: type) type {
+    return std.meta.Child(T);
+}
+
+pub fn asConstArray(ptr: anytype) *const [1]AsArrayType(@TypeOf(ptr)) {
+    return ptr;
+}
+
+pub fn asArray(ptr: anytype) *[1]AsArrayType(@TypeOf(ptr)) {
+    return ptr;
+}

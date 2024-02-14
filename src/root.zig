@@ -296,7 +296,11 @@ pub fn run2() !void {
 
     std.log.info("vk_backend size: {}", .{@sizeOf(@TypeOf(vk_backend))});
 
-    vk_backend.loop();
+    while (!window.shouldClose()) {
+        glfw.pollEvents();
+
+        try vk_backend.process();
+    }
 }
 
 pub fn run() !void {

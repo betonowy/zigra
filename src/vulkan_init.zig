@@ -12,7 +12,7 @@ fn vulkanDebugCallback(
 ) callconv(vk.vulkan_call_conv) vk.Bool32 {
     if (p_callback_data) |data| {
         if (data.p_message) |message| {
-            std.debug.print("Vulkan validation layer: {s}\n", .{message});
+            std.debug.print("Vulkan validation layer: {s}\n\n", .{message});
         }
     }
 
@@ -26,8 +26,8 @@ pub fn createDebugMessenger(vki: types.InstanceDispatch, vk_instance: vk.Instanc
         .message_severity = .{
             .error_bit_ext = true,
             .warning_bit_ext = true,
-            .info_bit_ext = true,
-            .verbose_bit_ext = true,
+            .info_bit_ext = false,
+            .verbose_bit_ext = false,
         },
         .message_type = .{
             .validation_bit_ext = true,
@@ -223,16 +223,16 @@ pub fn findQueueFamilies(
     vki.getPhysicalDeviceQueueFamilyProperties(vk_physical_device, &index_count, queue_families.ptr);
 
     for (queue_families, 0..) |queue_family, i| {
-        if (indices.graphicsFamily == null and queue_family.queue_flags.graphics_bit) {
-            indices.graphicsFamily = @intCast(i);
+        if (indices.graphics == null and queue_family.queue_flags.graphics_bit) {
+            indices.graphics = @intCast(i);
         }
 
-        if (indices.presentFamily == null and (try vki.getPhysicalDeviceSurfaceSupportKHR(
+        if (indices.present == null and (try vki.getPhysicalDeviceSurfaceSupportKHR(
             vk_physical_device,
             @intCast(i),
             vk_surface,
         )) == vk.TRUE) {
-            indices.presentFamily = @intCast(i);
+            indices.present = @intCast(i);
         }
 
         if (indices.isComplete()) return indices.complete();
@@ -311,12 +311,12 @@ pub fn createLogicalDevice(
 
     const queue_create_infos = [_]vk.DeviceQueueCreateInfo{
         .{
-            .queue_family_index = queue_family_indices.graphicsFamily,
+            .queue_family_index = queue_family_indices.graphics,
             .queue_count = 1,
             .p_queue_priorities = &priority,
         },
         .{
-            .queue_family_index = queue_family_indices.presentFamily,
+            .queue_family_index = queue_family_indices.present,
             .queue_count = 1,
             .p_queue_priorities = &priority,
         },
@@ -428,8 +428,8 @@ pub fn createSwapChain(
     }
 
     const queue_families = try findQueueFamilies(vki, vk_physical_device, vk_surface, allocator);
-    const is_one_queue = queue_families.graphicsFamily == queue_families.presentFamily;
-    const indices = [_]u32{ queue_families.graphicsFamily, queue_families.presentFamily };
+    const is_one_queue = queue_families.graphics == queue_families.present;
+    const indices = [_]u32{ queue_families.graphics, queue_families.present };
 
     const swapchain = try vkd.createSwapchainKHR(vk_device, &.{
         .surface = vk_surface,

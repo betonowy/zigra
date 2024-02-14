@@ -1,14 +1,11 @@
 #version 450
 
-// layout(location = 0) in vec3 inPosition;
-// layout(location = 1) in vec3 inColor;
-
 struct ObjectData {
     vec3 pos;
     vec3 col;
 };
 
-layout(std430, set = 0, binding = 1) readonly buffer ObjectBuffer{
+layout(std430, set = 0, binding = 0) readonly buffer ObjectBuffer{
 	ObjectData objects[];
 } objectBuffer;
 
