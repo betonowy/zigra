@@ -3,7 +3,6 @@ const builtin = @import("builtin");
 const glfw = @import("glfw");
 const vk = @import("./vk.zig");
 const stb = @cImport(@cInclude("stb/stb_image.h"));
-const zva = @import("./zva.zig");
 const Vulkan = @import("./VulkanBackend.zig");
 const vk_types = @import("./vulkan_types.zig");
 
@@ -361,9 +360,6 @@ pub fn run() !void {
 
     const vkd = try DeviceDispatch.load(vk_device, vki.dispatch.vkGetDeviceProcAddr);
     defer vkd.destroyDevice(vk_device, null);
-
-    var zva_allocator = try zva.Allocator.init(allocator, createZvaFunctionPointers(vki, vkd), vk_physical_device, vk_device, 4);
-    defer zva_allocator.deinit();
 
     var swapchain_metadata = try createSwapChain(vki, vkd, vk_physical_device, vk_device, vk_surface, window, allocator);
     defer vkd.destroySwapchainKHR(vk_device, swapchain_metadata.vk_swapchain, null);
@@ -1556,17 +1552,6 @@ fn transitionImage(
         .image_memory_barrier_count = 1,
         .p_image_memory_barriers = asConstArray(&image_barier),
     });
-}
-
-fn createZvaFunctionPointers(vki: InstanceDispatch, vkd: DeviceDispatch) zva.FunctionPointers {
-    return zva.FunctionPointers{
-        .getPhysicalDeviceMemoryProperties = vki.dispatch.vkGetPhysicalDeviceMemoryProperties,
-        .getPhysicalDeviceProperties = vki.dispatch.vkGetPhysicalDeviceProperties,
-        .allocateMemory = vkd.dispatch.vkAllocateMemory,
-        .freeMemory = vkd.dispatch.vkFreeMemory,
-        .mapMemory = vkd.dispatch.vkMapMemory,
-        .unmapMemory = vkd.dispatch.vkUnmapMemory,
-    };
 }
 
 fn findMemoryType(vki: InstanceDispatch, vk_physical_device: vk.PhysicalDevice, type_filter: u32, properties: vk.MemoryPropertyFlags) !u32 {

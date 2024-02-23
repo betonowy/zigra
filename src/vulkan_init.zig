@@ -322,8 +322,13 @@ pub fn createLogicalDevice(
         },
     };
 
+    const vulkan_12_features = vk.PhysicalDeviceVulkan12Features{
+        .runtime_descriptor_array = vk.TRUE,
+    };
+
     const synchronization_2 = vk.PhysicalDeviceSynchronization2Features{
         .synchronization_2 = vk.TRUE,
+        .p_next = @constCast(&vulkan_12_features),
     };
 
     const dynamic_rendering_feature = vk.PhysicalDeviceDynamicRenderingFeatures{
@@ -372,7 +377,7 @@ fn chooseSwapSurfaceFormat(formats: []vk.SurfaceFormatKHR) vk.SurfaceFormatKHR {
 
 fn chooseSwapPresentMode(modes: []vk.PresentModeKHR) vk.PresentModeKHR {
     for (modes) |mode| {
-        if (mode == vk.PresentModeKHR.mailbox_khr) return mode;
+        if (mode == .fifo_relaxed_khr) return mode;
     }
 
     return vk.PresentModeKHR.fifo_khr;
@@ -421,7 +426,7 @@ pub fn createSwapChain(
     const present_mode = chooseSwapPresentMode(present_modes);
     const extent = try chooseSwapExtent(vkd, vk_device, capabilities, window);
 
-    var image_count = capabilities.min_image_count + 1;
+    var image_count = @max(2, capabilities.min_image_count);
 
     if (capabilities.max_image_count > 0 and image_count > capabilities.max_image_count) {
         image_count = capabilities.max_image_count;

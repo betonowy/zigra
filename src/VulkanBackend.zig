@@ -5,18 +5,18 @@ const glfw = @import("glfw");
 const vk = @import("./vk.zig");
 const types = @import("./vulkan_types.zig");
 const initialization = @import("./vulkan_init.zig");
-const Atlas = @import("VulkanAtlas.zig");
-
-const zva = @import("./zva.zig");
+const builder = @import("./vulkan_builder.zig");
 const meta = @import("./meta.zig");
+const Atlas = @import("VulkanAtlas.zig");
+const Landscape = @import("VulkanLandscape.zig");
 
 const stb = @cImport(@cInclude("stb/stb_image.h"));
 
-const frame_data_count: u8 = 2;
-const frame_max_draw_commands = 65536;
-const frame_target_width = 640;
-const frame_target_heigth = 480;
-const frame_format = vk.Format.r16g16b16a16_sfloat;
+pub const frame_data_count: u8 = 2;
+pub const frame_max_draw_commands = 65536;
+pub const frame_target_width = 320;
+pub const frame_target_heigth = 200;
+pub const frame_format = vk.Format.r16g16b16a16_sfloat;
 
 allocator: std.mem.Allocator,
 
@@ -42,6 +42,10 @@ frames: [frame_data_count]types.FrameData,
 frame_index: @TypeOf(frame_data_count) = 0,
 pipelines: types.Pipelines,
 atlas: Atlas,
+landscape: Landscape,
+
+camera_pos: @Vector(2, i32),
+start_timestamp: i128,
 
 pub fn init(
     allocator: std.mem.Allocator,
@@ -73,7 +77,7 @@ pub fn init(
     errdefer self.vkd.destroyDevice(self.device, null);
 
     try self.createSwapchain(.first_time);
-    errdefer self.vkd.destroySwapchainKHR(self.device, self.swapchain.handle, null);
+    errdefer self.destroySwapchain();
 
     self.descriptor_pool = try self.createDescriptorPool();
     errdefer self.vkd.destroyDescriptorPool(self.device, self.descriptor_pool, null);
@@ -102,8 +106,14 @@ pub fn init(
     });
     errdefer self.atlas.deinit(&self);
 
+    self.landscape = try Landscape.init(&self);
+    errdefer self.landscape.deinit(&self);
+
     try self.createFrameData();
     errdefer self.destroyFrameData();
+
+    self.start_timestamp = std.time.nanoTimestamp();
+    self.camera_pos = .{ 0, 0 };
 
     return self;
 }
@@ -111,17 +121,14 @@ pub fn init(
 pub fn deinit(self: *@This()) void {
     self.vkd.deviceWaitIdle(self.device) catch unreachable;
 
+    self.landscape.deinit(self);
     self.atlas.deinit(self);
     self.destroyFrameData();
     self.destroyCommandPools();
     self.destroyPipelines();
     self.vkd.destroyDescriptorPool(self.device, self.descriptor_pool, null);
 
-    for (self.swapchain.views.slice()) |view| {
-        self.vkd.destroyImageView(self.device, view, null);
-    }
-
-    self.vkd.destroySwapchainKHR(self.device, self.swapchain.handle, null);
+    self.destroySwapchain();
     self.vkd.destroyDevice(self.device, null);
     self.vki.destroySurfaceKHR(self.instance, self.surface, null);
 
@@ -134,9 +141,18 @@ pub fn deinit(self: *@This()) void {
 
 pub fn process(self: *@This()) !void {
     var timer = try std.time.Timer.start();
-
     const to_ms: f32 = 1e-6;
-    _ = to_ms; // autofix
+
+    try self.landscape.recalculateActiveSets(@intCast(self.camera_pos));
+    const sets = self.landscape.active_sets.constSlice();
+
+    var upload = Landscape.UploadSets.init(0) catch unreachable;
+    var fake_buf: [Landscape.image_size * Landscape.image_size]u8 = undefined;
+
+    for (fake_buf[0..], 0..) |*cell, i| cell.* = @intCast(i & 0xff);
+    for (sets) |set| try upload.append(.{ .tile = set.tile, .data = fake_buf[0..] });
+
+    const landscape_u_dur: f32 = @floatFromInt(timer.lap());
 
     if (try self.vkd.waitForFences(
         self.device,
@@ -147,7 +163,17 @@ pub fn process(self: *@This()) !void {
     ) != .success) return error.FenceTimeout;
 
     const fence_dur: f32 = @floatFromInt(timer.lap());
-    _ = fence_dur; // autofix
+
+    try self.vkd.resetCommandBuffer(self.frames[self.frame_index].command_buffer, .{});
+    try self.vkd.beginCommandBuffer(self.frames[self.frame_index].command_buffer, &.{ .flags = .{ .one_time_submit_bit = true } });
+
+    try self.landscape.recordUploadData(self, self.frames[self.frame_index].command_buffer, upload);
+
+    const landscape_r_dur: f32 = @floatFromInt(timer.lap());
+
+    try self.uploadScheduledData(&self.frames[self.frame_index]);
+
+    const upload_dur: f32 = @floatFromInt(timer.lap());
 
     const next_image = try self.acquireNextSwapchainImage();
 
@@ -157,15 +183,36 @@ pub fn process(self: *@This()) !void {
     }
 
     const acquire_dur: f32 = @floatFromInt(timer.lap());
-    _ = acquire_dur; // autofix
 
-    try self.drawFrame(
+    try self.recordDrawFrame(
         self.frames[self.frame_index],
         next_image.image_index,
     );
 
+    try self.vkd.endCommandBuffer(self.frames[self.frame_index].command_buffer);
+
+    var wait_semaphores = std.BoundedArray(vk.Semaphore, 4).init(0) catch unreachable;
+    var wait_dst_stage_mask = std.BoundedArray(vk.PipelineStageFlags, 4).init(0) catch unreachable;
+
+    try wait_semaphores.append(self.frames[self.frame_index].semaphore_swapchain_image_acquired);
+    try wait_dst_stage_mask.append(.{ .color_attachment_output_bit = true });
+
+    std.debug.assert(wait_semaphores.len == wait_dst_stage_mask.len);
+
+    const submit_info = vk.SubmitInfo{
+        .wait_semaphore_count = wait_semaphores.len,
+        .p_wait_semaphores = wait_semaphores.constSlice().ptr,
+        .p_wait_dst_stage_mask = wait_dst_stage_mask.constSlice().ptr,
+        .command_buffer_count = 1,
+        .p_command_buffers = meta.asConstArray(&self.frames[self.frame_index].command_buffer),
+        .signal_semaphore_count = 1,
+        .p_signal_semaphores = meta.asConstArray(&self.frames[self.frame_index].semaphore_finished),
+    };
+
+    try self.vkd.resetFences(self.device, 1, meta.asConstArray(&self.frames[self.frame_index].fence_busy));
+    try self.vkd.queueSubmit(self.graphic_queue, 1, meta.asConstArray(&submit_info), self.frames[self.frame_index].fence_busy);
+
     const draw_dur: f32 = @floatFromInt(timer.lap());
-    _ = draw_dur; // autofix
 
     const present_result = try self.presentSwapchainImage(
         self.frames[self.frame_index],
@@ -173,19 +220,34 @@ pub fn process(self: *@This()) !void {
     );
 
     const present_dur: f32 = @floatFromInt(timer.lap());
-    _ = present_dur; // autofix
 
     if (next_image.result != .success or present_result != .success) {
         try self.createSwapchain(.recreate);
     }
 
-    // std.debug.print("fence: {d: >6.3} ms, acq: {d: >6.3} ms, draw: {d: >6.3} ms, p: {d: >6.3} ms, total: {d: >6.3} ms\n", .{
-    //     fence_dur * to_ms,
-    //     acquire_dur * to_ms,
-    //     draw_dur * to_ms,
-    //     present_dur * to_ms,
-    //     (fence_dur + acquire_dur + draw_dur + present_dur) * to_ms,
-    // });
+    std.debug.print(
+        \\ --------------------
+        \\ lu:    {d: >6.3} ms
+        \\ fence: {d: >6.3} ms
+        \\ lr:    {d: >6.3} ms
+        \\ up:    {d: >6.3} ms
+        \\ acq:   {d: >6.3} ms
+        \\ draw:  {d: >6.3} ms
+        \\ p:     {d: >6.3} ms
+        \\ total: {d: >6.3} ms
+        \\ nofen: {d: >6.3} ms
+        \\
+    , .{
+        landscape_u_dur * to_ms,
+        fence_dur * to_ms,
+        landscape_r_dur * to_ms,
+        upload_dur * to_ms,
+        acquire_dur * to_ms,
+        draw_dur * to_ms,
+        present_dur * to_ms,
+        (landscape_u_dur + fence_dur + landscape_r_dur + upload_dur + acquire_dur + draw_dur + present_dur) * to_ms,
+        (landscape_u_dur + landscape_r_dur + upload_dur + acquire_dur + draw_dur + present_dur) * to_ms,
+    });
 
     self.advanceFrame();
 }
@@ -251,21 +313,18 @@ pub fn createSwapchain(self: *@This(), comptime mode: CreateSwapchainMode) !void
             .image = image,
             .view_type = .@"2d",
             .format = self.swapchain.format,
-            .components = .{
-                .r = .identity,
-                .g = .identity,
-                .b = .identity,
-                .a = .identity,
-            },
-            .subresource_range = .{
-                .aspect_mask = .{ .color_bit = true },
-                .base_mip_level = 0,
-                .level_count = 1,
-                .base_array_layer = 0,
-                .layer_count = 1,
-            },
+            .components = builder.compIdentity,
+            .subresource_range = builder.defaultSubrange(.{ .color_bit = true }, 1),
         }, null);
     }
+}
+
+pub fn destroySwapchain(self: *@This()) void {
+    for (self.swapchain.views.slice()) |view| {
+        self.vkd.destroyImageView(self.device, view, null);
+    }
+
+    self.vkd.destroySwapchainKHR(self.device, self.swapchain.handle, null);
 }
 
 fn findMemoryType(self: *@This(), type_filter: u32, properties: vk.MemoryPropertyFlags) !u32 {
@@ -377,7 +436,7 @@ pub fn createImage(self: *@This(), info: ImageDataCreateInfo) !types.ImageData {
             .depth = 1,
         },
         .mip_levels = 1,
-        .array_layers = 1,
+        .array_layers = info.array_layers,
         .format = info.format,
         .tiling = info.tiling,
         .initial_layout = info.initial_layout,
@@ -415,19 +474,8 @@ pub fn createImage(self: *@This(), info: ImageDataCreateInfo) !types.ImageData {
         .image = image,
         .view_type = if (info.array_layers > 1) .@"2d_array" else .@"2d",
         .format = info.format,
-        .subresource_range = .{
-            .aspect_mask = info.aspect_mask,
-            .base_mip_level = 0,
-            .level_count = 1,
-            .base_array_layer = 0,
-            .layer_count = info.array_layers,
-        },
-        .components = .{
-            .r = .identity,
-            .g = .identity,
-            .b = .identity,
-            .a = .identity,
-        },
+        .subresource_range = builder.defaultSubrange(info.aspect_mask, info.array_layers),
+        .components = builder.compIdentity,
     }, null);
 
     return .{
@@ -449,21 +497,9 @@ pub fn destroyImage(self: *@This(), image_data: types.ImageData) void {
 }
 
 fn createDescriptorPool(self: *@This()) !vk.DescriptorPool {
-    const combined_image_samplers = vk.DescriptorPoolSize{
-        .descriptor_count = 2,
-        .type = .combined_image_sampler,
-    };
-
-    const storage_buffers = vk.DescriptorPoolSize{
-        .descriptor_count = 1,
-        .type = .storage_buffer,
-    };
-
-    const pool_sizes = [_]vk.DescriptorPoolSize{ combined_image_samplers, storage_buffers };
-
     return try self.vkd.createDescriptorPool(self.device, &.{
-        .pool_size_count = 1,
-        .p_pool_sizes = &pool_sizes,
+        .pool_size_count = builder.pipeline.descriptor_pool_sizes.len,
+        .p_pool_sizes = &builder.pipeline.descriptor_pool_sizes,
         .max_sets = 2,
         .flags = .{ .free_descriptor_set_bit = true },
     }, null);
@@ -477,204 +513,71 @@ fn createShaderModule(self: *@This(), path: []const u8) !vk.ShaderModule {
     const bytecode = try file.readToEndAllocOptions(self.allocator, stat.size, stat.size, @alignOf(u32), null);
     defer self.allocator.free(bytecode);
 
-    const info = vk.ShaderModuleCreateInfo{
+    return try self.vkd.createShaderModule(self.device, &.{
         .code_size = bytecode.len,
         .p_code = @alignCast(@ptrCast(bytecode)),
-    };
-
-    return try self.vkd.createShaderModule(self.device, &info, null);
+    }, null);
 }
 
 fn createPipelines(self: *@This()) !void {
-    const triangle_vs = try self.createShaderModule("shaders/triangle.vert.spv");
-    defer self.vkd.destroyShaderModule(self.device, triangle_vs, null);
-    const triangle_fs = try self.createShaderModule("shaders/triangle.frag.spv");
-    defer self.vkd.destroyShaderModule(self.device, triangle_fs, null);
-    const present_vs = try self.createShaderModule("shaders/present.vert.spv");
-    defer self.vkd.destroyShaderModule(self.device, present_vs, null);
-    const present_fs = try self.createShaderModule("shaders/present.frag.spv");
+    const sprite_vs = try self.createShaderModule("shaders/sprite.vert.spv");
+    defer self.vkd.destroyShaderModule(self.device, sprite_vs, null);
+    const sprite_opaque_fs = try self.createShaderModule("shaders/sprite_opaque.frag.spv");
+    defer self.vkd.destroyShaderModule(self.device, sprite_opaque_fs, null);
+    const fullscreen_vs = try self.createShaderModule("shaders/fullscreen.vert.spv");
+    defer self.vkd.destroyShaderModule(self.device, fullscreen_vs, null);
+    const present_fs = try self.createShaderModule("shaders/final.frag.spv");
     defer self.vkd.destroyShaderModule(self.device, present_fs, null);
+    const landscape_vs = try self.createShaderModule("shaders/landscape.vert.spv");
+    defer self.vkd.destroyShaderModule(self.device, landscape_vs, null);
+    const landscape_fs = try self.createShaderModule("shaders/landscape.frag.spv");
+    defer self.vkd.destroyShaderModule(self.device, landscape_fs, null);
+    const line_vs = try self.createShaderModule("shaders/line.vert.spv");
+    defer self.vkd.destroyShaderModule(self.device, line_vs, null);
+    const line_opaque_fs = try self.createShaderModule("shaders/line_opaque.frag.spv");
+    defer self.vkd.destroyShaderModule(self.device, line_opaque_fs, null);
 
     self.pipelines.resolved_depth_format = try self.findDepthImageFormat();
+    self.pipelines.resolved_depth_aspect = builder.depthImageAspect(self.pipelines.resolved_depth_format);
+    self.pipelines.resolved_depth_layout = builder.depthImageLayout(self.pipelines.resolved_depth_format);
 
-    self.pipelines.resolved_depth_aspect = switch (formatHasStencil(self.pipelines.resolved_depth_format)) {
-        .with_stencil => .{ .depth_bit = true, .stencil_bit = true },
-        .no_stencil => .{ .depth_bit = true },
-    };
-
-    self.pipelines.resolved_depth_layout = switch (formatHasStencil(self.pipelines.resolved_depth_format)) {
-        .with_stencil => .depth_stencil_attachment_optimal,
-        .no_stencil => .depth_attachment_optimal,
-    };
-
-    const triangle_shader_stage_create_info = [_]vk.PipelineShaderStageCreateInfo{
-        .{
-            .stage = .{ .vertex_bit = true },
-            .module = triangle_vs,
-            .p_name = "main",
-        },
-        .{
-            .stage = .{ .fragment_bit = true },
-            .module = triangle_fs,
-            .p_name = "main",
-        },
-    };
-
-    const present_shader_stage_create_info = [_]vk.PipelineShaderStageCreateInfo{
-        .{
-            .stage = .{ .vertex_bit = true },
-            .module = present_vs,
-            .p_name = "main",
-        },
-        .{
-            .stage = .{ .fragment_bit = true },
-            .module = present_fs,
-            .p_name = "main",
-        },
-    };
-
-    const dynamic_state_create_info = vk.PipelineDynamicStateCreateInfo{
-        .dynamic_state_count = 2,
-        .p_dynamic_states = &[_]vk.DynamicState{ .viewport, .scissor },
-    };
-
-    const assembly_stage_create_info = vk.PipelineInputAssemblyStateCreateInfo{
-        .topology = .triangle_strip,
-        .primitive_restart_enable = vk.FALSE,
-    };
-
-    const viewport = vk.Viewport{
-        .x = 0,
-        .y = 0,
-        .width = @floatFromInt(self.swapchain.extent.width),
-        .height = @floatFromInt(self.swapchain.extent.height),
-        .min_depth = 0,
-        .max_depth = 1,
-    };
-
-    const scissor = vk.Rect2D{
-        .offset = .{ .x = 0, .y = 0 },
-        .extent = self.swapchain.extent,
-    };
-
-    const viewport_state_create_info = vk.PipelineViewportStateCreateInfo{
-        .viewport_count = 1,
-        .p_viewports = meta.asConstArray(&viewport),
-        .scissor_count = 1,
-        .p_scissors = meta.asConstArray(&scissor),
-    };
-
-    const pipeline_rasterization_state_create_info = vk.PipelineRasterizationStateCreateInfo{ // OK
-        .depth_clamp_enable = vk.FALSE,
-        .rasterizer_discard_enable = vk.FALSE,
-        .polygon_mode = .fill,
-        .line_width = 1,
-        .front_face = .clockwise,
-        .depth_bias_enable = vk.FALSE,
-        .depth_bias_constant_factor = 0,
-        .depth_bias_clamp = 0,
-        .depth_bias_slope_factor = 0,
-    };
-
-    const no_multisampling = vk.PipelineMultisampleStateCreateInfo{ // OK
-        .sample_shading_enable = vk.FALSE,
-        .rasterization_samples = .{ .@"1_bit" = true },
-        .min_sample_shading = 1,
-        .alpha_to_coverage_enable = vk.FALSE,
-        .alpha_to_one_enable = vk.FALSE,
-    };
-
-    const opaque_color_blend_attachment = vk.PipelineColorBlendAttachmentState{ // OK
-        .color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true },
-        .blend_enable = vk.FALSE,
-        .src_color_blend_factor = .one,
-        .dst_color_blend_factor = .zero,
-        .color_blend_op = .add,
-        .src_alpha_blend_factor = .one,
-        .dst_alpha_blend_factor = .zero,
-        .alpha_blend_op = .add,
-    };
-
-    const depth_stencil_attachment = vk.PipelineDepthStencilStateCreateInfo{
-        .depth_test_enable = vk.TRUE,
-        .depth_write_enable = vk.TRUE,
-        .depth_compare_op = .less,
-        .depth_bounds_test_enable = vk.FALSE,
-        .stencil_test_enable = vk.FALSE,
-        .front = undefined,
-        .back = undefined,
-        .min_depth_bounds = undefined,
-        .max_depth_bounds = undefined,
-    };
-
-    const no_depth_stencil_attachment = vk.PipelineDepthStencilStateCreateInfo{
-        .depth_test_enable = vk.TRUE,
-        .depth_write_enable = vk.TRUE,
-        .depth_compare_op = .less,
-        .depth_bounds_test_enable = vk.FALSE,
-        .stencil_test_enable = vk.FALSE,
-        .front = undefined,
-        .back = undefined,
-        .min_depth_bounds = undefined,
-        .max_depth_bounds = undefined,
-    };
-
-    const no_color_blending = vk.PipelineColorBlendStateCreateInfo{ // OK
-        .logic_op_enable = vk.FALSE,
-        .logic_op = .copy,
-        .attachment_count = 1,
-        .p_attachments = &[_]vk.PipelineColorBlendAttachmentState{opaque_color_blend_attachment},
-        .blend_constants = .{ 0, 0, 0, 0 },
-    };
-
-    const binding_ssb = vk.DescriptorSetLayoutBinding{
-        .binding = 0,
-        .descriptor_type = .storage_buffer,
-        .descriptor_count = 1,
-        .stage_flags = .{ .vertex_bit = true },
-    };
-
-    const binding_atlas_img = vk.DescriptorSetLayoutBinding{
-        .binding = 1,
-        .descriptor_type = .combined_image_sampler,
-        .descriptor_count = 1,
-        .stage_flags = .{ .fragment_bit = true },
-    };
-
-    const binding_target = vk.DescriptorSetLayoutBinding{
-        .binding = 2,
-        .descriptor_type = .combined_image_sampler,
-        .descriptor_count = 1,
-        .stage_flags = .{ .fragment_bit = true },
-    };
-
-    const bindings = [_]vk.DescriptorSetLayoutBinding{ binding_ssb, binding_atlas_img, binding_target };
+    const line_opaque_stage_create_info = builder.pipeline.shader_stage.vsFs(line_vs, line_opaque_fs, .{});
+    const landscape_stage_create_info = builder.pipeline.shader_stage.vsFs(landscape_vs, landscape_fs, .{});
+    const sprite_opaque_stage_create_info = builder.pipeline.shader_stage.vsFs(sprite_vs, sprite_opaque_fs, .{});
+    const present_shader_stage_create_info = builder.pipeline.shader_stage.vsFs(fullscreen_vs, present_fs, .{});
+    const dynamic_state_create_info = builder.pipeline.dynamicState(.minimal);
+    const triangle_assembly_stage_create_info = builder.pipeline.assemblyState(.triangle_strip);
+    const line_assembly_stage_create_info = builder.pipeline.assemblyState(.line_list);
 
     self.pipelines.descriptor_set_layout = try self.vkd.createDescriptorSetLayout(self.device, &.{
-        .binding_count = bindings.len,
-        .p_bindings = &bindings,
+        .binding_count = builder.pipeline.dslb_bindings.len,
+        .p_bindings = &builder.pipeline.dslb_bindings,
     }, null);
     errdefer self.vkd.destroyDescriptorSetLayout(self.device, self.pipelines.descriptor_set_layout, null);
 
-    const vs_push_contant = vk.PushConstantRange{
-        .size = 12,
-        .offset = 0,
-        .stage_flags = .{ .vertex_bit = true },
-    };
+    const push_constant = builder.pipeline.pushConstantVsFs(@sizeOf(types.BasicPushConstant));
 
-    const fs_push_constant = vk.PushConstantRange{
-        .size = 16,
-        .offset = 0,
-        .stage_flags = .{ .fragment_bit = true },
-    };
+    self.pipelines.pipeline_line.layout = try self.vkd.createPipelineLayout(self.device, &.{
+        .set_layout_count = 1,
+        .p_set_layouts = meta.asConstArray(&self.pipelines.descriptor_set_layout),
+        .push_constant_range_count = 1,
+        .p_push_constant_ranges = meta.asConstArray(&push_constant),
+    }, null);
+    errdefer self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_line.layout, null);
 
-    const push_constants = [_]vk.PushConstantRange{ vs_push_contant, fs_push_constant };
+    self.pipelines.pipeline_landscape.layout = try self.vkd.createPipelineLayout(self.device, &.{
+        .set_layout_count = 1,
+        .p_set_layouts = meta.asConstArray(&self.pipelines.descriptor_set_layout),
+        .push_constant_range_count = 1,
+        .p_push_constant_ranges = meta.asConstArray(&push_constant),
+    }, null);
+    errdefer self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_landscape.layout, null);
 
     self.pipelines.pipeline_sprite_opaque.layout = try self.vkd.createPipelineLayout(self.device, &.{
         .set_layout_count = 1,
         .p_set_layouts = meta.asConstArray(&self.pipelines.descriptor_set_layout),
-        .push_constant_range_count = push_constants.len,
-        .p_push_constant_ranges = &push_constants,
+        .push_constant_range_count = 1,
+        .p_push_constant_ranges = meta.asConstArray(&push_constant),
     }, null);
     errdefer self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_sprite_opaque.layout, null);
 
@@ -684,31 +587,14 @@ fn createPipelines(self: *@This()) !void {
         .push_constant_range_count = 0,
         .p_push_constant_ranges = null,
     }, null);
-    errdefer self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_sprite_opaque.layout, null);
+    errdefer self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_present.layout, null);
 
-    const sprite_opaque_render_info = vk.PipelineRenderingCreateInfo{
+    const target_render_info = vk.PipelineRenderingCreateInfo{
         .color_attachment_count = 1,
         .p_color_attachment_formats = meta.asConstArray(&frame_format),
         .depth_attachment_format = self.pipelines.resolved_depth_format,
         .view_mask = 0,
         .stencil_attachment_format = .undefined,
-    };
-
-    const pipeline_sprite_opaque_info = vk.GraphicsPipelineCreateInfo{
-        .stage_count = 2,
-        .p_dynamic_state = &dynamic_state_create_info,
-        .p_stages = &triangle_shader_stage_create_info,
-        .p_vertex_input_state = &.{},
-        .p_input_assembly_state = &assembly_stage_create_info,
-        .p_viewport_state = &viewport_state_create_info,
-        .p_rasterization_state = &pipeline_rasterization_state_create_info,
-        .p_multisample_state = &no_multisampling,
-        .p_depth_stencil_state = &depth_stencil_attachment,
-        .p_color_blend_state = &no_color_blending,
-        .layout = self.pipelines.pipeline_sprite_opaque.layout,
-        .p_next = &sprite_opaque_render_info,
-        .subpass = 0,
-        .base_pipeline_index = 0,
     };
 
     const present_render_info = vk.PipelineRenderingCreateInfo{
@@ -719,22 +605,93 @@ fn createPipelines(self: *@This()) !void {
         .stencil_attachment_format = .undefined,
     };
 
+    const pipeline_line_opaque_info = vk.GraphicsPipelineCreateInfo{
+        .stage_count = 2,
+        .p_dynamic_state = &dynamic_state_create_info,
+        .p_stages = &line_opaque_stage_create_info,
+        .p_vertex_input_state = &.{},
+        .p_input_assembly_state = &line_assembly_stage_create_info,
+        .p_viewport_state = &builder.pipeline.dummy_viewport_state,
+        .p_rasterization_state = &builder.pipeline.default_rasterization,
+        .p_multisample_state = &builder.pipeline.disabled_multisampling,
+        .p_depth_stencil_state = &builder.pipeline.enabled_depth_attachment,
+        .p_color_blend_state = &builder.pipeline.disabled_color_blending,
+        .layout = self.pipelines.pipeline_line.layout,
+        .p_next = &target_render_info,
+        .subpass = 0,
+        .base_pipeline_index = 0,
+    };
+
+    const pipeline_landscape_info = vk.GraphicsPipelineCreateInfo{
+        .stage_count = 2,
+        .p_dynamic_state = &dynamic_state_create_info,
+        .p_stages = &landscape_stage_create_info,
+        .p_vertex_input_state = &.{},
+        .p_input_assembly_state = &triangle_assembly_stage_create_info,
+        .p_viewport_state = &builder.pipeline.dummy_viewport_state,
+        .p_rasterization_state = &builder.pipeline.default_rasterization,
+        .p_multisample_state = &builder.pipeline.disabled_multisampling,
+        .p_depth_stencil_state = &builder.pipeline.enabled_depth_attachment,
+        .p_color_blend_state = &builder.pipeline.disabled_color_blending,
+        .layout = self.pipelines.pipeline_landscape.layout,
+        .p_next = &target_render_info,
+        .subpass = 0,
+        .base_pipeline_index = 0,
+    };
+
+    const pipeline_sprite_opaque_info = vk.GraphicsPipelineCreateInfo{
+        .stage_count = 2,
+        .p_dynamic_state = &dynamic_state_create_info,
+        .p_stages = &sprite_opaque_stage_create_info,
+        .p_vertex_input_state = &.{},
+        .p_input_assembly_state = &triangle_assembly_stage_create_info,
+        .p_viewport_state = &builder.pipeline.dummy_viewport_state,
+        .p_rasterization_state = &builder.pipeline.default_rasterization,
+        .p_multisample_state = &builder.pipeline.disabled_multisampling,
+        .p_depth_stencil_state = &builder.pipeline.enabled_depth_attachment,
+        .p_color_blend_state = &builder.pipeline.disabled_color_blending,
+        .layout = self.pipelines.pipeline_sprite_opaque.layout,
+        .p_next = &target_render_info,
+        .subpass = 0,
+        .base_pipeline_index = 0,
+    };
+
     const pipeline_present_info = vk.GraphicsPipelineCreateInfo{
         .stage_count = 2,
         .p_dynamic_state = &dynamic_state_create_info,
         .p_stages = &present_shader_stage_create_info,
         .p_vertex_input_state = &.{},
-        .p_input_assembly_state = &assembly_stage_create_info,
-        .p_viewport_state = &viewport_state_create_info,
-        .p_rasterization_state = &pipeline_rasterization_state_create_info,
-        .p_multisample_state = &no_multisampling,
-        .p_depth_stencil_state = &no_depth_stencil_attachment,
-        .p_color_blend_state = &no_color_blending,
-        .layout = self.pipelines.pipeline_sprite_opaque.layout,
+        .p_input_assembly_state = &triangle_assembly_stage_create_info,
+        .p_viewport_state = &builder.pipeline.dummy_viewport_state,
+        .p_rasterization_state = &builder.pipeline.default_rasterization,
+        .p_multisample_state = &builder.pipeline.disabled_multisampling,
+        .p_depth_stencil_state = &builder.pipeline.disabled_depth_attachment,
+        .p_color_blend_state = &builder.pipeline.disabled_color_blending,
+        .layout = self.pipelines.pipeline_present.layout,
         .p_next = &present_render_info,
         .subpass = 0,
         .base_pipeline_index = 0,
     };
+
+    if (try self.vkd.createGraphicsPipelines(
+        self.device,
+        .null_handle,
+        1,
+        meta.asConstArray(&pipeline_line_opaque_info),
+        null,
+        meta.asArray(&self.pipelines.pipeline_line.handle),
+    ) != .success) return error.InitializationFailed;
+    errdefer self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_line.handle, null);
+
+    if (try self.vkd.createGraphicsPipelines(
+        self.device,
+        .null_handle,
+        1,
+        meta.asConstArray(&pipeline_landscape_info),
+        null,
+        meta.asArray(&self.pipelines.pipeline_landscape.handle),
+    ) != .success) return error.InitializationFailed;
+    errdefer self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_landscape.handle, null);
 
     if (try self.vkd.createGraphicsPipelines(
         self.device,
@@ -759,8 +716,12 @@ fn createPipelines(self: *@This()) !void {
 fn destroyPipelines(self: *@This()) void {
     self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_present.handle, null);
     self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_sprite_opaque.handle, null);
+    self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_landscape.handle, null);
+    self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_line.handle, null);
     self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_present.layout, null);
     self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_sprite_opaque.layout, null);
+    self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_landscape.layout, null);
+    self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_line.layout, null);
     self.vkd.destroyDescriptorSetLayout(self.device, self.pipelines.descriptor_set_layout, null);
 }
 
@@ -857,6 +818,14 @@ fn createFrameData(self: *@This()) !void {
             .sampler = frame.image_color_sampler,
         };
 
+        var ds_landscape_info: [Landscape.tile_count]vk.DescriptorImageInfo = undefined;
+
+        for (ds_landscape_info[0..], self.landscape.tiles[0..]) |*info, tile| {
+            info.image_layout = .shader_read_only_optimal;
+            info.image_view = tile.device_image.view;
+            info.sampler = tile.sampler;
+        }
+
         const write_ssb = vk.WriteDescriptorSet{
             .descriptor_count = 1,
             .descriptor_type = .storage_buffer,
@@ -884,7 +853,16 @@ fn createFrameData(self: *@This()) !void {
             .p_image_info = meta.asConstArray(&ds_target_info),
         };
 
-        const writes = [_]vk.WriteDescriptorSet{ write_ssb, write_atlas, write_img };
+        const write_landscape = vk.WriteDescriptorSet{
+            .descriptor_count = ds_landscape_info.len,
+            .descriptor_type = .combined_image_sampler,
+            .dst_array_element = 0,
+            .dst_binding = 3,
+            .dst_set = frame.descriptor_set,
+            .p_image_info = &ds_landscape_info,
+        };
+
+        const writes = [_]vk.WriteDescriptorSet{ write_ssb, write_atlas, write_img, write_landscape };
 
         self.vkd.updateDescriptorSets(self.device, writes.len, &writes, 0, null);
     }
@@ -958,18 +936,161 @@ fn presentSwapchainImage(self: *@This(), frame: types.FrameData, swapchain_image
     };
 }
 
-fn drawFrame(self: *@This(), frame: types.FrameData, swapchain_image_index: u32) !void {
-    try self.vkd.resetCommandBuffer(frame.command_buffer, .{});
-    try self.vkd.beginCommandBuffer(frame.command_buffer, &.{ .flags = .{ .one_time_submit_bit = true } });
-
+fn recordDrawFrame(self: *@This(), frame: types.FrameData, swapchain_image_index: u32) !void {
     self.transitionFrameImagesBegin(frame);
     self.beginRenderingOpaque(frame);
-    self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_sprite_opaque.handle);
+
+    const push = types.BasicPushConstant{
+        .atlas_size = .{
+            self.atlas.image.extent.width,
+            self.atlas.image.extent.height,
+        },
+        .target_size = .{
+            frame.image_color.extent.width,
+            frame.image_color.extent.height,
+        },
+        .camera_pos = self.camera_pos,
+    };
+
+    {
+        self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_sprite_opaque.handle);
+
+        self.vkd.cmdBindDescriptorSets(
+            frame.command_buffer,
+            .graphics,
+            self.pipelines.pipeline_sprite_opaque.layout,
+            0,
+            1,
+            meta.asConstArray(&frame.descriptor_set),
+            0,
+            null,
+        );
+
+        self.vkd.cmdSetViewport(frame.command_buffer, 0, 1, meta.asConstArray(&vk.Viewport{
+            .x = 0,
+            .y = 0,
+            .width = @floatFromInt(frame.image_color.extent.width),
+            .height = @floatFromInt(frame.image_color.extent.height),
+            .min_depth = 0,
+            .max_depth = 1,
+        }));
+
+        self.vkd.cmdSetScissor(frame.command_buffer, 0, 1, meta.asConstArray(&vk.Rect2D{
+            .offset = .{ .x = 0, .y = 0 },
+            .extent = frame.image_color.extent,
+        }));
+
+        self.vkd.cmdPushConstants(
+            frame.command_buffer,
+            self.pipelines.pipeline_sprite_opaque.layout,
+            .{ .vertex_bit = true, .fragment_bit = true },
+            0,
+            @sizeOf(@TypeOf(push)),
+            &push,
+        );
+
+        self.vkd.cmdDraw(
+            frame.command_buffer,
+            4,
+            frame.draw_sprite_opaque_range,
+            0,
+            frame.draw_sprite_opaque_index,
+        );
+    }
+    {
+        self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_line.handle);
+
+        self.vkd.cmdBindDescriptorSets(
+            frame.command_buffer,
+            .graphics,
+            self.pipelines.pipeline_line.layout,
+            0,
+            1,
+            meta.asConstArray(&frame.descriptor_set),
+            0,
+            null,
+        );
+
+        self.vkd.cmdSetViewport(frame.command_buffer, 0, 1, meta.asConstArray(&vk.Viewport{
+            .x = 0,
+            .y = 0,
+            .width = @floatFromInt(frame.image_color.extent.width),
+            .height = @floatFromInt(frame.image_color.extent.height),
+            .min_depth = 0,
+            .max_depth = 1,
+        }));
+
+        self.vkd.cmdSetScissor(frame.command_buffer, 0, 1, meta.asConstArray(&vk.Rect2D{
+            .offset = .{ .x = 0, .y = 0 },
+            .extent = frame.image_color.extent,
+        }));
+
+        self.vkd.cmdPushConstants(
+            frame.command_buffer,
+            self.pipelines.pipeline_line.layout,
+            .{ .vertex_bit = true, .fragment_bit = true },
+            0,
+            @sizeOf(@TypeOf(push)),
+            &push,
+        );
+
+        self.vkd.cmdDraw(
+            frame.command_buffer,
+            2,
+            frame.draw_line_range,
+            0,
+            frame.draw_line_index,
+        );
+    }
+    {
+        self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_landscape.handle);
+
+        self.vkd.cmdBindDescriptorSets(
+            frame.command_buffer,
+            .graphics,
+            self.pipelines.pipeline_landscape.layout,
+            0,
+            1,
+            meta.asConstArray(&frame.descriptor_set),
+            0,
+            null,
+        );
+
+        self.vkd.cmdSetViewport(frame.command_buffer, 0, 1, meta.asConstArray(&vk.Viewport{
+            .x = 0,
+            .y = 0,
+            .width = @floatFromInt(frame.image_color.extent.width),
+            .height = @floatFromInt(frame.image_color.extent.height),
+            .min_depth = 0,
+            .max_depth = 1,
+        }));
+
+        self.vkd.cmdSetScissor(frame.command_buffer, 0, 1, meta.asConstArray(&vk.Rect2D{
+            .offset = .{ .x = 0, .y = 0 },
+            .extent = frame.image_color.extent,
+        }));
+
+        self.vkd.cmdPushConstants(
+            frame.command_buffer,
+            self.pipelines.pipeline_sprite_opaque.layout,
+            .{ .vertex_bit = true, .fragment_bit = true },
+            0,
+            @sizeOf(@TypeOf(push)),
+            &push,
+        );
+
+        self.vkd.cmdDraw(frame.command_buffer, 4, frame.draw_landscape_range, 0, frame.draw_landscape_index);
+    }
+
+    self.vkd.cmdEndRendering(frame.command_buffer);
+    self.transitionFrameImagesFinal(frame, swapchain_image_index);
+    self.beginRenderingFinal(frame, swapchain_image_index);
+    self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_present.handle);
 
     self.vkd.cmdBindDescriptorSets(
         frame.command_buffer,
         .graphics,
-        self.pipelines.pipeline_sprite_opaque.layout,
+        self.pipelines.pipeline_present.layout,
         0,
         1,
         meta.asConstArray(&frame.descriptor_set),
@@ -977,26 +1098,7 @@ fn drawFrame(self: *@This(), frame: types.FrameData, swapchain_image_index: u32)
         null,
     );
 
-    self.vkd.cmdSetViewport(frame.command_buffer, 0, 1, meta.asConstArray(&vk.Viewport{
-        .x = 0,
-        .y = 0,
-        .width = @floatFromInt(frame.image_color.extent.width),
-        .height = @floatFromInt(frame.image_color.extent.height),
-        .min_depth = 0,
-        .max_depth = 1,
-    }));
-
-    self.vkd.cmdSetScissor(frame.command_buffer, 0, 1, meta.asConstArray(&vk.Rect2D{
-        .offset = .{ .x = 0, .y = 0 },
-        .extent = frame.image_color.extent,
-    }));
-
-    self.vkd.cmdEndRendering(frame.command_buffer);
-    self.transitionFrameImagesFinal(frame, swapchain_image_index);
-    self.beginRenderingFinal(frame, swapchain_image_index);
-    self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_present.handle);
-
-    const integer_scaling = integerScaling(self.swapchain.extent, self.atlas.image.extent);
+    const integer_scaling = integerScaling(self.swapchain.extent, frame.image_color.extent);
 
     self.vkd.cmdSetViewport(frame.command_buffer, 0, 1, meta.asConstArray(&vk.Viewport{
         .x = @floatFromInt(integer_scaling.offset.x),
@@ -1012,28 +1114,14 @@ fn drawFrame(self: *@This(), frame: types.FrameData, swapchain_image_index: u32)
     self.vkd.cmdDraw(frame.command_buffer, 3, 1, 0, 0);
     self.vkd.cmdEndRendering(frame.command_buffer);
     self.transitionFrameImagesPresent(frame, swapchain_image_index);
-    try self.vkd.endCommandBuffer(frame.command_buffer);
-
-    const submit_info = vk.SubmitInfo{
-        .wait_semaphore_count = 1,
-        .p_wait_semaphores = meta.asConstArray(&frame.semaphore_swapchain_image_acquired),
-        .p_wait_dst_stage_mask = &[_]vk.PipelineStageFlags{.{ .color_attachment_output_bit = true }},
-        .command_buffer_count = 1,
-        .p_command_buffers = meta.asConstArray(&frame.command_buffer),
-        .signal_semaphore_count = 1,
-        .p_signal_semaphores = meta.asConstArray(&frame.semaphore_finished),
-    };
-
-    try self.vkd.resetFences(self.device, 1, meta.asConstArray(&frame.fence_busy));
-    try self.vkd.queueSubmit(self.graphic_queue, 1, meta.asConstArray(&submit_info), frame.fence_busy);
 }
 
 fn transitionFrameImagesBegin(self: *@This(), frame: types.FrameData) void {
     const depth_image_barrier = vk.ImageMemoryBarrier2{
-        .src_stage_mask = .{ .all_commands_bit = true },
-        .src_access_mask = .{ .memory_write_bit = true },
-        .dst_stage_mask = .{ .all_commands_bit = true },
-        .dst_access_mask = .{ .memory_write_bit = true, .memory_read_bit = true },
+        .src_stage_mask = .{ .fragment_shader_bit = true },
+        .src_access_mask = .{ .memory_read_bit = true },
+        .dst_stage_mask = .{ .fragment_shader_bit = true },
+        .dst_access_mask = .{ .memory_write_bit = true },
         .old_layout = .undefined,
         .new_layout = self.pipelines.resolved_depth_layout,
         .image = frame.image_depth.handle,
@@ -1049,10 +1137,10 @@ fn transitionFrameImagesBegin(self: *@This(), frame: types.FrameData) void {
     };
 
     const color_image_barrier = vk.ImageMemoryBarrier2{
-        .src_stage_mask = .{ .all_commands_bit = true },
-        .src_access_mask = .{ .memory_write_bit = true },
-        .dst_stage_mask = .{ .all_commands_bit = true },
-        .dst_access_mask = .{ .memory_write_bit = true, .memory_read_bit = true },
+        .src_stage_mask = .{ .bottom_of_pipe_bit = true },
+        .src_access_mask = .{ .memory_read_bit = true },
+        .dst_stage_mask = .{ .fragment_shader_bit = true },
+        .dst_access_mask = .{ .shader_write_bit = true },
         .old_layout = .undefined,
         .new_layout = .color_attachment_optimal,
         .image = frame.image_color.handle,
@@ -1108,10 +1196,10 @@ fn beginRenderingOpaque(self: *@This(), frame: types.FrameData) void {
 
 fn transitionFrameImagesFinal(self: *@This(), frame: types.FrameData, swapchain_image_index: u32) void {
     const swapchain_image_barrier = vk.ImageMemoryBarrier2{
-        .src_stage_mask = .{ .all_commands_bit = true },
-        .src_access_mask = .{ .memory_write_bit = true },
-        .dst_stage_mask = .{ .all_commands_bit = true },
-        .dst_access_mask = .{ .memory_write_bit = true, .memory_read_bit = true },
+        .src_stage_mask = .{ .bottom_of_pipe_bit = true },
+        .src_access_mask = .{ .memory_read_bit = true },
+        .dst_stage_mask = .{ .fragment_shader_bit = true },
+        .dst_access_mask = .{ .shader_write_bit = true },
         .old_layout = .undefined,
         .new_layout = .color_attachment_optimal,
         .image = self.swapchain.images.get(swapchain_image_index),
@@ -1127,10 +1215,10 @@ fn transitionFrameImagesFinal(self: *@This(), frame: types.FrameData, swapchain_
     };
 
     const color_image_barrier = vk.ImageMemoryBarrier2{
-        .src_stage_mask = .{ .all_commands_bit = true },
-        .src_access_mask = .{ .memory_write_bit = true },
-        .dst_stage_mask = .{ .all_commands_bit = true },
-        .dst_access_mask = .{ .memory_write_bit = true, .memory_read_bit = true },
+        .src_stage_mask = .{ .fragment_shader_bit = true },
+        .src_access_mask = .{ .shader_write_bit = true },
+        .dst_stage_mask = .{ .fragment_shader_bit = true },
+        .dst_access_mask = .{ .shader_read_bit = true },
         .old_layout = .color_attachment_optimal,
         .new_layout = .shader_read_only_optimal,
         .image = frame.image_color.handle,
@@ -1179,7 +1267,7 @@ fn transitionFrameImagesPresent(self: *@This(), frame: types.FrameData, swapchai
         .src_stage_mask = .{ .all_commands_bit = true },
         .src_access_mask = .{ .memory_write_bit = true },
         .dst_stage_mask = .{ .all_commands_bit = true },
-        .dst_access_mask = .{ .memory_write_bit = true, .memory_read_bit = true },
+        .dst_access_mask = .{ .memory_read_bit = true },
         .old_layout = .color_attachment_optimal,
         .new_layout = .present_src_khr,
         .image = self.swapchain.images.get(swapchain_image_index),
@@ -1220,4 +1308,112 @@ fn integerScaling(dst: vk.Extent2D, src: vk.Extent2D) vk.Rect2D {
             .y = @intCast((dst.height - (src.height * scale)) / 2),
         },
     };
+}
+
+fn uploadScheduledData(self: *@This(), frame: *types.FrameData) !void {
+    var current_index: u32 = 0;
+
+    const timestamp = @as(f32, @floatFromInt(std.time.nanoTimestamp() - self.start_timestamp)) * (1.0 / @as(f32, std.time.ns_per_s));
+
+    const rect = self.atlas.map.get("images/crate_16.png") orelse unreachable;
+
+    const rot_full: f32 = timestamp * 0.3;
+    const sprite_count = 2000;
+
+    var sprites: [sprite_count]types.DrawData = undefined;
+
+    self.camera_pos = .{
+        @intFromFloat(@sin(rot_full * 1.90) * 50),
+        @intFromFloat(@cos(rot_full * 3.14) * 50),
+    };
+
+    for (sprites[current_index..], current_index..) |*cmd, i| {
+        var rot_actual = rot_full + @as(f32, @floatFromInt(i));
+
+        const intermediate = (rot_actual / (std.math.pi * 2));
+        rot_actual = std.math.clamp(std.math.pi * 2 * (intermediate - @floor(intermediate) - 0.5), -std.math.pi, std.math.pi);
+
+        cmd.sprite = .{
+            .color = .{ 1.0, 1.0, 1.0, 1.0 },
+            .depth = floatToUnorm16(0.4 + @sin(@as(f32, @floatFromInt(i))) * 0.3, 1.0),
+            .offset = .{ -100 + @as(f32, @floatFromInt(@mod(i * 30, 200))), @floatFromInt(@as(i32, @intCast(i / 5)) * 30 - 80) },
+            .pivot = .{ 0.1, 0.1 },
+            .uv_ul = .{ @intCast(rect.offset.x), @intCast(rect.offset.y) },
+            .uv_sz = .{ @intCast(rect.extent.width), @intCast(rect.extent.height) },
+            .rot = floatToSnorm16(rot_actual, std.math.pi),
+        };
+    }
+
+    @memcpy(frame.draw_buffer.map[0..sprite_count], &sprites);
+
+    frame.draw_sprite_opaque_index = current_index;
+    frame.draw_sprite_opaque_range = sprite_count;
+    current_index += sprite_count;
+
+    for (
+        self.landscape.active_sets.constSlice(),
+        frame.draw_buffer.map[current_index .. current_index + self.landscape.active_sets.len],
+        0..,
+    ) |set, *cmd, i| {
+        _ = i; // autofix
+        cmd.landscape = .{
+            .depth = 0.9,
+            .descriptor = 0,
+            .offset = set.tile.coord,
+            .size = .{ Landscape.image_size, Landscape.image_size },
+        };
+    }
+
+    frame.draw_landscape_index = current_index;
+    frame.draw_landscape_range = self.landscape.active_sets.len;
+    current_index += self.landscape.active_sets.len;
+
+    var prng = std.rand.DefaultPrng.init(@intCast(std.time.nanoTimestamp() & 0xffffffffffffffff));
+    var position: [5]@Vector(2, f32) = undefined;
+    const point: [5]@Vector(2, f32) = .{
+        .{ -40, -80 },
+        .{ -20, -60 },
+        .{ -30, -53 },
+        .{ -25, -46 },
+        .{ -10, -30 },
+    };
+
+    for (position[0..]) |*pos| pos.* = .{
+        prng.random().floatNorm(f32),
+        prng.random().floatNorm(f32),
+    };
+
+    const lines_count = 4;
+
+    for (frame.draw_buffer.map[current_index .. current_index + lines_count], 0..) |*cmd, i| {
+        cmd.line = .{
+            .color = .{ 0.7, 0.8, 1.0, 1.0 },
+            .alpha_gradient = .{ 1.0, 1.0 },
+            .depth = 0.5,
+            .points = .{
+                position[i + 0] + point[i + 0],
+                position[i + 1] + point[i + 1],
+            },
+        };
+    }
+
+    frame.draw_line_index = current_index;
+    frame.draw_line_range = lines_count;
+    current_index += lines_count;
+}
+
+fn floatToSnorm16(value: f32, comptime range: f32) i16 {
+    return @max(-std.math.maxInt(i16), @as(i16, @intFromFloat(value * (1.0 / range) * std.math.maxInt(i16))));
+}
+
+fn snorm16ToFloat(value: i16, comptime range: f32) f32 {
+    return @as(f32, @floatFromInt(@max(-std.math.maxInt(i16), value))) * (1.0 / std.math.maxInt(i16)) * range;
+}
+
+fn floatToUnorm16(value: f32, comptime range: f32) u16 {
+    return @intFromFloat(value * std.math.maxInt(u16) * (1.0 / range));
+}
+
+fn unorm16ToFloat(value: u16, comptime range: f32) f32 {
+    return range * @as(f32, @floatFromInt(value)) / (1.0 / std.math.maxInt(u16));
 }

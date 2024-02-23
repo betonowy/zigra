@@ -12,24 +12,35 @@ pub const Pipeline = struct {
 pub const Pipelines = struct {
     pipeline_present: Pipeline = .{},
     pipeline_sprite_opaque: Pipeline = .{},
+    pipeline_landscape: Pipeline = .{},
+    pipeline_line: Pipeline = .{},
     descriptor_set_layout: vk.DescriptorSetLayout = .null_handle,
     resolved_depth_format: vk.Format = .undefined,
     resolved_depth_layout: vk.ImageLayout = .undefined,
     resolved_depth_aspect: vk.ImageAspectFlags = .undefined,
 };
 
+pub const BasicPushConstant = extern struct {
+    atlas_size: @Vector(2, u32),
+    target_size: @Vector(2, u32),
+    camera_pos: @Vector(2, i32),
+};
+
 pub const SpriteData = extern struct {
     offset: @Vector(2, f32),
-    pivot: @Vector(2, f32),
     color: @Vector(4, f16),
-    uv_source: @Vector(2, u16),
-    depth: f32,
+    pivot: @Vector(2, f16),
+    uv_ul: @Vector(2, u16),
+    uv_sz: @Vector(2, u16),
+    depth: u16, // unsigned normalized [0, 1]
+    rot: i16, // signed normalized [-pi; pi]
 };
 
 pub const LineData = extern struct {
     points: [2]@Vector(2, f32),
-    color_a: @Vector(4, f16),
-    color_b: @Vector(4, f16),
+    color: @Vector(4, f16),
+    depth: f32,
+    alpha_gradient: @Vector(2, f16),
 };
 
 pub const PointData = extern struct {
@@ -37,10 +48,28 @@ pub const PointData = extern struct {
     color: @Vector(4, f16),
 };
 
+pub const BackgroundData = extern struct {
+    offset: @Vector(2, f32),
+    uv_ul: @Vector(2, u16),
+    uv_sz: @Vector(2, u16),
+    color_top: @Vector(4, u8),
+    color_bot: @Vector(4, u8),
+    color: @Vector(4, f16),
+};
+
+pub const LandscapeData = extern struct {
+    offset: @Vector(2, i32),
+    size: @Vector(2, i32),
+    descriptor: i32,
+    depth: f32,
+};
+
 pub const DrawData = extern union {
     sprite: SpriteData,
     line: LineData,
     point: PointData,
+    background: BackgroundData,
+    landscape: LandscapeData,
 };
 
 test "DrawDataLayout" {
@@ -48,11 +77,16 @@ test "DrawDataLayout" {
     try comptime std.testing.expectEqual(32, @sizeOf(SpriteData));
     try comptime std.testing.expectEqual(32, @sizeOf(LineData));
     try comptime std.testing.expectEqual(32, @sizeOf(PointData));
+    try comptime std.testing.expectEqual(32, @sizeOf(BackgroundData));
+    try comptime std.testing.expectEqual(24, @sizeOf(LandscapeData));
 
     try comptime std.testing.expectEqual(16, @alignOf(DrawData));
     try comptime std.testing.expectEqual(8, @alignOf(SpriteData));
     try comptime std.testing.expectEqual(8, @alignOf(LineData));
     try comptime std.testing.expectEqual(16, @alignOf(PointData));
+    try comptime std.testing.expectEqual(8, @alignOf(BackgroundData));
+
+    try comptime std.testing.expectEqual(16, @sizeOf(BasicPushConstant));
 
     const data: DrawData = undefined; // extern unions are never type checked
     try std.testing.expectEqual(@intFromPtr(&data), @intFromPtr(&data.sprite));
@@ -99,7 +133,14 @@ pub const FrameData = struct {
     image_depth: ImageData = .{},
 
     descriptor_set: vk.DescriptorSet = .null_handle,
+
     draw_buffer: BufferVisible(DrawData) = .{},
+    draw_sprite_opaque_index: u32 = 0,
+    draw_sprite_opaque_range: u32 = 0,
+    draw_landscape_index: u32 = 0,
+    draw_landscape_range: u32 = 0,
+    draw_line_index: u32 = 0,
+    draw_line_range: u32 = 0,
 
     command_buffer: vk.CommandBuffer = .null_handle,
 };

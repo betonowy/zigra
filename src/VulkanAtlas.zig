@@ -265,7 +265,6 @@ fn findFreeRect(extent: vk.Extent2D, existing_rects: []vk.Rect2D, max_extent: vk
 
             if (!free) continue;
 
-            std.debug.print("New atlas rect: {}\n", .{new_rect});
             return new_rect;
         }
     }
@@ -348,10 +347,10 @@ fn calculateRequiredExtent(rects: []const vk.Rect2D) vk.Extent2D {
 
 fn barrierUndefinedToTransferDst(handle: vk.Image) vk.ImageMemoryBarrier2 {
     return vk.ImageMemoryBarrier2{
-        .src_stage_mask = .{ .all_commands_bit = true },
-        .src_access_mask = .{ .memory_write_bit = true },
-        .dst_stage_mask = .{ .all_commands_bit = true },
-        .dst_access_mask = .{ .memory_write_bit = true, .memory_read_bit = true },
+        .src_stage_mask = .{},
+        .src_access_mask = .{},
+        .dst_stage_mask = .{},
+        .dst_access_mask = .{},
         .old_layout = .undefined,
         .new_layout = .transfer_dst_optimal,
         .image = handle,
@@ -372,7 +371,7 @@ fn barrierPreinitializedToTransferSrc(handle: vk.Image) vk.ImageMemoryBarrier2 {
         .src_stage_mask = .{ .all_commands_bit = true },
         .src_access_mask = .{ .memory_write_bit = true },
         .dst_stage_mask = .{ .all_commands_bit = true },
-        .dst_access_mask = .{ .memory_write_bit = true, .memory_read_bit = true },
+        .dst_access_mask = .{ .memory_read_bit = true },
         .old_layout = .preinitialized,
         .new_layout = .transfer_src_optimal,
         .image = handle,
@@ -393,7 +392,7 @@ fn barrierTransferDstToSampler(handle: vk.Image) vk.ImageMemoryBarrier2 {
         .src_stage_mask = .{ .all_commands_bit = true },
         .src_access_mask = .{ .memory_write_bit = true },
         .dst_stage_mask = .{ .all_commands_bit = true },
-        .dst_access_mask = .{ .memory_write_bit = true, .memory_read_bit = true },
+        .dst_access_mask = .{ .shader_read_bit = true },
         .old_layout = .transfer_dst_optimal,
         .new_layout = .shader_read_only_optimal,
         .image = handle,

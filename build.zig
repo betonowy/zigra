@@ -2,15 +2,13 @@ const std = @import("std");
 const vma = @import("thirdparty/vma/build_wrap.zig");
 const stb = @import("thirdparty/stb/build_wrap.zig");
 
+const shaders = @import("steps/shaders.zig");
+
 fn vulkanIncludeDir(b: *std.Build) []const u8 {
     return b.pathFromRoot("thirdparty/Vulkan-Headers/include");
 }
 
-fn compileGlsl(b: *std.Build, comptime path: []const u8) void {
-    _ = b.run(&.{ "glslc", "-I", "shaders", path, "-o", path ++ ".spv" });
-}
-
-pub fn build(b: *std.Build) void {
+pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -49,21 +47,14 @@ pub fn build(b: *std.Build) void {
     });
 
     exe.root_module.addImport("zigra", &lib.root_module);
+    const compile_glsl_step = shaders.step(b);
 
     b.installArtifact(exe);
-
-    compileGlsl(b, "shaders/triangle.frag");
-    compileGlsl(b, "shaders/triangle.vert");
-    compileGlsl(b, "shaders/present.frag");
-    compileGlsl(b, "shaders/present.vert");
-
     const run_cmd = b.addRunArtifact(exe);
-
     run_cmd.step.dependOn(b.getInstallStep());
+    exe.step.dependOn(compile_glsl_step);
 
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    if (b.args) |args| run_cmd.addArgs(args);
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
@@ -92,14 +83,22 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const vulkan_landscape_tests = b.addTest(.{
+        .root_source_file = .{ .path = "src/VulkanLandscape.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
     const run_meta_unit_tests = b.addRunArtifact(meta_tests);
     const run_vulkan_types_unit_tests = b.addRunArtifact(vulkan_types_tests);
     const run_vulkan_atlas_unit_tests = b.addRunArtifact(vulkan_atlas_tests);
+    const run_vulkan_landscape_unit_tests = b.addRunArtifact(vulkan_landscape_tests);
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_meta_unit_tests.step);
     test_step.dependOn(&run_vulkan_types_unit_tests.step);
     test_step.dependOn(&run_vulkan_atlas_unit_tests.step);
+    test_step.dependOn(&run_vulkan_landscape_unit_tests.step);
 }
