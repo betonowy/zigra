@@ -3,7 +3,6 @@ const builtin = @import("builtin");
 
 const meta = @import("./meta.zig");
 const vk = @import("./vk.zig");
-const Landscape = @import("./VulkanLandscape.zig");
 
 pub const Pipeline = struct {
     handle: vk.Pipeline = .null_handle,
@@ -123,31 +122,6 @@ pub fn ImageDataVisible(comptime T: type) type {
         map: []T = &.{},
     };
 }
-
-pub const FrameData = struct {
-    fence_busy: vk.Fence = .null_handle,
-    semaphore_swapchain_image_acquired: vk.Semaphore = .null_handle,
-    semaphore_finished: vk.Semaphore = .null_handle,
-
-    image_color_sampler: vk.Sampler = .null_handle,
-    image_color: ImageData = .{},
-    image_depth: ImageData = .{},
-
-    landscape: Landscape = .{},
-    landscape_upload: Landscape.UploadSets = .{},
-
-    descriptor_set: vk.DescriptorSet = .null_handle,
-
-    draw_buffer: BufferVisible(DrawData) = .{},
-    draw_sprite_opaque_index: u32 = 0,
-    draw_sprite_opaque_range: u32 = 0,
-    draw_landscape_index: u32 = 0,
-    draw_landscape_range: u32 = 0,
-    draw_line_index: u32 = 0,
-    draw_line_range: u32 = 0,
-
-    command_buffer: vk.CommandBuffer = .null_handle,
-};
 
 pub const SwapchainBasicData = struct {
     handle: vk.SwapchainKHR = .null_handle,

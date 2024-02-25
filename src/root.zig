@@ -300,18 +300,23 @@ pub fn run() !void {
 
     try ls.loadFromPngFile(.{ .coord = .{ -256, -256 }, .size = .{ 512, 512 } }, "land/TEST_LEVEL.png");
 
+    var tick: usize = 0;
+
     while (!window.shouldClose()) {
+        tick += 1;
         glfw.pollEvents();
+
+        if (tick % 5 == 0) try ls.simulate();
 
         try vk_backend.frames[vk_backend.frame_index].landscape.recalculateActiveSets(@intCast(vk_backend.camera_pos));
         const set = vk_backend.frames[vk_backend.frame_index].landscape.active_sets.constSlice();
         vk_backend.frames[vk_backend.frame_index].landscape_upload.resize(0) catch unreachable;
 
-        const extent = @Vector(2, i32){ Vulkan.frame_target_width, Vulkan.frame_target_heigth };
+        const extent = @Vector(2, i32){ Vulkan.frame_target_width, Vulkan.frame_target_height };
 
         const lsExtent = LandSim.NodeExtent{
             .coord = vk_backend.camera_pos - extent / @Vector(2, i32){ 2, 2 },
-            .size = .{ Vulkan.frame_target_width, Vulkan.frame_target_heigth },
+            .size = .{ Vulkan.frame_target_width, Vulkan.frame_target_height },
         };
 
         const tc = ls.tileCountForArea(lsExtent);
@@ -323,11 +328,8 @@ pub fn run() !void {
 
         for (used) |src| for (set) |dst| {
             if (@reduce(.Or, src.coord != dst.tile.coord)) continue;
-            std.debug.print("Copied {}, {}\n", .{ src.coord, dst.tile.coord });
             try vk_backend.frames[vk_backend.frame_index].landscape_upload.append(.{ .tile = dst.tile, .data = std.mem.asBytes(&src.matrix) });
         };
-
-        std.debug.print("nodes: {} tiles: {}\n", .{ ls.node_pool.arena.queryCapacity(), ls.tile_pool.arena.queryCapacity() });
 
         try vk_backend.process();
     }

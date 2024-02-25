@@ -7,7 +7,7 @@ const stb = @cImport(@cInclude("stb/stb_image.h"));
 
 pub const image_size = 128;
 const tiles_width_count = Backend.frame_target_width / image_size + 2;
-const tiles_height_count = Backend.frame_target_heigth / image_size + 2;
+const tiles_height_count = Backend.frame_target_height / image_size + 2;
 pub const tile_count = tiles_width_count * tiles_height_count;
 
 const Tile = struct {
@@ -228,7 +228,7 @@ fn barrierTransferDstToSampler(handle: vk.Image) vk.ImageMemoryBarrier2 {
 pub fn recalculateActiveSets(self: *@This(), target: @Vector(2, i16)) !void {
     const tile_size = @as(@Vector(2, i16), @splat(image_size));
 
-    const extent: @Vector(2, i16) = .{ Backend.frame_target_width, Backend.frame_target_heigth };
+    const extent: @Vector(2, i16) = .{ Backend.frame_target_width, Backend.frame_target_height };
     const offset = target - extent / @as(@Vector(2, i16), @splat(2));
 
     const start_pos = @divFloor(offset, tile_size) * tile_size;
@@ -256,11 +256,9 @@ pub fn recalculateActiveSets(self: *@This(), target: @Vector(2, i16)) !void {
     for (self.tiles[0..]) |*tile| {
         tile.used_flag = false;
 
-        // TODO Doesn't work for now
         for (positions.constSlice(), 0..) |position, i| {
             if (@reduce(.Or, position != tile.coord)) continue;
 
-            // tile.coord = position;
             tile.used_flag = true;
             _ = positions.swapRemove(i);
 

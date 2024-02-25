@@ -35,7 +35,7 @@ pub fn rgbaToCell(value: u32) Cell {
         Rgba.U32(0x40, 0x40, 0x40, 0xff) => cell_types.rock,
         Rgba.U32(0x00, 0x00, 0xc0, 0xff) => cell_types.water,
         Rgba.U32(0x00, 0xff, 0x00, 0xff) => cell_types.acid,
-        Rgba.U32(0xff, 0xff, 0x80, 0xff) => cell_types.sand,
+        Rgba.U32(0xff, 0xff, 0x80, 0xff) => cell_types.sand_nb,
         else => @panic("Bad cell coding"),
     };
 }
@@ -76,6 +76,12 @@ pub const Tile = struct {
                 else => {},
             }
         };
+    }
+
+    pub fn lessPtr(_: void, lhs: *@This(), rhs: *@This()) bool {
+        if (lhs.coord[1] < rhs.coord[1]) return true;
+        if (lhs.coord[1] == rhs.coord[1] and lhs.coord[0] < rhs.coord[1]) return true;
+        return false;
     }
 };
 
@@ -155,6 +161,7 @@ tile_pool: TilePool,
 node_pool: NodePool,
 
 tree: TreeNode,
+iteration: usize,
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
     var self: @This() = undefined;
@@ -162,6 +169,7 @@ pub fn init(allocator: std.mem.Allocator) !@This() {
     self.allocator = allocator;
     self.tile_pool = try TilePool.initPreheated(self.allocator, 4 * 4);
     self.node_pool = try NodePool.initPreheated(self.allocator, 128);
+    self.iteration = 0;
 
     self.tree = .{
         .coord = .{ -(max_extent >> 1), -(max_extent >> 1) },
@@ -361,6 +369,219 @@ pub fn loadFromPngFile(self: *@This(), extent: NodeExtent, path: []const u8) !vo
     defer stb.stbi_image_free(rgba);
 
     return self.loadFromRgbaImage(extent, rgba[0..@intCast(x * y * 4)]);
+}
+
+pub fn simulate(self: *@This()) !void {
+    self.iteration +%= 1;
+
+    const sim_tile_size = @Vector(2, u32){ tile_size / 2, tile_size / 2 };
+
+    const sim_extent = NodeExtent{
+        .coord = .{ -256, -256 },
+        .size = .{ 512, 512 },
+    };
+
+    const ensure_extent = NodeExtent{
+        .coord = sim_extent.coord - @Vector(2, i32){ 32, 32 },
+        .size = sim_extent.size + @Vector(2, u32){ 64, 64 },
+    };
+
+    try self.ensureArea(ensure_extent);
+
+    const iteration_offsets = [_]@Vector(2, i32){
+        .{ 0, 0 },
+        .{ tile_size / 2, 0 },
+        .{ 0, tile_size / 2 },
+        .{ tile_size / 2, tile_size / 2 },
+    };
+
+    const margin = 16;
+
+    const margin_extent = NodeExtent{
+        .coord = .{ -margin, -margin },
+        .size = .{ 2 * margin, 2 * margin },
+    };
+
+    const root = sim_extent.coord;
+    var current = root;
+
+    while (current[1] < sim_extent.coord[1] + sim_extent.size[1]) {
+        current[0] = root[0];
+
+        while (current[0] < sim_extent.coord[0] + sim_extent.size[0]) {
+            inline for (iteration_offsets) |offset| {
+                const sim_tile_extent = NodeExtent{
+                    .coord = current + offset,
+                    .size = sim_tile_size,
+                };
+
+                const view_extent = NodeExtent{
+                    .coord = sim_tile_extent.coord + margin_extent.coord,
+                    .size = sim_tile_extent.size + margin_extent.size,
+                };
+
+                self.simulateTile(sim_tile_extent, view_extent);
+            }
+
+            current[0] += tile_size;
+        }
+
+        current[1] += tile_size;
+    }
+}
+
+const Code = enum {
+    noop,
+    swap_r,
+    swap_l,
+    swap_d,
+    swap_ld,
+    swap_rd,
+};
+
+fn simulateTile(self: *@This(), sim_tile_extent: NodeExtent, view_extent: NodeExtent) void {
+    var arr_main_tiles: [1]*Tile = undefined;
+    var arr_view_tiles: [4]*Tile = undefined;
+
+    const main_tiles = try self.fillTilesFromArea(sim_tile_extent, &arr_main_tiles);
+    const view_tiles = try self.fillTilesFromArea(view_extent, &arr_view_tiles);
+
+    std.debug.assert(main_tiles.len == arr_main_tiles.len);
+    std.debug.assert(view_tiles.len == arr_view_tiles.len);
+
+    // const MainView = struct {
+    //     tile: *Tile,
+    //     extent: NodeExtent,
+
+    //     pub fn get(view: *const @This(), coord: @Vector(2, i32)) *Cell {
+    //         const origin = view.extent.coord - view.tile.coord + coord;
+    //         return &view.tile.matrix[@intCast(origin[1])][@intCast(origin[0])];
+    //     }
+    // };
+    // _ = MainView; // autofix
+
+    const BigView = struct {
+        tiles: [4]*Tile,
+        extent: NodeExtent,
+
+        pub fn init(tiles: [4]*Tile, extent: NodeExtent) @This() {
+            return .{
+                .tiles = tiles,
+                .extent = extent,
+            };
+        }
+
+        fn get(view: *const @This(), coord: @Vector(2, i32)) *Cell {
+            inline for (view.tiles) |tile| {
+                const diff = coord - tile.coord;
+                if (@reduce(.And, diff >= @Vector(2, i32){ 0, 0 }) and @reduce(.And, diff < @Vector(2, i32){ tile_size, tile_size })) {
+                    return &tile.matrix[@intCast(diff[1])][@intCast(diff[0])];
+                }
+            }
+            unreachable;
+        }
+    };
+
+    // const a = MainView{ .tile = arr_main_tiles[0], .extent = sim_tile_extent };
+    const b = BigView.init(arr_view_tiles, sim_tile_extent);
+
+    var codes: [tile_size / 2][tile_size / 2]Code = undefined;
+
+    var rand = std.rand.Sfc64.init(self.iteration & 0xffffffffffffffff);
+
+    for (codes[0..], 0..) |*col, y| {
+        const SwapDirOrder = struct { code: Code, offset: @Vector(2, i32) };
+
+        const rand_int_x = rand.random().int(u1);
+
+        for (col[0..], 0..) |*code, ix| {
+            code.* = .noop;
+
+            const x = if (rand_int_x == 1) ix else (tile_size / 2) - 1 - ix;
+
+            const current_coord = sim_tile_extent.coord - @Vector(2, i32){ @intCast(x), @intCast(y) };
+            const current = b.get(current_coord);
+
+            const rand_int_swap = rand.random().int(u1);
+
+            const liquid_swap_dir_orders: [5]SwapDirOrder = if (rand_int_swap == 1) .{
+                .{ .code = .swap_d, .offset = .{ 0, 1 } },
+                .{ .code = .swap_ld, .offset = .{ -1, 1 } },
+                .{ .code = .swap_rd, .offset = .{ 1, 1 } },
+                .{ .code = .swap_l, .offset = .{ -1, 0 } },
+                .{ .code = .swap_r, .offset = .{ 1, 0 } },
+            } else .{
+                .{ .code = .swap_d, .offset = .{ 0, 1 } },
+                .{ .code = .swap_rd, .offset = .{ 1, 1 } },
+                .{ .code = .swap_ld, .offset = .{ -1, 1 } },
+                .{ .code = .swap_r, .offset = .{ 1, 0 } },
+                .{ .code = .swap_l, .offset = .{ -1, 0 } },
+            };
+
+            const powder_swap_dir_orders: [3]SwapDirOrder = if (rand_int_swap == 1) .{
+                .{ .code = .swap_d, .offset = .{ 0, 1 } },
+                .{ .code = .swap_ld, .offset = .{ -1, 1 } },
+                .{ .code = .swap_rd, .offset = .{ 1, 1 } },
+            } else .{
+                .{ .code = .swap_d, .offset = .{ 0, 1 } },
+                .{ .code = .swap_rd, .offset = .{ 1, 1 } },
+                .{ .code = .swap_ld, .offset = .{ -1, 1 } },
+            };
+
+            const swap_orders = switch (current.type) {
+                .air, .solid => continue,
+                .liquid => liquid_swap_dir_orders[0..],
+                .powder => powder_swap_dir_orders[0..],
+            };
+
+            for (swap_orders) |order| {
+                const other_coord = current_coord + order.offset;
+                const other = b.get(other_coord);
+
+                if (@intFromEnum(other.type) < @intFromEnum(current.type)) {
+                    code.* = order.code;
+                    Cell.swap(current, other);
+                    break;
+                }
+            }
+        }
+    }
+
+    // for (codes, 0..) |col, y| for (col, 0..) |code, x| {
+    //     // const y = 63 - iy;
+
+    //     const current_coord = sim_tile_extent.coord - @Vector(2, i32){ @intCast(x), @intCast(y) };
+    //     const current = b.get(current_coord);
+
+    //     switch (code) {
+    //         .noop => {},
+    //         .swap_d => {
+    //             const other_coord = current_coord + @Vector(2, i32){ 0, 1 };
+    //             const other = b.get(other_coord);
+    //             Cell.swap(current, other);
+    //         },
+    //         .swap_l => {
+    //             const other_coord = current_coord + @Vector(2, i32){ -1, 0 };
+    //             const other = b.get(other_coord);
+    //             Cell.swap(current, other);
+    //         },
+    //         .swap_r => {
+    //             const other_coord = current_coord + @Vector(2, i32){ 1, 0 };
+    //             const other = b.get(other_coord);
+    //             Cell.swap(current, other);
+    //         },
+    //         .swap_ld => {
+    //             const other_coord = current_coord + @Vector(2, i32){ -1, 1 };
+    //             const other = b.get(other_coord);
+    //             Cell.swap(current, other);
+    //         },
+    //         .swap_rd => {
+    //             const other_coord = current_coord + @Vector(2, i32){ 1, 1 };
+    //             const other = b.get(other_coord);
+    //             Cell.swap(current, other);
+    //         },
+    //     }
+    // };
 }
 
 test "Minimal lifetime" {

@@ -16,7 +16,7 @@ const stb = @cImport(@cInclude("stb/stb_image.h"));
 pub const frame_data_count: u8 = 2;
 pub const frame_max_draw_commands = 65536;
 pub const frame_target_width = 320;
-pub const frame_target_heigth = 200;
+pub const frame_target_height = 200;
 pub const frame_format = vk.Format.r16g16b16a16_sfloat;
 
 allocator: std.mem.Allocator,
@@ -39,13 +39,38 @@ graphic_command_pool: vk.CommandPool,
 
 swapchain: types.SwapchainData,
 descriptor_pool: vk.DescriptorPool,
-frames: [frame_data_count]types.FrameData,
+frames: [frame_data_count]FrameData,
 frame_index: @TypeOf(frame_data_count) = 0,
 pipelines: types.Pipelines,
 atlas: Atlas,
 
 camera_pos: @Vector(2, i32),
 start_timestamp: i128,
+
+pub const FrameData = struct {
+    fence_busy: vk.Fence = .null_handle,
+    semaphore_swapchain_image_acquired: vk.Semaphore = .null_handle,
+    semaphore_finished: vk.Semaphore = .null_handle,
+
+    image_color_sampler: vk.Sampler = .null_handle,
+    image_color: types.ImageData = .{},
+    image_depth: types.ImageData = .{},
+
+    landscape: Landscape = .{},
+    landscape_upload: Landscape.UploadSets = .{},
+
+    descriptor_set: vk.DescriptorSet = .null_handle,
+
+    draw_buffer: types.BufferVisible(types.DrawData) = .{},
+    draw_sprite_opaque_index: u32 = 0,
+    draw_sprite_opaque_range: u32 = 0,
+    draw_landscape_index: u32 = 0,
+    draw_landscape_range: u32 = 0,
+    draw_line_index: u32 = 0,
+    draw_line_range: u32 = 0,
+
+    command_buffer: vk.CommandBuffer = .null_handle,
+};
 
 pub fn init(
     allocator: std.mem.Allocator,
@@ -728,7 +753,7 @@ fn createFrameData(self: *@This()) !void {
     self.frame_index = 0;
     errdefer self.destroyFrameData();
 
-    const image_extent = vk.Extent2D{ .width = frame_target_width, .height = frame_target_heigth };
+    const image_extent = vk.Extent2D{ .width = frame_target_width, .height = frame_target_height };
 
     for (self.frames[0..]) |*frame| {
         frame.draw_buffer = try self.createBuffer(types.DrawData, .{
@@ -912,7 +937,7 @@ fn acquireNextSwapchainImage(self: *@This()) !types.DeviceDispatch.AcquireNextIm
     return next_image_result;
 }
 
-fn presentSwapchainImage(self: *@This(), frame: types.FrameData, swapchain_image_index: u32) !vk.Result {
+fn presentSwapchainImage(self: *@This(), frame: FrameData, swapchain_image_index: u32) !vk.Result {
     return self.vkd.queuePresentKHR(self.present_queue, &.{
         .wait_semaphore_count = 1,
         .p_wait_semaphores = meta.asConstArray(&frame.semaphore_finished),
@@ -928,7 +953,7 @@ fn presentSwapchainImage(self: *@This(), frame: types.FrameData, swapchain_image
     };
 }
 
-fn recordDrawFrame(self: *@This(), frame: types.FrameData, swapchain_image_index: u32) !void {
+fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32) !void {
     self.transitionFrameImagesBegin(frame);
     self.beginRenderingOpaque(frame);
 
@@ -1108,7 +1133,7 @@ fn recordDrawFrame(self: *@This(), frame: types.FrameData, swapchain_image_index
     self.transitionFrameImagesPresent(frame, swapchain_image_index);
 }
 
-fn transitionFrameImagesBegin(self: *@This(), frame: types.FrameData) void {
+fn transitionFrameImagesBegin(self: *@This(), frame: FrameData) void {
     const depth_image_barrier = vk.ImageMemoryBarrier2{
         .src_stage_mask = .{ .fragment_shader_bit = true },
         .src_access_mask = .{ .memory_read_bit = true },
@@ -1155,7 +1180,7 @@ fn transitionFrameImagesBegin(self: *@This(), frame: types.FrameData) void {
     });
 }
 
-fn beginRenderingOpaque(self: *@This(), frame: types.FrameData) void {
+fn beginRenderingOpaque(self: *@This(), frame: FrameData) void {
     const color_attachment = vk.RenderingAttachmentInfo{
         .image_view = frame.image_color.view,
         .image_layout = .color_attachment_optimal,
@@ -1186,7 +1211,7 @@ fn beginRenderingOpaque(self: *@This(), frame: types.FrameData) void {
     });
 }
 
-fn transitionFrameImagesFinal(self: *@This(), frame: types.FrameData, swapchain_image_index: u32) void {
+fn transitionFrameImagesFinal(self: *@This(), frame: FrameData, swapchain_image_index: u32) void {
     const swapchain_image_barrier = vk.ImageMemoryBarrier2{
         .src_stage_mask = .{ .bottom_of_pipe_bit = true },
         .src_access_mask = .{ .memory_read_bit = true },
@@ -1233,7 +1258,7 @@ fn transitionFrameImagesFinal(self: *@This(), frame: types.FrameData, swapchain_
     });
 }
 
-fn beginRenderingFinal(self: *@This(), frame: types.FrameData, swapchain_image_index: u32) void {
+fn beginRenderingFinal(self: *@This(), frame: FrameData, swapchain_image_index: u32) void {
     const color_attachment = vk.RenderingAttachmentInfo{
         .image_view = self.swapchain.views.get(swapchain_image_index),
         .image_layout = .color_attachment_optimal,
@@ -1254,7 +1279,7 @@ fn beginRenderingFinal(self: *@This(), frame: types.FrameData, swapchain_image_i
     });
 }
 
-fn transitionFrameImagesPresent(self: *@This(), frame: types.FrameData, swapchain_image_index: u32) void {
+fn transitionFrameImagesPresent(self: *@This(), frame: FrameData, swapchain_image_index: u32) void {
     const swapchain_image_barrier = vk.ImageMemoryBarrier2{
         .src_stage_mask = .{ .all_commands_bit = true },
         .src_access_mask = .{ .memory_write_bit = true },
@@ -1302,7 +1327,7 @@ fn integerScaling(dst: vk.Extent2D, src: vk.Extent2D) vk.Rect2D {
     };
 }
 
-fn uploadScheduledData(self: *@This(), frame: *types.FrameData) !void {
+fn uploadScheduledData(self: *@This(), frame: *FrameData) !void {
     var current_index: u32 = 0;
 
     const timestamp = @as(f32, @floatFromInt(std.time.nanoTimestamp() - self.start_timestamp)) * (1.0 / @as(f32, std.time.ns_per_s));
@@ -1315,8 +1340,8 @@ fn uploadScheduledData(self: *@This(), frame: *types.FrameData) !void {
     var sprites: [sprite_count]types.DrawData = undefined;
 
     self.camera_pos = .{
-        @intFromFloat(@sin(rot_full * 1.90) * 70 + 24),
-        @intFromFloat(@cos(rot_full * 3.14) * 70 + 24),
+        @intFromFloat(@sin(rot_full * 1.90) * 0 + 10),
+        @intFromFloat(@cos(rot_full * 3.14) * 0 - 70),
     };
 
     for (sprites[current_index..], current_index..) |*cmd, i| {
@@ -1345,11 +1370,10 @@ fn uploadScheduledData(self: *@This(), frame: *types.FrameData) !void {
     for (
         self.frames[self.frame_index].landscape.active_sets.constSlice(),
         frame.draw_buffer.map[current_index .. current_index + self.frames[self.frame_index].landscape.active_sets.len],
-        0..,
-    ) |set, *cmd, i| {
+    ) |set, *cmd| {
         cmd.landscape = .{
             .depth = 0.9,
-            .descriptor = @intCast(i),
+            .descriptor = @intCast(set.tile.table_index),
             .offset = set.tile.coord,
             .size = .{ Landscape.image_size, Landscape.image_size },
         };
