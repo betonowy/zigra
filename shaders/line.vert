@@ -1,6 +1,6 @@
 #version 450
 
-#include <basic_push_constant.glsl>
+#include <gen/pc/BasicPushConstant.glsl>
 
 struct LineDataPacked {
     vec2 points[2];
@@ -36,5 +36,5 @@ LineData getLineData(uint i, uint v) {
 void main() {
     LineData data = getLineData(gl_InstanceIndex, gl_VertexIndex);
     out_color = data.color;
-    gl_Position = vec4(round(data.point.xy - push.camera_pos) / (push.target_size * 0.5), data.point.z, 1.0);
+    gl_Position = vec4(round(data.point.xy - pc.camera_pos) / (pc.target_size * 0.5), data.point.z, 1.0);
 }

@@ -3,9 +3,22 @@ const vma = @import("thirdparty/vma/build_wrap.zig");
 const stb = @import("thirdparty/stb/build_wrap.zig");
 
 const shaders = @import("steps/shaders.zig");
+const glsl_gen = @import("steps/glsl_gen.zig");
+
+const vulkan_headers_include_dir = "thirdparty/Vulkan-Headers/include";
+const vulkan_docs_xml_path = "thirdparty/Vulkan-Docs/xml/vk.xml";
+
+const files_to_test = [_][]const u8{
+    "src/root.zig",
+    "src/meta.zig",
+    "src/vulkan_types.zig",
+    "src/VulkanAtlas.zig",
+    "src/VulkanLandscape.zig",
+    "src/LandscapeSim.zig",
+};
 
 fn vulkanIncludeDir(b: *std.Build) []const u8 {
-    return b.pathFromRoot("thirdparty/Vulkan-Headers/include");
+    return b.pathFromRoot(vulkan_headers_include_dir);
 }
 
 pub fn build(b: *std.Build) !void {
@@ -18,7 +31,7 @@ pub fn build(b: *std.Build) !void {
     });
 
     const dep_vk = b.dependency("vulkan_zig", .{
-        .registry = @as([]const u8, b.pathFromRoot("thirdparty/Vulkan-Docs/xml/vk.xml")),
+        .registry = @as([]const u8, b.pathFromRoot(vulkan_docs_xml_path)),
     });
 
     const lib_vma = vma.build(b, target, optimize, vulkanIncludeDir(b));
@@ -47,58 +60,52 @@ pub fn build(b: *std.Build) !void {
     });
 
     exe.root_module.addImport("zigra", &lib.root_module);
-    const compile_glsl_step = shaders.step(b);
+    const gen_glsl_step = glsl_gen.step(b);
+    const compile_glsl_step = shaders.step(b, gen_glsl_step);
 
     b.installArtifact(exe);
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
-    exe.step.dependOn(compile_glsl_step);
+    exe.step.dependOn(&compile_glsl_step.step);
 
     if (b.args) |args| run_cmd.addArgs(args);
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    const lib_unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/root.zig" },
-        .target = target,
-        .optimize = optimize,
-    });
+    createTestStep(b, target, optimize);
+}
 
-    const meta_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/meta.zig" },
-        .target = target,
-        .optimize = optimize,
-    });
+fn makeTestName(comptime str: []const u8) [str.len - 4]u8 {
+    var new_str: [str.len - 4]u8 = undefined;
+    @memcpy(new_str[0..], str[0 .. str.len - 4]);
 
-    const vulkan_types_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/vulkan_types.zig" },
-        .target = target,
-        .optimize = optimize,
-    });
+    for (new_str[0..]) |*c| c.* = switch (c.*) {
+        ' ' => '_',
+        '/', '\\', ':' => '.',
+        else => c.*,
+    };
 
-    const vulkan_atlas_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/VulkanAtlas.zig" },
-        .target = target,
-        .optimize = optimize,
-    });
+    return new_str;
+}
 
-    const vulkan_landscape_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/VulkanLandscape.zig" },
-        .target = target,
-        .optimize = optimize,
-    });
+fn createTestStep(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.Mode) void {
+    const step = b.step("test", "Run unit tests");
 
-    const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
-    const run_meta_unit_tests = b.addRunArtifact(meta_tests);
-    const run_vulkan_types_unit_tests = b.addRunArtifact(vulkan_types_tests);
-    const run_vulkan_atlas_unit_tests = b.addRunArtifact(vulkan_atlas_tests);
-    const run_vulkan_landscape_unit_tests = b.addRunArtifact(vulkan_landscape_tests);
+    inline for (files_to_test) |path| {
+        const name = comptime makeTestName("test " ++ path);
 
-    const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_lib_unit_tests.step);
-    test_step.dependOn(&run_meta_unit_tests.step);
-    test_step.dependOn(&run_vulkan_types_unit_tests.step);
-    test_step.dependOn(&run_vulkan_atlas_unit_tests.step);
-    test_step.dependOn(&run_vulkan_landscape_unit_tests.step);
+        const compile_test = b.addTest(.{
+            .name = &name,
+            .root_source_file = .{ .path = path },
+            .target = target,
+            .optimize = optimize,
+        });
+
+        const run_test = b.addRunArtifact(compile_test);
+        const install_test = b.addInstallArtifact(compile_test, .{ .dest_dir = .{ .override = .{ .custom = "test" } } });
+
+        step.dependOn(&run_test.step);
+        step.dependOn(&install_test.step);
+    }
 }

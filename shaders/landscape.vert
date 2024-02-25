@@ -1,6 +1,6 @@
 #version 450
 
-#include <basic_push_constant.glsl>
+#include <gen/pc/BasicPushConstant.glsl>
 
 struct LandscapeData {
     ivec2 offset;
@@ -43,8 +43,8 @@ void main() {
     vec2 pos = init_pos[gl_VertexIndex];
 
     pos *= data.size;
-    pos = round(pos + data.offset - push.camera_pos);
-    pos /= push.target_size * 0.5;
+    pos = round(pos + data.offset - pc.camera_pos);
+    pos /= pc.target_size * 0.5;
 
     out_uv = init_pos[gl_VertexIndex];
     out_descriptor = data.descriptor;

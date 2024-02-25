@@ -32,8 +32,8 @@ const UploadSet = struct {
 pub const ActiveSets = std.BoundedArray(ActiveSet, tile_count);
 pub const UploadSets = std.BoundedArray(UploadSet, tile_count);
 
-tiles: [tile_count]Tile,
-active_sets: ActiveSets,
+tiles: [tile_count]Tile = std.mem.zeroes([tile_count]Tile),
+active_sets: ActiveSets = undefined,
 
 pub fn init(backend: *Backend) !@This() {
     var self = @This(){
@@ -164,8 +164,8 @@ pub fn recordUploadData(self: *@This(), backend: *Backend, cmd: vk.CommandBuffer
 
 fn barrierUndefinedToTransferDst(handle: vk.Image) vk.ImageMemoryBarrier2 {
     return vk.ImageMemoryBarrier2{
-        .src_stage_mask = .{},
-        .src_access_mask = .{},
+        .src_stage_mask = .{ .fragment_shader_bit = true },
+        .src_access_mask = .{ .shader_sampled_read_bit = true },
         .dst_stage_mask = .{ .copy_bit = true },
         .dst_access_mask = .{ .transfer_write_bit = true },
         .old_layout = .undefined,
@@ -256,9 +256,11 @@ pub fn recalculateActiveSets(self: *@This(), target: @Vector(2, i16)) !void {
     for (self.tiles[0..]) |*tile| {
         tile.used_flag = false;
 
+        // TODO Doesn't work for now
         for (positions.constSlice(), 0..) |position, i| {
             if (@reduce(.Or, position != tile.coord)) continue;
 
+            // tile.coord = position;
             tile.used_flag = true;
             _ = positions.swapRemove(i);
 

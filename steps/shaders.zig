@@ -1,9 +1,28 @@
 const std = @import("std");
+const glsl_gen = @import("./glsl_gen.zig");
 
-pub fn step(b: *std.Build) *std.Build.Step {
-    var build_step = b.step("shaders", "Compile vulkan shaders");
-    build_step.makeFn = &make;
-    return build_step;
+const ShaderStep = struct {
+    gen_step: ?*std.Build.Step,
+    step: std.Build.Step,
+};
+
+pub fn step(b: *std.Build, opt_gen_step: ?*std.Build.Step) *ShaderStep {
+    const shader_step = b.allocator.create(ShaderStep) catch @panic("OOM");
+
+    shader_step.* = .{
+        .gen_step = opt_gen_step,
+        .step = std.Build.Step.init(.{
+            .first_ret_addr = @returnAddress(),
+            .id = .top_level,
+            .makeFn = &make,
+            .name = "shaders",
+            .owner = b,
+        }),
+    };
+
+    if (opt_gen_step) |gen_step| shader_step.step.dependOn(gen_step);
+
+    return shader_step;
 }
 
 const Shader = struct {
@@ -25,6 +44,8 @@ fn strEqlAnyOf(lhs: []const u8, list: []const []const u8) bool {
 
 fn make(build_step: *std.Build.Step, parent_node: *std.Progress.Node) anyerror!void {
     var timer = try std.time.Timer.start();
+    const shader_step = @fieldParentPtr(ShaderStep, "step", build_step);
+
     defer build_step.result_duration_ns = timer.read();
     const b = build_step.owner;
     const cwd = std.fs.cwd();
@@ -34,6 +55,7 @@ fn make(build_step: *std.Build.Step, parent_node: *std.Progress.Node) anyerror!v
     defer arena.deinit();
 
     build_step.result_cached = true;
+    const dont_cache = if (shader_step.gen_step) |gen_step| !gen_step.result_cached else false;
 
     const shaders_path = "shaders";
     var dir = try cwd.openDir(shaders_path, .{ .iterate = true });
@@ -74,7 +96,7 @@ fn make(build_step: *std.Build.Step, parent_node: *std.Progress.Node) anyerror!v
             }
         };
 
-        if (opt_output_stat != null and source_stat.mtime < opt_output_stat.?.mtime) continue;
+        if (!dont_cache and opt_output_stat != null and source_stat.mtime < opt_output_stat.?.mtime) continue;
 
         var run = std.Build.Step.Run.create(b, "glslc");
         run.addArgs(&.{ glslc, "-I", shaders_path, "--target-env=vulkan1.2", shader.input, "-o", shader.output });

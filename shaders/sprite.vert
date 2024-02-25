@@ -1,6 +1,6 @@
 #version 450
 
-#include <basic_push_constant.glsl>
+#include <gen/pc/BasicPushConstant.glsl>
 
 struct SpriteDataPacked {
     vec2 offset;
@@ -86,14 +86,14 @@ void main() {
     pos = vec2(pos.x * cos_rot - pos.y * sin_rot,
                pos.y * cos_rot + pos.x * sin_rot);
 
-    pos = round(pos + data.offset - push.camera_pos);
-    pos /= push.target_size * 0.5;
+    pos = round(pos + data.offset - pc.camera_pos);
+    pos /= pc.target_size * 0.5;
 
     out_color = data.color;
 
     out_uv = init_uv[gl_VertexIndex] * data.uv_sz + data.uv_ul;
     out_uv += uv_correction[gl_VertexIndex];
-    out_uv /= push.atlas_size;
+    out_uv /= pc.atlas_size;
 
     gl_Position = vec4(pos, data.depth, 1.0);
 }

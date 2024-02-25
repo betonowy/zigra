@@ -9,6 +9,7 @@ const builder = @import("./vulkan_builder.zig");
 const meta = @import("./meta.zig");
 const Atlas = @import("VulkanAtlas.zig");
 const Landscape = @import("VulkanLandscape.zig");
+const LandSim = @import("./LandscapeSim.zig");
 
 const stb = @cImport(@cInclude("stb/stb_image.h"));
 
@@ -42,7 +43,6 @@ frames: [frame_data_count]types.FrameData,
 frame_index: @TypeOf(frame_data_count) = 0,
 pipelines: types.Pipelines,
 atlas: Atlas,
-landscape: Landscape,
 
 camera_pos: @Vector(2, i32),
 start_timestamp: i128,
@@ -106,9 +106,6 @@ pub fn init(
     });
     errdefer self.atlas.deinit(&self);
 
-    self.landscape = try Landscape.init(&self);
-    errdefer self.landscape.deinit(&self);
-
     try self.createFrameData();
     errdefer self.destroyFrameData();
 
@@ -121,7 +118,6 @@ pub fn init(
 pub fn deinit(self: *@This()) void {
     self.vkd.deviceWaitIdle(self.device) catch unreachable;
 
-    self.landscape.deinit(self);
     self.atlas.deinit(self);
     self.destroyFrameData();
     self.destroyCommandPools();
@@ -143,15 +139,6 @@ pub fn process(self: *@This()) !void {
     var timer = try std.time.Timer.start();
     const to_ms: f32 = 1e-6;
 
-    try self.landscape.recalculateActiveSets(@intCast(self.camera_pos));
-    const sets = self.landscape.active_sets.constSlice();
-
-    var upload = Landscape.UploadSets.init(0) catch unreachable;
-    var fake_buf: [Landscape.image_size * Landscape.image_size]u8 = undefined;
-
-    for (fake_buf[0..], 0..) |*cell, i| cell.* = @intCast(i & 0xff);
-    for (sets) |set| try upload.append(.{ .tile = set.tile, .data = fake_buf[0..] });
-
     const landscape_u_dur: f32 = @floatFromInt(timer.lap());
 
     if (try self.vkd.waitForFences(
@@ -167,7 +154,7 @@ pub fn process(self: *@This()) !void {
     try self.vkd.resetCommandBuffer(self.frames[self.frame_index].command_buffer, .{});
     try self.vkd.beginCommandBuffer(self.frames[self.frame_index].command_buffer, &.{ .flags = .{ .one_time_submit_bit = true } });
 
-    try self.landscape.recordUploadData(self, self.frames[self.frame_index].command_buffer, upload);
+    try self.frames[self.frame_index].landscape.recordUploadData(self, self.frames[self.frame_index].command_buffer, self.frames[self.frame_index].landscape_upload);
 
     const landscape_r_dur: f32 = @floatFromInt(timer.lap());
 
@@ -784,6 +771,9 @@ fn createFrameData(self: *@This()) !void {
             .max_lod = 0,
         }, null);
 
+        frame.landscape = try Landscape.init(self);
+        frame.landscape_upload.resize(0) catch unreachable;
+
         frame.fence_busy = try self.vkd.createFence(self.device, &.{ .flags = .{ .signaled_bit = true } }, null);
         frame.semaphore_finished = try self.vkd.createSemaphore(self.device, &.{}, null);
         frame.semaphore_swapchain_image_acquired = try self.vkd.createSemaphore(self.device, &.{}, null);
@@ -820,7 +810,7 @@ fn createFrameData(self: *@This()) !void {
 
         var ds_landscape_info: [Landscape.tile_count]vk.DescriptorImageInfo = undefined;
 
-        for (ds_landscape_info[0..], self.landscape.tiles[0..]) |*info, tile| {
+        for (ds_landscape_info[0..], frame.landscape.tiles[0..]) |*info, tile| {
             info.image_layout = .shader_read_only_optimal;
             info.image_view = tile.device_image.view;
             info.sampler = tile.sampler;
@@ -869,7 +859,7 @@ fn createFrameData(self: *@This()) !void {
 }
 
 fn destroyFrameData(self: *@This()) void {
-    for (self.frames[0..]) |frame| {
+    for (self.frames[0..]) |*frame| {
         if (frame.command_buffer != .null_handle) {
             self.vkd.freeCommandBuffers(
                 self.device,
@@ -878,6 +868,8 @@ fn destroyFrameData(self: *@This()) void {
                 meta.asConstArray(&frame.command_buffer),
             );
         }
+
+        frame.landscape.deinit(self);
 
         if (frame.image_color_sampler != .null_handle) self.vkd.destroySampler(self.device, frame.image_color_sampler, null);
         if (frame.draw_buffer.handle != .null_handle) self.destroyBuffer(frame.draw_buffer);
@@ -1323,8 +1315,8 @@ fn uploadScheduledData(self: *@This(), frame: *types.FrameData) !void {
     var sprites: [sprite_count]types.DrawData = undefined;
 
     self.camera_pos = .{
-        @intFromFloat(@sin(rot_full * 1.90) * 50),
-        @intFromFloat(@cos(rot_full * 3.14) * 50),
+        @intFromFloat(@sin(rot_full * 1.90) * 70 + 24),
+        @intFromFloat(@cos(rot_full * 3.14) * 70 + 24),
     };
 
     for (sprites[current_index..], current_index..) |*cmd, i| {
@@ -1351,22 +1343,21 @@ fn uploadScheduledData(self: *@This(), frame: *types.FrameData) !void {
     current_index += sprite_count;
 
     for (
-        self.landscape.active_sets.constSlice(),
-        frame.draw_buffer.map[current_index .. current_index + self.landscape.active_sets.len],
+        self.frames[self.frame_index].landscape.active_sets.constSlice(),
+        frame.draw_buffer.map[current_index .. current_index + self.frames[self.frame_index].landscape.active_sets.len],
         0..,
     ) |set, *cmd, i| {
-        _ = i; // autofix
         cmd.landscape = .{
             .depth = 0.9,
-            .descriptor = 0,
+            .descriptor = @intCast(i),
             .offset = set.tile.coord,
             .size = .{ Landscape.image_size, Landscape.image_size },
         };
     }
 
     frame.draw_landscape_index = current_index;
-    frame.draw_landscape_range = self.landscape.active_sets.len;
-    current_index += self.landscape.active_sets.len;
+    frame.draw_landscape_range = self.frames[self.frame_index].landscape.active_sets.len;
+    current_index += self.frames[self.frame_index].landscape.active_sets.len;
 
     var prng = std.rand.DefaultPrng.init(@intCast(std.time.nanoTimestamp() & 0xffffffffffffffff));
     var position: [5]@Vector(2, f32) = undefined;

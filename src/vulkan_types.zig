@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 
 const meta = @import("./meta.zig");
 const vk = @import("./vk.zig");
+const Landscape = @import("./VulkanLandscape.zig");
 
 pub const Pipeline = struct {
     handle: vk.Pipeline = .null_handle,
@@ -86,7 +87,7 @@ test "DrawDataLayout" {
     try comptime std.testing.expectEqual(16, @alignOf(PointData));
     try comptime std.testing.expectEqual(8, @alignOf(BackgroundData));
 
-    try comptime std.testing.expectEqual(16, @sizeOf(BasicPushConstant));
+    try comptime std.testing.expectEqual(24, @sizeOf(BasicPushConstant));
 
     const data: DrawData = undefined; // extern unions are never type checked
     try std.testing.expectEqual(@intFromPtr(&data), @intFromPtr(&data.sprite));
@@ -131,6 +132,9 @@ pub const FrameData = struct {
     image_color_sampler: vk.Sampler = .null_handle,
     image_color: ImageData = .{},
     image_depth: ImageData = .{},
+
+    landscape: Landscape = .{},
+    landscape_upload: Landscape.UploadSets = .{},
 
     descriptor_set: vk.DescriptorSet = .null_handle,
 
