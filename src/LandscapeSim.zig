@@ -161,7 +161,7 @@ tile_pool: TilePool,
 node_pool: NodePool,
 
 tree: TreeNode,
-iteration: usize,
+iteration: u64,
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
     var self: @This() = undefined;
@@ -437,6 +437,17 @@ const Code = enum {
     swap_d,
     swap_ld,
     swap_rd,
+
+    fn toOffset(self: @This()) @Vector(2, i32) {
+        return switch (self) {
+            .noop => .{ 0, 0 },
+            .swap_r => .{ 1, 0 },
+            .swap_l => .{ -1, 0 },
+            .swap_d => .{ 0, 1 },
+            .swap_ld => .{ -1, 1 },
+            .swap_rd => .{ 1, 1 },
+        };
+    }
 };
 
 fn simulateTile(self: *@This(), sim_tile_extent: NodeExtent, view_extent: NodeExtent) void {
@@ -487,13 +498,12 @@ fn simulateTile(self: *@This(), sim_tile_extent: NodeExtent, view_extent: NodeEx
 
     var codes: [tile_size / 2][tile_size / 2]Code = undefined;
 
-    var rand = std.rand.Sfc64.init(self.iteration & 0xffffffffffffffff);
+    // var rand = std.rand.Sfc64.init(self.iteration);
+    var rand_int_swap: u1 = 0;
+    const rand_int_x: u1 = 0;
 
     for (codes[0..], 0..) |*col, y| {
-        const SwapDirOrder = struct { code: Code, offset: @Vector(2, i32) };
-
-        const rand_int_x = rand.random().int(u1);
-
+        rand_int_swap ^= 0b1;
         for (col[0..], 0..) |*code, ix| {
             code.* = .noop;
 
@@ -502,30 +512,28 @@ fn simulateTile(self: *@This(), sim_tile_extent: NodeExtent, view_extent: NodeEx
             const current_coord = sim_tile_extent.coord - @Vector(2, i32){ @intCast(x), @intCast(y) };
             const current = b.get(current_coord);
 
-            const rand_int_swap = rand.random().int(u1);
-
-            const liquid_swap_dir_orders: [5]SwapDirOrder = if (rand_int_swap == 1) .{
-                .{ .code = .swap_d, .offset = .{ 0, 1 } },
-                .{ .code = .swap_ld, .offset = .{ -1, 1 } },
-                .{ .code = .swap_rd, .offset = .{ 1, 1 } },
-                .{ .code = .swap_l, .offset = .{ -1, 0 } },
-                .{ .code = .swap_r, .offset = .{ 1, 0 } },
-            } else .{
-                .{ .code = .swap_d, .offset = .{ 0, 1 } },
-                .{ .code = .swap_rd, .offset = .{ 1, 1 } },
-                .{ .code = .swap_ld, .offset = .{ -1, 1 } },
-                .{ .code = .swap_r, .offset = .{ 1, 0 } },
-                .{ .code = .swap_l, .offset = .{ -1, 0 } },
+            const liquid_swap_dir_orders = if (rand_int_swap == 1) [_]Code{
+                .swap_d,
+                .swap_ld,
+                .swap_rd,
+                .swap_l,
+                .swap_r,
+            } else [_]Code{
+                .swap_d,
+                .swap_rd,
+                .swap_ld,
+                .swap_r,
+                .swap_l,
             };
 
-            const powder_swap_dir_orders: [3]SwapDirOrder = if (rand_int_swap == 1) .{
-                .{ .code = .swap_d, .offset = .{ 0, 1 } },
-                .{ .code = .swap_ld, .offset = .{ -1, 1 } },
-                .{ .code = .swap_rd, .offset = .{ 1, 1 } },
-            } else .{
-                .{ .code = .swap_d, .offset = .{ 0, 1 } },
-                .{ .code = .swap_rd, .offset = .{ 1, 1 } },
-                .{ .code = .swap_ld, .offset = .{ -1, 1 } },
+            const powder_swap_dir_orders = if (rand_int_swap == 1) [_]Code{
+                .swap_d,
+                .swap_ld,
+                .swap_rd,
+            } else [_]Code{
+                .swap_d,
+                .swap_rd,
+                .swap_ld,
             };
 
             const swap_orders = switch (current.type) {
@@ -535,11 +543,11 @@ fn simulateTile(self: *@This(), sim_tile_extent: NodeExtent, view_extent: NodeEx
             };
 
             for (swap_orders) |order| {
-                const other_coord = current_coord + order.offset;
+                const other_coord = current_coord + order.toOffset();
                 const other = b.get(other_coord);
 
                 if (@intFromEnum(other.type) < @intFromEnum(current.type)) {
-                    code.* = order.code;
+                    code.* = order;
                     Cell.swap(current, other);
                     break;
                 }
@@ -547,41 +555,20 @@ fn simulateTile(self: *@This(), sim_tile_extent: NodeExtent, view_extent: NodeEx
         }
     }
 
-    // for (codes, 0..) |col, y| for (col, 0..) |code, x| {
-    //     // const y = 63 - iy;
+    // for (codes[0..], 0..) |*col, y| {
+    //     for (col[0..], 0..) |*code, ix| {
+    //         if (code.* == .noop) continue;
 
-    //     const current_coord = sim_tile_extent.coord - @Vector(2, i32){ @intCast(x), @intCast(y) };
-    //     const current = b.get(current_coord);
+    //         const x = if (rand_int_x == 1) ix else (tile_size / 2) - 1 - ix;
 
-    //     switch (code) {
-    //         .noop => {},
-    //         .swap_d => {
-    //             const other_coord = current_coord + @Vector(2, i32){ 0, 1 };
-    //             const other = b.get(other_coord);
-    //             Cell.swap(current, other);
-    //         },
-    //         .swap_l => {
-    //             const other_coord = current_coord + @Vector(2, i32){ -1, 0 };
-    //             const other = b.get(other_coord);
-    //             Cell.swap(current, other);
-    //         },
-    //         .swap_r => {
-    //             const other_coord = current_coord + @Vector(2, i32){ 1, 0 };
-    //             const other = b.get(other_coord);
-    //             Cell.swap(current, other);
-    //         },
-    //         .swap_ld => {
-    //             const other_coord = current_coord + @Vector(2, i32){ -1, 1 };
-    //             const other = b.get(other_coord);
-    //             Cell.swap(current, other);
-    //         },
-    //         .swap_rd => {
-    //             const other_coord = current_coord + @Vector(2, i32){ 1, 1 };
-    //             const other = b.get(other_coord);
-    //             Cell.swap(current, other);
-    //         },
+    //         const current_coord = sim_tile_extent.coord - @Vector(2, i32){ @intCast(x), @intCast(y) };
+    //         const current = b.get(current_coord);
+    //         const other_coord = current_coord + code.toOffset();
+    //         const other = b.get(other_coord);
+
+    //         if (@intFromEnum(other.type) < @intFromEnum(current.type)) Cell.swap(current, other);
     //     }
-    // };
+    // }
 }
 
 test "Minimal lifetime" {

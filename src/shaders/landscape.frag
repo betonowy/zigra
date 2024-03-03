@@ -13,7 +13,7 @@ layout(location = 0) out vec4 out_color;
 
 vec4 getColor(uint code) {
 
-    // bkg independent rendering
+    // bkg dependent rendering
     switch (code) {
         case CellType_air: return vec4(0);
     }

@@ -10,6 +10,7 @@ const meta = @import("./meta.zig");
 const Atlas = @import("VulkanAtlas.zig");
 const Landscape = @import("VulkanLandscape.zig");
 const LandSim = @import("./LandscapeSim.zig");
+const spv = @import("shaders/spv.zig");
 
 const stb = @cImport(@cInclude("stb/stb_image.h"));
 
@@ -517,36 +518,29 @@ fn createDescriptorPool(self: *@This()) !vk.DescriptorPool {
     }, null);
 }
 
-fn createShaderModule(self: *@This(), path: []const u8) !vk.ShaderModule {
-    var file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
-
-    const stat = try file.stat();
-    const bytecode = try file.readToEndAllocOptions(self.allocator, stat.size, stat.size, @alignOf(u32), null);
-    defer self.allocator.free(bytecode);
-
+fn createShaderModule(self: *@This(), byte_code: []const u32) !vk.ShaderModule {
     return try self.vkd.createShaderModule(self.device, &.{
-        .code_size = bytecode.len,
-        .p_code = @alignCast(@ptrCast(bytecode)),
+        .code_size = byte_code.len * @sizeOf(std.meta.Child(@TypeOf(byte_code))),
+        .p_code = @alignCast(@ptrCast(byte_code)),
     }, null);
 }
 
 fn createPipelines(self: *@This()) !void {
-    const sprite_vs = try self.createShaderModule("shaders/sprite.vert.spv");
+    const sprite_vs = try self.createShaderModule(&spv.sprite_vert);
     defer self.vkd.destroyShaderModule(self.device, sprite_vs, null);
-    const sprite_opaque_fs = try self.createShaderModule("shaders/sprite_opaque.frag.spv");
+    const sprite_opaque_fs = try self.createShaderModule(&spv.sprite_opaque_frag);
     defer self.vkd.destroyShaderModule(self.device, sprite_opaque_fs, null);
-    const fullscreen_vs = try self.createShaderModule("shaders/fullscreen.vert.spv");
+    const fullscreen_vs = try self.createShaderModule(&spv.fullscreen_vert);
     defer self.vkd.destroyShaderModule(self.device, fullscreen_vs, null);
-    const present_fs = try self.createShaderModule("shaders/final.frag.spv");
+    const present_fs = try self.createShaderModule(&spv.final_frag);
     defer self.vkd.destroyShaderModule(self.device, present_fs, null);
-    const landscape_vs = try self.createShaderModule("shaders/landscape.vert.spv");
+    const landscape_vs = try self.createShaderModule(&spv.landscape_vert);
     defer self.vkd.destroyShaderModule(self.device, landscape_vs, null);
-    const landscape_fs = try self.createShaderModule("shaders/landscape.frag.spv");
+    const landscape_fs = try self.createShaderModule(&spv.landscape_frag);
     defer self.vkd.destroyShaderModule(self.device, landscape_fs, null);
-    const line_vs = try self.createShaderModule("shaders/line.vert.spv");
+    const line_vs = try self.createShaderModule(&spv.line_vert);
     defer self.vkd.destroyShaderModule(self.device, line_vs, null);
-    const line_opaque_fs = try self.createShaderModule("shaders/line_opaque.frag.spv");
+    const line_opaque_fs = try self.createShaderModule(&spv.line_opaque_frag);
     defer self.vkd.destroyShaderModule(self.device, line_opaque_fs, null);
 
     self.pipelines.resolved_depth_format = try self.findDepthImageFormat();

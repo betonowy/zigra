@@ -11,7 +11,7 @@ struct SpriteDataPacked {
     uint depth_rot_packed_unorm16_snorm16;
 };
 
-struct SpriteData {
+struct SpriteData {//
     vec2 offset;
     vec4 color;
     vec2 pivot;

@@ -21,8 +21,8 @@ fn make(build_step: *std.Build.Step, parent_node: *std.Progress.Node) anyerror!v
     defer build_step.result_peak_rss = arena.queryCapacity();
     build_step.result_cached = true;
 
-    if (try genPushConstant(types.BasicPushConstant, &arena, &node)) build_step.result_cached = false;
-    if (try genLandscapeCells(&arena, &node)) build_step.result_cached = false;
+    if (try genPushConstant(b, types.BasicPushConstant, &arena, &node)) build_step.result_cached = false;
+    if (try genLandscapeCells(b, &arena, &node)) build_step.result_cached = false;
 }
 
 const GlslField = struct {
@@ -98,23 +98,24 @@ fn typeNameExtract(comptime T: type) []const u8 {
     }
 }
 
-fn areContentsUpToDate(path: []const u8, contents: []const u8, allocator: std.mem.Allocator) !bool {
-    const stat = std.fs.cwd().statFile(path) catch return false;
+fn areContentsUpToDate(b: *std.Build, path: []const u8, contents: []const u8, allocator: std.mem.Allocator) !bool {
+    const stat = b.build_root.handle.statFile(path) catch return false;
 
     const buffer = try allocator.alloc(u8, stat.size);
     defer allocator.free(buffer);
 
-    const read_slice = try std.fs.cwd().readFile(path, buffer);
+    const read_slice = try b.build_root.handle.readFile(path, buffer);
     return std.mem.eql(u8, contents, read_slice);
 }
 
-fn replaceIfDifferent(path: []const u8, contents: []const u8, allocator: std.mem.Allocator) !bool {
-    if (try areContentsUpToDate(path, contents, allocator)) return false;
-    try std.fs.cwd().writeFile2(.{ .sub_path = path, .data = contents });
+fn replaceIfDifferent(b: *std.Build, path: []const u8, contents: []const u8, allocator: std.mem.Allocator) !bool {
+    if (try areContentsUpToDate(b, path, contents, allocator)) return false;
+    try b.build_root.handle.makePath(std.fs.path.dirname(path).?);
+    try b.build_root.handle.writeFile2(.{ .sub_path = path, .data = contents });
     return true;
 }
 
-fn genPushConstant(comptime T: type, arena: *std.heap.ArenaAllocator, node: *std.Progress.Node) !bool {
+fn genPushConstant(b: *std.Build, comptime T: type, arena: *std.heap.ArenaAllocator, node: *std.Progress.Node) !bool {
     var string = std.ArrayList(u8).init(arena.allocator());
     errdefer string.deinit();
     defer node.completeOne();
@@ -123,17 +124,17 @@ fn genPushConstant(comptime T: type, arena: *std.heap.ArenaAllocator, node: *std
     try appendFields(T, &string);
     try string.appendSlice("} pc;\n");
 
-    try std.fs.cwd().makePath("shaders/gen/pc");
+    try b.build_root.handle.makePath("src/shaders/gen/pc");
 
     const path = try std.fs.path.join(
         arena.allocator(),
-        &.{ "shaders/gen/pc", comptime typeNameExtract(T) ++ ".glsl" },
+        &.{ "src/shaders/gen/pc", comptime typeNameExtract(T) ++ ".glsl" },
     );
 
-    return replaceIfDifferent(path, string.items, arena.allocator());
+    return replaceIfDifferent(b, path, string.items, arena.allocator());
 }
 
-fn genLandscapeCells(arena: *std.heap.ArenaAllocator, node: *std.Progress.Node) !bool {
+fn genLandscapeCells(b: *std.Build, arena: *std.heap.ArenaAllocator, node: *std.Progress.Node) !bool {
     var string = std.ArrayList(u8).init(arena.allocator());
     errdefer string.deinit();
     defer node.completeOne();
@@ -147,6 +148,6 @@ fn genLandscapeCells(arena: *std.heap.ArenaAllocator, node: *std.Progress.Node) 
         ));
     }
 
-    const path = "shaders/gen/landscape/Cells.glsl";
-    return replaceIfDifferent(path, string.items, arena.allocator());
+    const path = "src/shaders/gen/landscape/Cells.glsl";
+    return replaceIfDifferent(b, path, string.items, arena.allocator());
 }

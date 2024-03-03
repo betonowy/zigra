@@ -30,11 +30,6 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
 
-    const dep_vk = b.dependency("vulkan_zig", .{
-        .registry = @as([]const u8, b.pathFromRoot(vulkan_docs_xml_path)),
-    });
-
-    const lib_vma = vma.build(b, target, optimize, vulkanIncludeDir(b));
     const lib_stb = stb.build(b, target, optimize);
 
     const lib = b.addStaticLibrary(.{
@@ -44,12 +39,9 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
 
-    lib.addIncludePath(.{ .path = vma.includeDir(b) });
     lib.addIncludePath(.{ .path = stb.includeDir() });
     lib.addIncludePath(.{ .path = vulkanIncludeDir(b) });
-    lib.root_module.addImport("vk", dep_vk.module("vulkan-zig"));
     lib.root_module.addImport("glfw", dep_glfw.module("mach-glfw"));
-    lib.linkLibrary(lib_vma);
     lib.linkLibrary(lib_stb);
 
     const exe = b.addExecutable(.{
@@ -59,14 +51,15 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
 
-    exe.root_module.addImport("zigra", &lib.root_module);
     const gen_glsl_step = glsl_gen.step(b);
     const compile_glsl_step = shaders.step(b, gen_glsl_step);
+    exe.step.dependOn(&compile_glsl_step.step);
+
+    exe.root_module.addImport("zigra", &lib.root_module);
 
     b.installArtifact(exe);
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
-    exe.step.dependOn(&compile_glsl_step.step);
 
     if (b.args) |args| run_cmd.addArgs(args);
 

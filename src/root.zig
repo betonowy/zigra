@@ -8,155 +8,9 @@ const vk_types = @import("./vulkan_types.zig");
 
 const LandSim = @import("./LandscapeSim.zig");
 
-const BaseDispatch = vk.BaseWrapper(.{
-    .createInstance = true,
-    .getInstanceProcAddr = true,
-    .enumerateInstanceExtensionProperties = true,
-    .enumerateInstanceLayerProperties = true,
-});
-
-fn GetInstanceFlags() vk.InstanceCommandFlags {
-    var flags = vk.InstanceCommandFlags{
-        .destroyInstance = true,
-        .enumeratePhysicalDevices = true,
-        .getPhysicalDeviceProperties = true,
-        .getPhysicalDeviceMemoryProperties = true,
-        .getPhysicalDeviceFeatures = true,
-        .getPhysicalDeviceQueueFamilyProperties = true,
-        .getPhysicalDeviceSurfaceSupportKHR = true,
-        .getDeviceProcAddr = true,
-        .createDevice = true,
-        .destroySurfaceKHR = true,
-        .enumerateDeviceExtensionProperties = true,
-        .getPhysicalDeviceSurfaceCapabilitiesKHR = true,
-        .getPhysicalDeviceSurfaceFormatsKHR = true,
-        .getPhysicalDeviceSurfacePresentModesKHR = true,
-        .getPhysicalDeviceFormatProperties = true,
-    };
-
-    if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
-        flags.createDebugUtilsMessengerEXT = true;
-        flags.destroyDebugUtilsMessengerEXT = true;
-    }
-
-    return flags;
-}
-
-const InstanceDispatch = vk.InstanceWrapper(GetInstanceFlags());
-
-const DeviceDispatch = vk.DeviceWrapper(.{
-    .destroyDevice = true,
-    .getDeviceQueue = true,
-    .createSwapchainKHR = true,
-    .destroySwapchainKHR = true,
-    .getSwapchainImagesKHR = true,
-    .createImageView = true,
-    .destroyImageView = true,
-    .createCommandPool = true,
-    .destroyCommandPool = true,
-    .allocateCommandBuffers = true,
-    .freeCommandBuffers = true,
-    .createFence = true,
-    .destroyFence = true,
-    .createSemaphore = true,
-    .destroySemaphore = true,
-    .createShaderModule = true,
-    .destroyShaderModule = true,
-    .createPipelineLayout = true,
-    .createGraphicsPipelines = true,
-    .destroyPipelineLayout = true,
-    .destroyPipeline = true,
-    .beginCommandBuffer = true,
-    .cmdBindPipeline = true,
-    .cmdSetViewport = true,
-    .cmdSetScissor = true,
-    .cmdDraw = true,
-    .endCommandBuffer = true,
-    .waitForFences = true,
-    .resetFences = true,
-    .resetCommandBuffer = true,
-    .acquireNextImageKHR = true,
-    .queueSubmit = true,
-    .queuePresentKHR = true,
-    .deviceWaitIdle = true,
-    .cmdBeginRendering = true,
-    .cmdEndRendering = true,
-    .cmdPipelineBarrier2 = true,
-    .allocateMemory = true,
-    .freeMemory = true,
-    .mapMemory = true,
-    .unmapMemory = true,
-    .createBuffer = true,
-    .destroyBuffer = true,
-    .getBufferMemoryRequirements = true,
-    .bindBufferMemory = true,
-    .cmdBindVertexBuffers = true,
-    .cmdClearAttachments = true,
-    .cmdClearColorImage = true,
-    .createImage = true,
-    .getImageMemoryRequirements = true,
-    .destroyImage = true,
-    .bindImageMemory = true,
-    .cmdCopyBufferToImage = true,
-    .queueWaitIdle = true,
-    .createSampler = true,
-    .destroySampler = true,
-    .createDescriptorSetLayout = true,
-    .destroyDescriptorSetLayout = true,
-    .createDescriptorPool = true,
-    .destroyDescriptorPool = true,
-    .allocateDescriptorSets = true,
-    .freeDescriptorSets = true,
-    .updateDescriptorSets = true,
-    .cmdBindDescriptorSets = true,
-    .cmdPushConstants = true,
-    .cmdClearDepthStencilImage = true,
-});
-
-const VertexType = struct {
-    pos: @Vector(3, f32) align(16),
-    col: @Vector(3, f32) align(16),
-
-    fn getBindingDescription() [1]vk.VertexInputBindingDescription {
-        return .{.{
-            .binding = 0,
-            .input_rate = .vertex,
-            .stride = @sizeOf(VertexType),
-        }};
-    }
-
-    fn getAttributeDescription() [2]vk.VertexInputAttributeDescription {
-        return .{
-            .{
-                .binding = 0,
-                .location = 0,
-                .format = .r32g32b32_sfloat,
-                .offset = @offsetOf(@This(), "pos"),
-            },
-            .{
-                .binding = 0,
-                .location = 1,
-                .format = .r32g32b32_sfloat,
-                .offset = @offsetOf(@This(), "col"),
-            },
-        };
-    }
-};
-
 const Consts = struct {
     const width = 640;
     const height = 480;
-};
-
-const QueueFamilyIndices = struct {
-    graphicsFamily: ?u32 = null,
-    presentFamily: ?u32 = null,
-
-    fn isComplete(self: @This()) bool {
-        _ = self.graphicsFamily orelse return false;
-        _ = self.presentFamily orelse return false;
-        return true;
-    }
 };
 
 const FramebufferSizeCallbackCtx = struct {
@@ -178,36 +32,9 @@ fn glfwFramebufferSizeCallback(window: glfw.Window, _: u32, _: u32) void {
     ctx_ptr.framebuffer_resized = true;
 }
 
-fn AsArrayType(comptime T: type) type {
-    return std.meta.Child(T);
-}
-
-fn asConstArray(ptr: anytype) *const [1]AsArrayType(@TypeOf(ptr)) {
-    return ptr;
-}
-
-fn asArray(ptr: anytype) *[1]AsArrayType(@TypeOf(ptr)) {
-    return ptr;
-}
-
 /// Default GLFW error handling callback
 fn glfwErrorCallback(error_code: glfw.ErrorCode, description: [:0]const u8) void {
     std.log.err("glfw: {}: {s}\n", .{ error_code, description });
-}
-
-fn vulkanDebugCallback(
-    _: vk.DebugUtilsMessageSeverityFlagsEXT,
-    _: vk.DebugUtilsMessageTypeFlagsEXT,
-    p_callback_data: ?*const vk.DebugUtilsMessengerCallbackDataEXT,
-    _: ?*anyopaque,
-) callconv(vk.vulkan_call_conv) vk.Bool32 {
-    if (p_callback_data) |data| {
-        if (data.p_message) |message| {
-            std.debug.print("Vulkan validation layer: {s}\n", .{message});
-        }
-    }
-
-    return vk.FALSE;
 }
 
 pub fn run() !void {
@@ -217,7 +44,7 @@ pub fn run() !void {
 
     if (!glfw.init(.{})) {
         std.log.err("failed to initialize GLFW: {?s}", .{glfw.getErrorString()});
-        std.process.exit(1);
+        return error.GlfwInit;
     }
     defer glfw.terminate();
 

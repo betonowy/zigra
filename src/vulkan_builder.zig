@@ -8,6 +8,7 @@ const initialization = @import("./vulkan_init.zig");
 const meta = @import("./meta.zig");
 const Atlas = @import("VulkanAtlas.zig");
 const Landscape = @import("VulkanLandscape.zig");
+const spv = @import("shaders/spv.zig");
 
 const stb = @cImport(@cInclude("stb/stb_image.h"));
 
