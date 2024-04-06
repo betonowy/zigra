@@ -6,6 +6,8 @@ const cell_types = @import("./landscape_cell_types.zig").cell_types;
 
 pub const tile_size = 128;
 
+const BoundType = enum { Min, Max };
+
 test "Cell:is_one_byte" {
     comptime try std.testing.expectEqual(1, @sizeOf(Cell));
     comptime try std.testing.expectEqual(8, @bitSizeOf(Cell));
@@ -48,7 +50,7 @@ test "cell_types:are_unique" {
             if (i == j) continue;
             const lhs = @field(cell_types, a.name);
             const rhs = @field(cell_types, b.name);
-            if (lhs.type == rhs.type) try std.testing.expect(lhs.subtype != rhs.subtype);
+            if (lhs.type == rhs.type) try std.testing.expect(lhs.subtype != rhs.subtype or lhs.has_bkg != rhs.has_bkg);
         }
     }
 }
@@ -58,6 +60,7 @@ pub const CellMatrix align(@alignOf(@Vector(16, u8))) = [tile_size][tile_size]Ce
 pub const Tile = struct {
     matrix: CellMatrix,
     coord: @Vector(2, i32),
+    touch_count: u32,
     solid_count: u16,
     liquid_count: u16,
     powder_count: u16,
@@ -67,6 +70,8 @@ pub const Tile = struct {
         self.solid_count = 0;
         self.liquid_count = 0;
         self.powder_count = 0;
+        self.touch_count = 0;
+        self.sleeping = false;
 
         for (self.matrix) |row| for (row) |cell| {
             switch (cell.type) {
@@ -82,6 +87,71 @@ pub const Tile = struct {
         if (lhs.coord[1] < rhs.coord[1]) return true;
         if (lhs.coord[1] == rhs.coord[1] and lhs.coord[0] < rhs.coord[1]) return true;
         return false;
+    }
+
+    pub fn getBound(self: *const @This(), comptime bound_type: BoundType) @Vector(2, i32) {
+        return switch (bound_type) {
+            .Min => self.coord,
+            .Max => self.coord + @as(@Vector(2, i32), @splat(tile_size)),
+        };
+    }
+
+    pub fn hasPoint(self: *const @This(), pos: @Vector(2, i32)) bool {
+        return @reduce(.And, self.getBound(.Min) <= pos) and @reduce(.And, self.getBound(.Max) > pos);
+    }
+
+    pub fn getLocal(self: *@This(), pos: @Vector(2, u32)) *Cell {
+        return &self.matrix[pos[1]][pos[0]];
+    }
+
+    pub fn getGlobal(self: *@This(), pos: @Vector(2, i32)) *Cell {
+        return self.getLocal(@intCast(pos - self.coord));
+    }
+
+    pub fn tryGetGlobal(self: *@This(), pos: @Vector(2, i32)) ?*Cell {
+        return if (self.hasPoint(pos)) self.getGlobal(pos) else null;
+    }
+
+    pub fn touch(self: *@This()) void {
+        self.touch_count += 1;
+        self.sleeping = false;
+    }
+
+    pub fn touchReset(self: *@This()) void {
+        self.touch_count = 0;
+    }
+
+    pub fn sleepIfUntouched(self: *@This()) void {
+        self.sleeping = self.touch_count == 0;
+    }
+
+    pub fn wakeUp(self: *@This()) void {
+        self.sleeping = false;
+    }
+
+    pub const EdgeNeighbors = std.BoundedArray(@Vector(2, i32), 3);
+
+    pub fn getEdgeNeighbors(self: *@This(), pos: @Vector(2, i32)) EdgeNeighbors {
+        var neighbors = EdgeNeighbors.init(0) catch unreachable;
+        const local_pos = pos - self.coord;
+
+        const horizontal: i32 = switch (local_pos[0]) {
+            tile_size - 1 => 1,
+            0 => -1,
+            else => 0,
+        };
+
+        const vertical: i32 = switch (local_pos[1]) {
+            tile_size - 1 => 1,
+            0 => -1,
+            else => 0,
+        };
+
+        if (vertical != 0) neighbors.appendAssumeCapacity(.{ 0, vertical });
+        if (horizontal != 0) neighbors.appendAssumeCapacity(.{ horizontal, 0 });
+        if (vertical != 0 and horizontal != 0) neighbors.appendAssumeCapacity(.{ horizontal, vertical });
+
+        return neighbors;
     }
 };
 
@@ -107,8 +177,8 @@ const TreeNode = struct {
         nodes: NodeMatrix,
     };
 
-    pub fn size(self: *@This()) @Vector(2, i32) {
-        const value = 1 << self.level;
+    pub fn size(self: *const @This()) @Vector(2, i32) {
+        const value = @as(i32, 1) << @intCast(self.level);
         return .{ value, value };
     }
 
@@ -123,21 +193,21 @@ const TreeNode = struct {
         };
     }
 
-    pub fn hasTile(self: *@This()) bool {
+    pub fn hasTile(self: *const @This()) bool {
         return switch (self.child) {
             .tile => |tile| tile != null,
             .nodes => false,
         };
     }
 
-    pub fn isLeaf(self: *@This()) bool {
+    pub fn isLeaf(self: *const @This()) bool {
         return switch (self.child) {
             .tile => true,
             .nodes => false,
         };
     }
 
-    pub fn countTiles(self: *@This()) u32 {
+    pub fn countTiles(self: *const @This()) u32 {
         switch (self.child) {
             .tile => return 1,
             .nodes => |opt_nodes| {
@@ -148,6 +218,35 @@ const TreeNode = struct {
                 return sum;
             },
         }
+    }
+
+    /// Assumes child is not a Tile
+    pub fn getSubtree(self: *@This(), pos: @Vector(2, i32)) ?*TreeNode {
+        const matrix = switch (self.child) {
+            .tile => unreachable,
+            .nodes => |nodes| nodes,
+        };
+
+        for (matrix) |opt_node| if (opt_node) |node| {
+            if (node.hasPoint(pos)) return node;
+        };
+
+        return null;
+    }
+
+    pub fn view(self: *@This()) LandscapeView {
+        return LandscapeView{ .target = self };
+    }
+
+    pub fn getBound(self: *const @This(), comptime bound_type: BoundType) @Vector(2, i32) {
+        return switch (bound_type) {
+            .Min => self.coord,
+            .Max => self.coord + self.size(),
+        };
+    }
+
+    pub fn hasPoint(self: *const @This(), pos: @Vector(2, i32)) bool {
+        return @reduce(.And, self.getBound(.Min) <= pos) and @reduce(.And, self.getBound(.Max) > pos);
     }
 };
 
@@ -371,10 +470,95 @@ pub fn loadFromPngFile(self: *@This(), extent: NodeExtent, path: []const u8) !vo
     return self.loadFromRgbaImage(extent, rgba[0..@intCast(x * y * 4)]);
 }
 
+pub fn getView(self: *@This()) LandscapeView {
+    return LandscapeView{ .target = &self.tree };
+}
+
+pub fn forEachNode(self: *@This(), actor: anytype) void {
+    forEachNodeRecurse(actor, &self.tree);
+}
+
+fn forEachNodeRecurse(actor: anytype, node: *const TreeNode) void {
+    switch (node.child) {
+        .tile => |tile_opt| if (tile_opt) |tile| actor.func(tile),
+        .nodes => |nodes| for (nodes) |child| if (child) |subtree| forEachNodeRecurse(actor, subtree),
+    }
+}
+
+const LandscapeView = struct {
+    target: *TreeNode,
+    tile_cache: TileCache = TileCache.init(0) catch unreachable,
+    stack: NodeStack = NodeStack.init(0) catch unreachable,
+
+    const TileCache = std.BoundedArray(*Tile, 4);
+    const NodeStack = std.BoundedArray(*TreeNode, 32);
+
+    pub fn getMutable(self: *@This(), pos: @Vector(2, i32)) !*Cell {
+        if (self.tryCacheOnly(pos)) |cell| return cell;
+        return try self.tryCacheRefresh(pos) orelse error.PositionNotActive;
+    }
+
+    pub fn get(self: *@This(), pos: @Vector(2, i32)) Cell {
+        if (self.tryCacheOnly(pos)) |cell| return cell.*;
+        return self.tryCacheRefresh(pos) orelse cell_types.air;
+    }
+
+    fn tryCacheOnly(self: *@This(), pos: @Vector(2, i32)) ?*Cell {
+        for (self.tile_cache.constSlice()) |cached_tile| {
+            if (cached_tile.tryGetGlobal(pos)) |cell| return cell;
+        }
+        return null;
+    }
+
+    fn tryCacheRefresh(self: *@This(), pos: @Vector(2, i32)) !?*Cell {
+        const tile = try self.getTile(pos) orelse return null;
+        if (self.tile_cache.len == self.tile_cache.buffer.len) _ = self.tile_cache.orderedRemove(0);
+        self.tile_cache.appendAssumeCapacity(tile);
+        return tile.getGlobal(pos);
+    }
+
+    pub fn getTile(self: *@This(), pos: @Vector(2, i32)) !?*Tile {
+        if (self.stack.len == 0) {
+            self.stack.appendAssumeCapacity(self.target);
+        }
+
+        var top = self.stack.buffer[self.stack.len - 1];
+
+        while (!top.hasPoint(pos)) {
+            if (self.stack.len == 1) return error.PositionOutOfBounds;
+            _ = self.stack.pop();
+            top = self.stack.buffer[self.stack.len - 1];
+        }
+
+        while (!top.isLeaf()) {
+            const subtree_opt = top.getSubtree(pos);
+
+            if (subtree_opt) |subtree| {
+                try self.stack.append(subtree);
+                top = subtree;
+                continue;
+            }
+
+            return null;
+        }
+
+        return top.child.tile.?;
+    }
+};
+
 pub fn simulate(self: *@This()) !void {
     self.iteration +%= 1;
 
+    //PLAN
+    //
+    // - Track all damaged regions (potentially needing simulation)
+    // - Sort them top to bottom
+    // - Scan for interleaving regions and treat them specially
+    //
+    //ENDPLAN
+
     const sim_tile_size = @Vector(2, u32){ tile_size / 2, tile_size / 2 };
+    _ = sim_tile_size; // autofix
 
     const sim_extent = NodeExtent{
         .coord = .{ -256, -256 },
@@ -387,50 +571,94 @@ pub fn simulate(self: *@This()) !void {
     };
 
     try self.ensureArea(ensure_extent);
+    var rand = std.rand.Sfc64.init(self.iteration);
+    var view = self.getView();
 
-    const iteration_offsets = [_]@Vector(2, i32){
-        .{ 0, 0 },
-        .{ tile_size / 2, 0 },
-        .{ 0, tile_size / 2 },
-        .{ tile_size / 2, tile_size / 2 },
-    };
+    var iy: usize = 0;
 
-    const margin = 16;
+    while (iy < sim_extent.size[1]) {
+        const row_dir: DirOrder = if (iy & 0b1 != 0) .left else .right;
 
-    const margin_extent = NodeExtent{
-        .coord = .{ -margin, -margin },
-        .size = .{ 2 * margin, 2 * margin },
-    };
+        const origin: @Vector(2, i32) = switch (row_dir) {
+            .left => .{
+                sim_extent.coord[0] + @as(i32, @intCast(sim_extent.size[0])),
+                sim_extent.coord[1] + @as(i32, @intCast(sim_extent.size[1])),
+            },
+            .right => .{
+                sim_extent.coord[0],
+                sim_extent.coord[1] + @as(i32, @intCast(sim_extent.size[1])),
+            },
+        };
 
-    const root = sim_extent.coord;
-    var current = root;
+        const step_mul: @Vector(2, i32) = switch (row_dir) {
+            .left => .{ -1, -1 },
+            .right => .{ 1, -1 },
+        };
 
-    while (current[1] < sim_extent.coord[1] + sim_extent.size[1]) {
-        current[0] = root[0];
+        const row_rand = rand.random().int(usize);
 
-        while (current[0] < sim_extent.coord[0] + sim_extent.size[0]) {
-            inline for (iteration_offsets) |offset| {
-                const sim_tile_extent = NodeExtent{
-                    .coord = current + offset,
-                    .size = sim_tile_size,
-                };
+        const check_column_id: i32 = switch (row_dir) {
+            .left => tile_size - 1,
+            .right => 0,
+        };
 
-                const view_extent = NodeExtent{
-                    .coord = sim_tile_extent.coord + margin_extent.coord,
-                    .size = sim_tile_extent.size + margin_extent.size,
-                };
+        var ix: usize = 0;
 
-                self.simulateTile(sim_tile_extent, view_extent);
+        var tile_row_is_active: bool = false;
+
+        while (ix < sim_extent.size[0]) {
+            const center = origin + @Vector(2, i32){ @intCast(ix), @intCast(iy) } * step_mul;
+
+            if (@mod(center[0], tile_size) == check_column_id) {
+                if ((try view.getTile(center)).?.sleeping) {
+                    ix += tile_size;
+                    continue;
+                } else {
+                    tile_row_is_active = true;
+                }
             }
 
-            current[0] += tile_size;
+            try simulateView(&view, center, row_dir, row_rand);
+
+            ix += 1;
         }
 
-        current[1] += tile_size;
+        const check_row_id: i32 = tile_size - 1;
+        const in_tile_row = @mod(origin[1] + @as(i32, @intCast(iy)) * step_mul[1], tile_size);
+
+        iy += if (in_tile_row == check_row_id and !tile_row_is_active) tile_size else 1;
     }
+
+    const WakeMan = struct {
+        pub fn func(_: @This(), tile: *Tile) void {
+            tile.sleepIfUntouched();
+            tile.touchReset();
+        }
+    };
+
+    self.forEachNode(WakeMan{});
 }
 
-const Code = enum {
+const DirOrder = enum {
+    left,
+    right,
+
+    pub fn toOffset(self: @This()) @Vector(2, i32) {
+        return switch (self) {
+            .left => .{ -1, 0 },
+            .right => .{ 1, 0 },
+        };
+    }
+
+    pub fn inversed(self: @This()) DirOrder {
+        return switch (self) {
+            .left => .right,
+            .right => .left,
+        };
+    }
+};
+
+const SwapMove = enum {
     noop,
     swap_r,
     swap_l,
@@ -450,125 +678,130 @@ const Code = enum {
     }
 };
 
-fn simulateTile(self: *@This(), sim_tile_extent: NodeExtent, view_extent: NodeExtent) void {
-    var arr_main_tiles: [1]*Tile = undefined;
-    var arr_view_tiles: [4]*Tile = undefined;
+fn simulateView(view: *LandscapeView, pos: @Vector(2, i32), dir_order: DirOrder, rand: usize) !void {
+    const current = try view.getMutable(pos);
 
-    const main_tiles = try self.fillTilesFromArea(sim_tile_extent, &arr_main_tiles);
-    const view_tiles = try self.fillTilesFromArea(view_extent, &arr_view_tiles);
+    switch (current.type) {
+        .powder => try simulatePowder(view, current, pos, dir_order),
+        .liquid => try simulateLiquid(view, current, pos, dir_order, rand),
+        else => {},
+    }
+}
 
-    std.debug.assert(main_tiles.len == arr_main_tiles.len);
-    std.debug.assert(view_tiles.len == arr_view_tiles.len);
-
-    // const MainView = struct {
-    //     tile: *Tile,
-    //     extent: NodeExtent,
-
-    //     pub fn get(view: *const @This(), coord: @Vector(2, i32)) *Cell {
-    //         const origin = view.extent.coord - view.tile.coord + coord;
-    //         return &view.tile.matrix[@intCast(origin[1])][@intCast(origin[0])];
-    //     }
-    // };
-    // _ = MainView; // autofix
-
-    const BigView = struct {
-        tiles: [4]*Tile,
-        extent: NodeExtent,
-
-        pub fn init(tiles: [4]*Tile, extent: NodeExtent) @This() {
-            return .{
-                .tiles = tiles,
-                .extent = extent,
-            };
-        }
-
-        fn get(view: *const @This(), coord: @Vector(2, i32)) *Cell {
-            inline for (view.tiles) |tile| {
-                const diff = coord - tile.coord;
-                if (@reduce(.And, diff >= @Vector(2, i32){ 0, 0 }) and @reduce(.And, diff < @Vector(2, i32){ tile_size, tile_size })) {
-                    return &tile.matrix[@intCast(diff[1])][@intCast(diff[0])];
-                }
-            }
-            unreachable;
-        }
+fn simulatePowder(view: *LandscapeView, current: *Cell, pos: @Vector(2, i32), row_order: DirOrder) !void {
+    const swap_orders: []const SwapMove = switch (row_order) {
+        .left => &.{ .swap_d, .swap_ld, .swap_rd },
+        .right => &.{ .swap_d, .swap_rd, .swap_ld },
     };
 
-    // const a = MainView{ .tile = arr_main_tiles[0], .extent = sim_tile_extent };
-    const b = BigView.init(arr_view_tiles, sim_tile_extent);
+    for (swap_orders) |order| {
+        const other = try view.getMutable(pos + order.toOffset());
+        if (@intFromEnum(other.type) < @intFromEnum(current.type)) {
+            if (try view.getTile(pos)) |tile| tile.touch();
+            if (try view.getTile(pos + order.toOffset())) |tile| tile.touch();
+            return current.swap(other);
+        }
+    }
+}
 
-    var codes: [tile_size / 2][tile_size / 2]Code = undefined;
+fn simulateLiquid(view: *LandscapeView, current: *Cell, pos: @Vector(2, i32), dir_order: DirOrder, rand: usize) !void {
+    { // trivial case: free spot below
+        const other_pos = pos + SwapMove.swap_d.toOffset();
+        const other = try view.getMutable(other_pos);
 
-    // var rand = std.rand.Sfc64.init(self.iteration);
-    var rand_int_swap: u1 = 0;
-    const rand_int_x: u1 = 0;
+        switch (other.type) {
+            .air => {
+                const current_tile = (try view.getTile(pos)).?;
+                const other_tile = (try view.getTile(other_pos)).?;
+                current_tile.touch();
+                other_tile.touch();
 
-    for (codes[0..], 0..) |*col, y| {
-        rand_int_swap ^= 0b1;
-        for (col[0..], 0..) |*code, ix| {
-            code.* = .noop;
-
-            const x = if (rand_int_x == 1) ix else (tile_size / 2) - 1 - ix;
-
-            const current_coord = sim_tile_extent.coord - @Vector(2, i32){ @intCast(x), @intCast(y) };
-            const current = b.get(current_coord);
-
-            const liquid_swap_dir_orders = if (rand_int_swap == 1) [_]Code{
-                .swap_d,
-                .swap_ld,
-                .swap_rd,
-                .swap_l,
-                .swap_r,
-            } else [_]Code{
-                .swap_d,
-                .swap_rd,
-                .swap_ld,
-                .swap_r,
-                .swap_l,
-            };
-
-            const powder_swap_dir_orders = if (rand_int_swap == 1) [_]Code{
-                .swap_d,
-                .swap_ld,
-                .swap_rd,
-            } else [_]Code{
-                .swap_d,
-                .swap_rd,
-                .swap_ld,
-            };
-
-            const swap_orders = switch (current.type) {
-                .air, .solid => continue,
-                .liquid => liquid_swap_dir_orders[0..],
-                .powder => powder_swap_dir_orders[0..],
-            };
-
-            for (swap_orders) |order| {
-                const other_coord = current_coord + order.toOffset();
-                const other = b.get(other_coord);
-
-                if (@intFromEnum(other.type) < @intFromEnum(current.type)) {
-                    code.* = order;
-                    Cell.swap(current, other);
-                    break;
+                {
+                    const neighbors = current_tile.getEdgeNeighbors(pos);
+                    for (neighbors.constSlice()) |neighbor| {
+                        const tile_opt = try view.getTile(pos + neighbor);
+                        if (tile_opt) |tile| tile.touch();
+                    }
                 }
+                {
+                    const neighbors = other_tile.getEdgeNeighbors(pos);
+                    for (neighbors.constSlice()) |neighbor| {
+                        const tile_opt = try view.getTile(pos + neighbor);
+                        if (tile_opt) |tile| tile.touch();
+                    }
+                }
+
+                (try view.getTile(pos)).?.touch();
+                (try view.getTile(other_pos)).?.touch();
+
+                return current.swap(other);
+            },
+            else => {},
+        }
+    }
+
+    const dirs: []const DirOrder = switch (dir_order) {
+        .right => &.{ .left, .right },
+        .left => &.{ .right, .left },
+    };
+
+    const liquid_travel_max: usize = (rand & 0b111) + 1;
+
+    var best_candidate: ?*Cell = null;
+    var best_candidate_pos = std.mem.zeroes(@Vector(2, i32));
+
+    brk: for (dirs) |dir| {
+        var start_offset = dir.toOffset();
+
+        for (0..liquid_travel_max) |_| {
+            const horizontal_pos = start_offset + pos;
+            const horizontal = try view.getMutable(horizontal_pos);
+            start_offset += dir.toOffset();
+
+            switch (horizontal.type) {
+                .air, .liquid => {
+                    const horizontal_below_pos = horizontal_pos + @Vector(2, i32){ 0, 1 };
+                    const horizontal_below = try view.getMutable(horizontal_below_pos);
+
+                    if (horizontal_below.type == .air) {
+                        best_candidate = horizontal_below;
+                        best_candidate_pos = horizontal_below_pos;
+                        break :brk;
+                    } else if (horizontal.type == .air) {
+                        best_candidate = horizontal;
+                        best_candidate_pos = horizontal_pos;
+                    }
+                },
+                .powder, .solid => break,
             }
         }
     }
 
-    // for (codes[0..], 0..) |*col, y| {
-    //     for (col[0..], 0..) |*code, ix| {
-    //         if (code.* == .noop) continue;
+    if (best_candidate) |other| {
+        const current_tile = (try view.getTile(pos)).?;
+        const other_tile = (try view.getTile(best_candidate_pos)).?;
+        current_tile.touch();
+        other_tile.touch();
 
-    //         const x = if (rand_int_x == 1) ix else (tile_size / 2) - 1 - ix;
+        {
+            const neighbors = current_tile.getEdgeNeighbors(pos);
+            for (neighbors.constSlice()) |neighbor| {
+                const tile_opt = try view.getTile(pos + neighbor);
+                if (tile_opt) |tile| tile.touch();
+            }
+        }
+        {
+            const neighbors = other_tile.getEdgeNeighbors(pos);
+            for (neighbors.constSlice()) |neighbor| {
+                const tile_opt = try view.getTile(pos + neighbor);
+                if (tile_opt) |tile| tile.touch();
+            }
+        }
 
-    //         const current_coord = sim_tile_extent.coord - @Vector(2, i32){ @intCast(x), @intCast(y) };
-    //         const current = b.get(current_coord);
-    //         const other_coord = current_coord + code.toOffset();
-    //         const other = b.get(other_coord);
-
-    //         if (@intFromEnum(other.type) < @intFromEnum(current.type)) Cell.swap(current, other);
-    //     }
-    // }
+        (try view.getTile(pos)).?.touch();
+        (try view.getTile(best_candidate_pos)).?.touch();
+        current.swap(other);
+    }
 }
 
 test "Minimal lifetime" {
@@ -578,6 +811,8 @@ test "Minimal lifetime" {
     try std.testing.expectEqual(16, self.tree.level);
     try self.ensureArea(.{ .coord = .{ -128, -128 }, .size = .{ 256, 256 } });
     try std.testing.expectEqual(4, self.countTiles());
+
+    std.debug.print("\n{any}\n", .{self.tree.size()});
 
     try std.testing.expectEqual(4, self.tileCountForArea(.{ .coord = .{ -128, -128 }, .size = .{ 256, 256 } }));
     try std.testing.expectEqual(9, self.tileCountForArea(.{ .coord = .{ -127, -127 }, .size = .{ 256, 256 } }));

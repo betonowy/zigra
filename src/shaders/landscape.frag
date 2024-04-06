@@ -34,10 +34,5 @@ vec4 getColor(uint code) {
 
 void main() {
     uint code = texture(tex_landscape[in_descriptor], in_uv).r;
-
     out_color = getColor(code);
-
-    if (abs(in_uv.x - 0.5) > 0.49 || abs(in_uv.y - 0.5) > 0.49) {
-        out_color = mix(vec4(0.1, 0.2, 0.05, 1.0), out_color, 0.9);
-    }
 }

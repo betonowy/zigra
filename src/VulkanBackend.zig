@@ -48,6 +48,8 @@ atlas: Atlas,
 camera_pos: @Vector(2, i32),
 start_timestamp: i128,
 
+upload_line_data: std.ArrayListUnmanaged(types.LineData),
+
 pub const FrameData = struct {
     fence_busy: vk.Fence = .null_handle,
     semaphore_swapchain_image_acquired: vk.Semaphore = .null_handle,
@@ -138,10 +140,14 @@ pub fn init(
     self.start_timestamp = std.time.nanoTimestamp();
     self.camera_pos = .{ 0, 0 };
 
+    self.upload_line_data = .{};
+
     return self;
 }
 
 pub fn deinit(self: *@This()) void {
+    self.upload_line_data.deinit(self.allocator);
+
     self.vkd.deviceWaitIdle(self.device) catch unreachable;
 
     self.atlas.deinit(self);
@@ -164,8 +170,10 @@ pub fn deinit(self: *@This()) void {
 pub fn process(self: *@This()) !void {
     var timer = try std.time.Timer.start();
     const to_ms: f32 = 1e-6;
+    _ = to_ms; // autofix
 
     const landscape_u_dur: f32 = @floatFromInt(timer.lap());
+    _ = landscape_u_dur; // autofix
 
     if (try self.vkd.waitForFences(
         self.device,
@@ -176,6 +184,7 @@ pub fn process(self: *@This()) !void {
     ) != .success) return error.FenceTimeout;
 
     const fence_dur: f32 = @floatFromInt(timer.lap());
+    _ = fence_dur; // autofix
 
     try self.vkd.resetCommandBuffer(self.frames[self.frame_index].command_buffer, .{});
     try self.vkd.beginCommandBuffer(self.frames[self.frame_index].command_buffer, &.{ .flags = .{ .one_time_submit_bit = true } });
@@ -183,10 +192,12 @@ pub fn process(self: *@This()) !void {
     try self.frames[self.frame_index].landscape.recordUploadData(self, self.frames[self.frame_index].command_buffer, self.frames[self.frame_index].landscape_upload);
 
     const landscape_r_dur: f32 = @floatFromInt(timer.lap());
+    _ = landscape_r_dur; // autofix
 
     try self.uploadScheduledData(&self.frames[self.frame_index]);
 
     const upload_dur: f32 = @floatFromInt(timer.lap());
+    _ = upload_dur; // autofix
 
     const next_image = try self.acquireNextSwapchainImage();
 
@@ -196,6 +207,7 @@ pub fn process(self: *@This()) !void {
     }
 
     const acquire_dur: f32 = @floatFromInt(timer.lap());
+    _ = acquire_dur; // autofix
 
     try self.recordDrawFrame(
         self.frames[self.frame_index],
@@ -226,6 +238,7 @@ pub fn process(self: *@This()) !void {
     try self.vkd.queueSubmit(self.graphic_queue, 1, meta.asConstArray(&submit_info), self.frames[self.frame_index].fence_busy);
 
     const draw_dur: f32 = @floatFromInt(timer.lap());
+    _ = draw_dur; // autofix
 
     const present_result = try self.presentSwapchainImage(
         self.frames[self.frame_index],
@@ -233,34 +246,35 @@ pub fn process(self: *@This()) !void {
     );
 
     const present_dur: f32 = @floatFromInt(timer.lap());
+    _ = present_dur; // autofix
 
     if (next_image.result != .success or present_result != .success) {
         try self.createSwapchain(.recreate);
     }
 
-    std.debug.print(
-        \\ --------------------
-        \\ lu:    {d: >6.3} ms
-        \\ fence: {d: >6.3} ms
-        \\ lr:    {d: >6.3} ms
-        \\ up:    {d: >6.3} ms
-        \\ acq:   {d: >6.3} ms
-        \\ draw:  {d: >6.3} ms
-        \\ p:     {d: >6.3} ms
-        \\ total: {d: >6.3} ms
-        \\ nofen: {d: >6.3} ms
-        \\
-    , .{
-        landscape_u_dur * to_ms,
-        fence_dur * to_ms,
-        landscape_r_dur * to_ms,
-        upload_dur * to_ms,
-        acquire_dur * to_ms,
-        draw_dur * to_ms,
-        present_dur * to_ms,
-        (landscape_u_dur + fence_dur + landscape_r_dur + upload_dur + acquire_dur + draw_dur + present_dur) * to_ms,
-        (landscape_u_dur + landscape_r_dur + upload_dur + acquire_dur + draw_dur + present_dur) * to_ms,
-    });
+    // std.debug.print(
+    //     \\ --------------------
+    //     \\ lu:    {d: >6.3} ms
+    //     \\ fence: {d: >6.3} ms
+    //     \\ lr:    {d: >6.3} ms
+    //     \\ up:    {d: >6.3} ms
+    //     \\ acq:   {d: >6.3} ms
+    //     \\ draw:  {d: >6.3} ms
+    //     \\ p:     {d: >6.3} ms
+    //     \\ total: {d: >6.3} ms
+    //     \\ nofen: {d: >6.3} ms
+    //     \\
+    // , .{
+    //     landscape_u_dur * to_ms,
+    //     fence_dur * to_ms,
+    //     landscape_r_dur * to_ms,
+    //     upload_dur * to_ms,
+    //     acquire_dur * to_ms,
+    //     draw_dur * to_ms,
+    //     present_dur * to_ms,
+    //     (landscape_u_dur + fence_dur + landscape_r_dur + upload_dur + acquire_dur + draw_dur + present_dur) * to_ms,
+    //     (landscape_u_dur + landscape_r_dur + upload_dur + acquire_dur + draw_dur + present_dur) * to_ms,
+    // });
 
     self.advanceFrame();
 }
@@ -361,7 +375,7 @@ const CreateBufferInfo = struct {
 };
 
 fn createBuffer(self: *@This(), comptime T: type, info: CreateBufferInfo) !types.BufferVisible(T) {
-    const size_in_bytes = @sizeOf(T) * info.size;
+    const size_in_bytes = info.size * @sizeOf(T);
 
     const buffer = try self.vkd.createBuffer(self.device, &.{
         .size = size_in_bytes,
@@ -379,7 +393,7 @@ fn createBuffer(self: *@This(), comptime T: type, info: CreateBufferInfo) !types
     errdefer self.vkd.freeMemory(self.device, memory, null);
 
     try self.vkd.bindBufferMemory(self.device, buffer, memory, 0);
-    const ptr = try self.vkd.mapMemory(self.device, memory, 0, size_in_bytes, .{});
+    const ptr = try self.vkd.mapMemory(self.device, memory, 0, size_in_bytes, .{}) orelse return error.NullMemory;
 
     return types.BufferVisible(T){
         .handle = buffer,
@@ -812,7 +826,7 @@ fn createFrameData(self: *@This()) !void {
         const ds_ssb_info = vk.DescriptorBufferInfo{
             .buffer = frame.draw_buffer.handle,
             .offset = 0,
-            .range = frame.draw_buffer.map.len,
+            .range = std.mem.sliceAsBytes(frame.draw_buffer.map).len,
         };
 
         const ds_atlas_info = vk.DescriptorImageInfo{
@@ -921,7 +935,6 @@ fn acquireNextSwapchainImage(self: *@This()) !types.DeviceDispatch.AcquireNextIm
     ) catch |err| {
         switch (err) {
             error.OutOfDateKHR => {
-                std.log.err("Out of date swapchain!", .{});
                 return .{ .result = .error_out_of_date_khr, .image_index = 0 };
             },
             else => return err,
@@ -1321,6 +1334,15 @@ fn integerScaling(dst: vk.Extent2D, src: vk.Extent2D) vk.Rect2D {
     };
 }
 
+pub fn scheduleLine(self: *@This(), points: [2]@Vector(2, f32), color: @Vector(4, f16), depth: f32, alpha: @Vector(2, f16)) !void {
+    try self.upload_line_data.append(self.allocator, .{
+        .points = points,
+        .color = color,
+        .depth = depth,
+        .alpha_gradient = alpha,
+    });
+}
+
 fn uploadScheduledData(self: *@This(), frame: *FrameData) !void {
     var current_index: u32 = 0;
 
@@ -1329,14 +1351,9 @@ fn uploadScheduledData(self: *@This(), frame: *FrameData) !void {
     const rect = self.atlas.map.get("images/crate_16.png") orelse unreachable;
 
     const rot_full: f32 = timestamp * 0.3;
-    const sprite_count = 2000;
+    const sprite_count = 2032;
 
     var sprites: [sprite_count]types.DrawData = undefined;
-
-    self.camera_pos = .{
-        @intFromFloat(@sin(rot_full * 1.90) * 0 + 10),
-        @intFromFloat(@cos(rot_full * 3.14) * 0 - 70),
-    };
 
     for (sprites[current_index..], current_index..) |*cmd, i| {
         var rot_actual = rot_full + @as(f32, @floatFromInt(i));
@@ -1406,9 +1423,19 @@ fn uploadScheduledData(self: *@This(), frame: *FrameData) !void {
         };
     }
 
+    // Upload scheduled lines
     frame.draw_line_index = current_index;
-    frame.draw_line_range = lines_count;
-    current_index += lines_count;
+    frame.draw_line_range = @intCast(self.upload_line_data.items.len);
+
+    {
+        const begin = current_index;
+        const end = begin + self.upload_line_data.items.len;
+
+        for (self.upload_line_data.items, frame.draw_buffer.map[begin..end]) |src, *dst| dst.line = src;
+
+        current_index += @intCast(self.upload_line_data.items.len);
+        self.upload_line_data.clearRetainingCapacity();
+    }
 }
 
 fn floatToSnorm16(value: f32, comptime range: f32) i16 {

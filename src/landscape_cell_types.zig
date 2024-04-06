@@ -9,11 +9,13 @@ pub const Cell = packed struct {
     };
 
     const Weight = u2;
-    const Subtype = u3;
+    const Subtype = u2;
+    const Iteration = u1;
 
     type: Type,
     weight: Weight,
     subtype: Subtype,
+    Iteration: Iteration = 0, // Use this
     has_bkg: bool,
 
     pub fn asU8(self: @This()) u8 {
