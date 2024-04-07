@@ -144,7 +144,7 @@ fn genLandscapeCells(b: *std.Build, arena: *std.heap.ArenaAllocator, node: *std.
     inline for (comptime std.meta.declarations(T)) |decl| {
         try string.appendSlice(std.fmt.comptimePrint(
             "#define CellType_{s} {}\n",
-            .{ decl.name, comptime @field(T, decl.name).asU8() },
+            .{ decl.name, comptime @field(T, decl.name).asU16() },
         ));
     }
 

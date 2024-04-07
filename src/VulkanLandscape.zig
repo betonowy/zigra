@@ -50,7 +50,7 @@ pub fn init(backend: *Backend) !@This() {
         tile.upload_image = try backend.createImage(.{
             .aspect_mask = .{ .color_bit = true },
             .extent = .{ .width = image_size, .height = image_size },
-            .format = .r8_uint,
+            .format = .r16_uint,
             .initial_layout = .preinitialized,
             .has_view = false,
             .map_memory = true,
@@ -62,7 +62,7 @@ pub fn init(backend: *Backend) !@This() {
         tile.device_image = try backend.createImage(.{
             .aspect_mask = .{ .color_bit = true },
             .extent = .{ .width = image_size, .height = image_size },
-            .format = .r8_uint,
+            .format = .r16_uint,
             .property = .{ .device_local_bit = true },
             .tiling = .optimal,
             .usage = .{ .transfer_dst_bit = true, .sampled_bit = true },

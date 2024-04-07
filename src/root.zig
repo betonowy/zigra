@@ -154,7 +154,7 @@ pub fn run() !void {
     var ls = try LandSim.init(allocator);
     defer ls.deinit();
 
-    try ls.loadFromPngFile(.{ .coord = .{ -256, -256 }, .size = .{ 512, 512 } }, "land/TEST_LEVEL.png");
+    try ls.loadFromPngFile(.{ .coord = .{ -256, -256 }, .size = .{ 512, 512 } }, "land/TEST_LEVEL_WATERFALL_SMALLGAP.png");
 
     var tick: usize = 0;
     var begin_cam: @Vector(2, i32) = undefined;
@@ -163,8 +163,7 @@ pub fn run() !void {
         tick += 1;
         glfw.pollEvents();
 
-        if (tick % 5 == 0)
-            try ls.simulate();
+        if (tick % 4 == 0) try ls.simulate();
 
         try vk_backend.frames[vk_backend.frame_index].landscape.recalculateActiveSets(@intCast(vk_backend.camera_pos));
         const set = vk_backend.frames[vk_backend.frame_index].landscape.active_sets.constSlice();
@@ -195,31 +194,31 @@ pub fn run() !void {
         }
 
         for (used) |src| {
-            const min_coord: @Vector(2, f32) = @floatFromInt(src.coord);
-            const max_coord: @Vector(2, f32) = @floatFromInt(src.coord + @as(@Vector(2, i32), @splat(LandSim.tile_size - 1)));
+            // const min_coord: @Vector(2, f32) = @floatFromInt(src.coord);
+            // const max_coord: @Vector(2, f32) = @floatFromInt(src.coord + @as(@Vector(2, i32), @splat(LandSim.tile_size - 1)));
 
-            const points = [4]@Vector(2, f32){
-                .{ min_coord[0], min_coord[1] },
-                .{ min_coord[0], max_coord[1] },
-                .{ max_coord[0], min_coord[1] },
-                .{ max_coord[0], max_coord[1] },
-            };
+            // const points = [4]@Vector(2, f32){
+            //     .{ min_coord[0], min_coord[1] },
+            //     .{ min_coord[0], max_coord[1] },
+            //     .{ max_coord[0], min_coord[1] },
+            //     .{ max_coord[0], max_coord[1] },
+            // };
 
-            const index_pairs = [4]@Vector(2, usize){
-                .{ 0, 1 },
-                .{ 0, 2 },
-                .{ 3, 1 },
-                .{ 3, 2 },
-            };
+            // const index_pairs = [4]@Vector(2, usize){
+            //     .{ 0, 1 },
+            //     .{ 0, 2 },
+            //     .{ 3, 1 },
+            //     .{ 3, 2 },
+            // };
 
-            const color: @Vector(4, f16) = switch (src.sleeping) {
-                true => .{ 0.0, 1.0, 0.0, 1.0 },
-                false => .{ 1.0, 0.0, 0.0, 1.0 },
-            };
+            // const color: @Vector(4, f16) = switch (src.sleeping) {
+            //     true => .{ 0.0, 1.0, 0.0, 1.0 },
+            //     false => .{ 1.0, 0.0, 0.0, 1.0 },
+            // };
 
-            for (index_pairs) |index_pair| {
-                try vk_backend.scheduleLine(.{ points[index_pair[0]], points[index_pair[1]] }, color, 0, .{ 0.5, 0.5 });
-            }
+            // for (index_pairs) |index_pair| {
+            //     try vk_backend.scheduleLine(.{ points[index_pair[0]], points[index_pair[1]] }, color, 0, .{ 0.5, 0.5 });
+            // }
 
             for (set) |dst| {
                 if (@reduce(.Or, src.coord != dst.tile.coord)) continue;

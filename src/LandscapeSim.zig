@@ -23,21 +23,25 @@ pub const Rgba = packed struct {
         return @bitCast(self);
     }
 
-    fn U32(r: u8, g: u8, b: u8, a: u8) u32 {
+    fn fromU32(value: u32) @This() {
+        return @bitCast(value);
+    }
+
+    fn compToU32(r: u8, g: u8, b: u8, a: u8) u32 {
         return (Rgba{ .r = r, .g = g, .b = b, .a = a }).toU32();
     }
 };
 
 pub fn rgbaToCell(value: u32) Cell {
     return switch (value) {
-        Rgba.U32(0x00, 0x00, 0x00, 0xff) => cell_types.air,
-        Rgba.U32(0x40, 0x20, 0x00, 0xff) => cell_types.bkg,
-        Rgba.U32(0x80, 0x40, 0x00, 0xff) => cell_types.soil,
-        Rgba.U32(0xc0, 0xa8, 0x00, 0xff) => cell_types.gold,
-        Rgba.U32(0x40, 0x40, 0x40, 0xff) => cell_types.rock,
-        Rgba.U32(0x00, 0x00, 0xc0, 0xff) => cell_types.water,
-        Rgba.U32(0x00, 0xff, 0x00, 0xff) => cell_types.acid,
-        Rgba.U32(0xff, 0xff, 0x80, 0xff) => cell_types.sand_nb,
+        Rgba.compToU32(0x00, 0x00, 0x00, 0xff) => cell_types.air,
+        Rgba.compToU32(0x40, 0x20, 0x00, 0xff) => cell_types.bkg,
+        Rgba.compToU32(0x80, 0x40, 0x00, 0xff) => cell_types.soil,
+        Rgba.compToU32(0xc0, 0xa8, 0x00, 0xff) => cell_types.gold,
+        Rgba.compToU32(0x40, 0x40, 0x40, 0xff) => cell_types.rock,
+        Rgba.compToU32(0x00, 0x00, 0xc0, 0xff) => cell_types.water,
+        Rgba.compToU32(0x00, 0xff, 0x00, 0xff) => cell_types.acid,
+        Rgba.compToU32(0xff, 0xff, 0x80, 0xff) => cell_types.sand_nb,
         else => @panic("Bad cell coding"),
     };
 }
@@ -250,9 +254,17 @@ const TreeNode = struct {
     }
 };
 
+const CellParticle = struct {
+    pos: @Vector(2, f32),
+    vel: @Vector(2, f32),
+    cell: Cell,
+};
+
 const TilePool = std.heap.MemoryPoolExtra(Tile, .{});
 const NodePool = std.heap.MemoryPoolExtra(TreeNode, .{});
 const max_extent = 1 << 16;
+
+const ParticleArray = std.ArrayListUnmanaged(CellParticle);
 
 allocator: std.mem.Allocator,
 pool_arena: std.heap.ArenaAllocator,
@@ -260,6 +272,7 @@ tile_pool: TilePool,
 node_pool: NodePool,
 
 tree: TreeNode,
+particles: ParticleArray,
 iteration: u64,
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
@@ -276,10 +289,13 @@ pub fn init(allocator: std.mem.Allocator) !@This() {
         .child = .{ .nodes = std.mem.zeroes(NodeMatrix) },
     };
 
+    self.particles = try ParticleArray.initCapacity(self.allocator, 128);
+
     return self;
 }
 
 pub fn deinit(self: *@This()) void {
+    self.particles.deinit(self.allocator);
     self.node_pool.deinit();
     self.tile_pool.deinit();
 }
@@ -549,17 +565,6 @@ const LandscapeView = struct {
 pub fn simulate(self: *@This()) !void {
     self.iteration +%= 1;
 
-    //PLAN
-    //
-    // - Track all damaged regions (potentially needing simulation)
-    // - Sort them top to bottom
-    // - Scan for interleaving regions and treat them specially
-    //
-    //ENDPLAN
-
-    const sim_tile_size = @Vector(2, u32){ tile_size / 2, tile_size / 2 };
-    _ = sim_tile_size; // autofix
-
     const sim_extent = NodeExtent{
         .coord = .{ -256, -256 },
         .size = .{ 512, 512 },
@@ -609,17 +614,13 @@ pub fn simulate(self: *@This()) !void {
         while (ix < sim_extent.size[0]) {
             const center = origin + @Vector(2, i32){ @intCast(ix), @intCast(iy) } * step_mul;
 
-            if (@mod(center[0], tile_size) == check_column_id) {
-                if ((try view.getTile(center)).?.sleeping) {
-                    ix += tile_size;
-                    continue;
-                } else {
-                    tile_row_is_active = true;
-                }
+            if (@mod(center[0], tile_size) == check_column_id and (try view.getTile(center)).?.sleeping) {
+                ix += tile_size;
+                continue;
             }
 
+            tile_row_is_active = true;
             try simulateView(&view, center, row_dir, row_rand);
-
             ix += 1;
         }
 
@@ -658,6 +659,11 @@ const DirOrder = enum {
     }
 };
 
+const SpillPattern = struct {
+    dir: DirOrder,
+    len: usize,
+};
+
 const SwapMove = enum {
     noop,
     swap_r,
@@ -665,6 +671,7 @@ const SwapMove = enum {
     swap_d,
     swap_ld,
     swap_rd,
+    swap_u,
 
     fn toOffset(self: @This()) @Vector(2, i32) {
         return switch (self) {
@@ -674,6 +681,7 @@ const SwapMove = enum {
             .swap_d => .{ 0, 1 },
             .swap_ld => .{ -1, 1 },
             .swap_rd => .{ 1, 1 },
+            .swap_u => .{ 0, -1 },
         };
     }
 };
@@ -734,52 +742,78 @@ fn simulateLiquid(view: *LandscapeView, current: *Cell, pos: @Vector(2, i32), di
                 (try view.getTile(pos)).?.touch();
                 (try view.getTile(other_pos)).?.touch();
 
+                current.property_1 +%= 1;
+
                 return current.swap(other);
             },
             else => {},
         }
     }
 
-    const dirs: []const DirOrder = switch (dir_order) {
-        .right => &.{ .left, .right },
-        .left => &.{ .right, .left },
+    const liquid_travel_max: usize = (rand % 2) + 3;
+
+    const spill_patterns: []const SpillPattern = switch (dir_order) {
+        .right => &.{
+            .{ .dir = .left, .len = liquid_travel_max },
+            .{ .dir = .right, .len = liquid_travel_max },
+        },
+        .left => &.{
+            .{ .dir = .right, .len = liquid_travel_max },
+            .{ .dir = .left, .len = liquid_travel_max },
+        },
     };
 
-    const liquid_travel_max: usize = (rand & 0b111) + 1;
+    const cell_above_pos = pos + SwapMove.swap_u.toOffset();
+    const cell_above = try view.getMutable(cell_above_pos);
 
-    var best_candidate: ?*Cell = null;
-    var best_candidate_pos = std.mem.zeroes(@Vector(2, i32));
+    var minor_candidate: ?*Cell = null;
+    var minor_candidate_pos = std.mem.zeroes(@Vector(2, i32));
 
-    brk: for (dirs) |dir| {
-        var start_offset = dir.toOffset();
+    var major_candidate: ?*Cell = null;
+    var major_candidate_pos = std.mem.zeroes(@Vector(2, i32));
 
-        for (0..liquid_travel_max) |_| {
+    brk: for (spill_patterns) |spill_pattern| {
+        var start_offset = spill_pattern.dir.toOffset();
+
+        for (0..spill_pattern.len) |_| {
             const horizontal_pos = start_offset + pos;
+            const horizontal_below_pos = horizontal_pos + @Vector(2, i32){ 0, 1 };
+
+            start_offset += spill_pattern.dir.toOffset();
+
             const horizontal = try view.getMutable(horizontal_pos);
-            start_offset += dir.toOffset();
+            const horizontal_below = try view.getMutable(horizontal_below_pos);
 
             switch (horizontal.type) {
-                .air, .liquid => {
-                    const horizontal_below_pos = horizontal_pos + @Vector(2, i32){ 0, 1 };
-                    const horizontal_below = try view.getMutable(horizontal_below_pos);
-
-                    if (horizontal_below.type == .air) {
-                        best_candidate = horizontal_below;
-                        best_candidate_pos = horizontal_below_pos;
-                        break :brk;
-                    } else if (horizontal.type == .air) {
-                        best_candidate = horizontal;
-                        best_candidate_pos = horizontal_pos;
+                .air, .liquid => if (horizontal_below.type == .air) {
+                    major_candidate = horizontal_below;
+                    major_candidate_pos = horizontal_below_pos;
+                    break :brk;
+                } else if (horizontal.type == .air) {
+                    if (spill_pattern.dir == dir_order) {
+                        major_candidate = horizontal;
+                        major_candidate_pos = horizontal_pos;
+                        current.property_1 -|= 1;
+                    } else {
+                        minor_candidate = horizontal;
+                        minor_candidate_pos = horizontal_pos;
+                        current.property_1 -|= 1;
                     }
                 },
-                .powder, .solid => break,
+                .powder, .solid => {
+                    if (horizontal_below.type == .air) {
+                        major_candidate = horizontal_below;
+                        major_candidate_pos = horizontal_below_pos;
+                    }
+                    break;
+                },
             }
         }
     }
 
-    if (best_candidate) |other| {
+    if (major_candidate) |other| {
         const current_tile = (try view.getTile(pos)).?;
-        const other_tile = (try view.getTile(best_candidate_pos)).?;
+        const other_tile = (try view.getTile(major_candidate_pos)).?;
         current_tile.touch();
         other_tile.touch();
 
@@ -799,8 +833,39 @@ fn simulateLiquid(view: *LandscapeView, current: *Cell, pos: @Vector(2, i32), di
         }
 
         (try view.getTile(pos)).?.touch();
-        (try view.getTile(best_candidate_pos)).?.touch();
-        current.swap(other);
+        (try view.getTile(major_candidate_pos)).?.touch();
+        return current.swap(other);
+    } else if (cell_above.type == .solid) {
+        if (minor_candidate) |other| {
+            const current_tile = (try view.getTile(pos)).?;
+            const other_tile = (try view.getTile(minor_candidate_pos)).?;
+            current_tile.touch();
+            other_tile.touch();
+
+            {
+                const neighbors = current_tile.getEdgeNeighbors(pos);
+                for (neighbors.constSlice()) |neighbor| {
+                    const tile_opt = try view.getTile(pos + neighbor);
+                    if (tile_opt) |tile| tile.touch();
+                }
+            }
+            {
+                const neighbors = other_tile.getEdgeNeighbors(pos);
+                for (neighbors.constSlice()) |neighbor| {
+                    const tile_opt = try view.getTile(pos + neighbor);
+                    if (tile_opt) |tile| tile.touch();
+                }
+            }
+
+            (try view.getTile(pos)).?.touch();
+            (try view.getTile(minor_candidate_pos)).?.touch();
+            return current.swap(other);
+        }
+    }
+
+    if (current.property_1 > 0) {
+        current.property_1 -= 1;
+        (try view.getTile(pos)).?.touch();
     }
 }
 

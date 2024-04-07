@@ -9,20 +9,21 @@ pub const Cell = packed struct {
     };
 
     const Weight = u2;
-    const Subtype = u2;
-    const Iteration = u1;
+    const Subtype = u3;
+    const Property = u4;
 
     type: Type,
     weight: Weight,
     subtype: Subtype,
-    Iteration: Iteration = 0, // Use this
     has_bkg: bool,
+    property_1: Property = 0,
+    property_2: Property = 0,
 
-    pub fn asU8(self: @This()) u8 {
+    pub fn asU16(self: @This()) u16 {
         return @bitCast(self);
     }
 
-    pub fn fromU8(value: u8) @This() {
+    pub fn fromU16(value: u16) @This() {
         return @bitCast(value);
     }
 
@@ -31,6 +32,8 @@ pub const Cell = packed struct {
             .type = b.type,
             .weight = b.weight,
             .subtype = b.subtype,
+            .property_1 = b.property_1,
+            .property_2 = b.property_2,
             .has_bkg = a.has_bkg,
         };
 
@@ -38,17 +41,29 @@ pub const Cell = packed struct {
             .type = a.type,
             .weight = a.weight,
             .subtype = a.subtype,
+            .property_1 = a.property_1,
+            .property_2 = a.property_2,
             .has_bkg = b.has_bkg,
         };
 
         a.* = a_to_b;
         b.* = b_to_a;
     }
+
+    pub fn propagateProperty(a: *@This(), b: *@This()) void {
+        if (a.property_1 > b.property_1) {
+            a.property_1 -= 1;
+            b.property_2 += 1;
+        } else if (a.property_1 > b.property_1) {
+            a.property_1 += 1;
+            b.property_2 -= 1;
+        }
+    }
 };
 
 test "Cell:is_one_byte" {
-    comptime try std.testing.expectEqual(1, @sizeOf(Cell));
-    comptime try std.testing.expectEqual(8, @bitSizeOf(Cell));
+    comptime try std.testing.expectEqual(2, @sizeOf(Cell));
+    comptime try std.testing.expectEqual(16, @bitSizeOf(Cell));
 }
 
 pub const cell_types = struct {

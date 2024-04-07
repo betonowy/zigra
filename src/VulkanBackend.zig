@@ -1346,38 +1346,6 @@ pub fn scheduleLine(self: *@This(), points: [2]@Vector(2, f32), color: @Vector(4
 fn uploadScheduledData(self: *@This(), frame: *FrameData) !void {
     var current_index: u32 = 0;
 
-    const timestamp = @as(f32, @floatFromInt(std.time.nanoTimestamp() - self.start_timestamp)) * (1.0 / @as(f32, std.time.ns_per_s));
-
-    const rect = self.atlas.map.get("images/crate_16.png") orelse unreachable;
-
-    const rot_full: f32 = timestamp * 0.3;
-    const sprite_count = 2032;
-
-    var sprites: [sprite_count]types.DrawData = undefined;
-
-    for (sprites[current_index..], current_index..) |*cmd, i| {
-        var rot_actual = rot_full + @as(f32, @floatFromInt(i));
-
-        const intermediate = (rot_actual / (std.math.pi * 2));
-        rot_actual = std.math.clamp(std.math.pi * 2 * (intermediate - @floor(intermediate) - 0.5), -std.math.pi, std.math.pi);
-
-        cmd.sprite = .{
-            .color = .{ 1.0, 1.0, 1.0, 1.0 },
-            .depth = floatToUnorm16(0.4 + @sin(@as(f32, @floatFromInt(i))) * 0.3, 1.0),
-            .offset = .{ -100 + @as(f32, @floatFromInt(@mod(i * 30, 200))), @floatFromInt(@as(i32, @intCast(i / 5)) * 30 - 80) },
-            .pivot = .{ 0.1, 0.1 },
-            .uv_ul = .{ @intCast(rect.offset.x), @intCast(rect.offset.y) },
-            .uv_sz = .{ @intCast(rect.extent.width), @intCast(rect.extent.height) },
-            .rot = floatToSnorm16(rot_actual, std.math.pi),
-        };
-    }
-
-    @memcpy(frame.draw_buffer.map[0..sprite_count], &sprites);
-
-    frame.draw_sprite_opaque_index = current_index;
-    frame.draw_sprite_opaque_range = sprite_count;
-    current_index += sprite_count;
-
     for (
         self.frames[self.frame_index].landscape.active_sets.constSlice(),
         frame.draw_buffer.map[current_index .. current_index + self.frames[self.frame_index].landscape.active_sets.len],
