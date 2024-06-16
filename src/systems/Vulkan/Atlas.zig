@@ -1,8 +1,8 @@
 const std = @import("std");
 const vk = @import("vk.zig");
-const types = @import("vulkan_types.zig");
-const VulkanBackend = @import("VulkanBackend.zig");
-const meta = @import("meta.zig");
+const types = @import("types.zig");
+const VulkanBackend = @import("Backend.zig");
+const meta = @import("../../meta.zig");
 
 const stb = @cImport(@cInclude("stb/stb_image.h"));
 

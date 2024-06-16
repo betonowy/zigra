@@ -1,8 +1,8 @@
 const vk = @import("./vk.zig");
-const types = @import("./vulkan_types.zig");
+const types = @import("types.zig");
 const std = @import("std");
 const builtin = @import("builtin");
-const meta = @import("./meta.zig");
+const meta = @import("../../meta.zig");
 
 fn vulkanDebugCallback(
     _: vk.DebugUtilsMessageSeverityFlagsEXT,

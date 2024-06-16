@@ -1,16 +1,16 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const glfw = @import("glfw");
 
-const vk = @import("./vk.zig");
-const types = @import("./vulkan_types.zig");
-const initialization = @import("./vulkan_init.zig");
-const builder = @import("./vulkan_builder.zig");
-const meta = @import("./meta.zig");
-const Atlas = @import("VulkanAtlas.zig");
-const Landscape = @import("VulkanLandscape.zig");
-const LandSim = @import("./LandscapeSim.zig");
-const spv = @import("shaders/spv.zig");
+const vk = @import("vk.zig");
+const types = @import("types.zig");
+const initialization = @import("init.zig");
+const builder = @import("builder.zig");
+const meta = @import("../../meta.zig");
+const push_commands = @import("push_commands.zig");
+pub const Atlas = @import("Atlas.zig");
+pub const Landscape = @import("Landscape.zig");
+pub const SandSim = @import("../World/SandSim.zig");
+const spv = @import("../../shaders/spv.zig");
 
 const stb = @cImport(@cInclude("stb/stb_image.h"));
 
@@ -19,6 +19,11 @@ pub const frame_max_draw_commands = 65536;
 pub const frame_target_width = 320;
 pub const frame_target_height = 200;
 pub const frame_format = vk.Format.r16g16b16a16_sfloat;
+
+pub const font_file = "src/systems/Nuklear/PhoenixBios_128.png";
+pub const font_h_count = 16;
+pub const font_height = 8;
+pub const font_width = 8;
 
 allocator: std.mem.Allocator,
 
@@ -49,6 +54,13 @@ camera_pos: @Vector(2, i32),
 start_timestamp: i128,
 
 upload_line_data: std.ArrayListUnmanaged(types.LineData),
+upload_triangle_data: std.ArrayListUnmanaged(types.VertexData),
+upload_text_data: std.ArrayListUnmanaged(types.TextData),
+
+upload_gui_vertices: std.ArrayListUnmanaged(types.VertexData),
+upload_gui_data: std.ArrayListUnmanaged(types.GuiHeader),
+
+font: vk.Rect2D,
 
 pub const FrameData = struct {
     fence_busy: vk.Fence = .null_handle,
@@ -71,6 +83,13 @@ pub const FrameData = struct {
     draw_landscape_range: u32 = 0,
     draw_line_index: u32 = 0,
     draw_line_range: u32 = 0,
+    draw_point_index: u32 = 0,
+    draw_point_range: u32 = 0,
+    draw_triangles_index: u32 = 0,
+    draw_triangles_range: u32 = 0,
+    draw_text_index: u32 = 0,
+    draw_text_range: u32 = 0,
+    draw_cmd_gui_slice: []types.GuiHeader = &.{},
 
     command_buffer: vk.CommandBuffer = .null_handle,
 };
@@ -131,8 +150,11 @@ pub fn init(
         "images/mountains/cut_04.png",
         "images/mountains/fog_06.png",
         "images/mountains/full_00.png",
+        font_file,
     });
     errdefer self.atlas.deinit(&self);
+
+    self.font = self.atlas.map.get(font_file) orelse unreachable;
 
     try self.createFrameData();
     errdefer self.destroyFrameData();
@@ -141,11 +163,20 @@ pub fn init(
     self.camera_pos = .{ 0, 0 };
 
     self.upload_line_data = .{};
+    self.upload_triangle_data = .{};
+    self.upload_text_data = .{};
+
+    self.upload_gui_vertices = .{};
+    self.upload_gui_data = .{};
 
     return self;
 }
 
 pub fn deinit(self: *@This()) void {
+    self.upload_gui_data.deinit(self.allocator);
+    self.upload_gui_vertices.deinit(self.allocator);
+    self.upload_text_data.deinit(self.allocator);
+    self.upload_triangle_data.deinit(self.allocator);
     self.upload_line_data.deinit(self.allocator);
 
     self.vkd.deviceWaitIdle(self.device) catch unreachable;
@@ -165,6 +196,10 @@ pub fn deinit(self: *@This()) void {
     }
 
     self.vki.destroyInstance(self.instance, null);
+}
+
+pub fn currentFrameData(self: *@This()) *FrameData {
+    return &self.frames[self.frame_index];
 }
 
 pub fn process(self: *@This()) !void {
@@ -556,18 +591,35 @@ fn createPipelines(self: *@This()) !void {
     defer self.vkd.destroyShaderModule(self.device, line_vs, null);
     const line_opaque_fs = try self.createShaderModule(&spv.line_opaque_frag);
     defer self.vkd.destroyShaderModule(self.device, line_opaque_fs, null);
+    const point_vs = try self.createShaderModule(&spv.point_vert);
+    defer self.vkd.destroyShaderModule(self.device, point_vs, null);
+    const point_fs = try self.createShaderModule(&spv.point_frag);
+    defer self.vkd.destroyShaderModule(self.device, point_fs, null);
+    const vertex_vs = try self.createShaderModule(&spv.vertex_vert);
+    defer self.vkd.destroyShaderModule(self.device, vertex_vs, null);
+    const vertex_fs = try self.createShaderModule(&spv.vertex_frag);
+    defer self.vkd.destroyShaderModule(self.device, vertex_fs, null);
+    const text_vs = try self.createShaderModule(&spv.text_vert);
+    defer self.vkd.destroyShaderModule(self.device, text_vs, null);
+    const text_fs = try self.createShaderModule(&spv.text_frag);
+    defer self.vkd.destroyShaderModule(self.device, text_fs, null);
 
     self.pipelines.resolved_depth_format = try self.findDepthImageFormat();
     self.pipelines.resolved_depth_aspect = builder.depthImageAspect(self.pipelines.resolved_depth_format);
     self.pipelines.resolved_depth_layout = builder.depthImageLayout(self.pipelines.resolved_depth_format);
 
+    const point_opaque_stage_create_info = builder.pipeline.shader_stage.vsFs(point_vs, point_fs, .{});
     const line_opaque_stage_create_info = builder.pipeline.shader_stage.vsFs(line_vs, line_opaque_fs, .{});
     const landscape_stage_create_info = builder.pipeline.shader_stage.vsFs(landscape_vs, landscape_fs, .{});
+    const triangle_stage_create_info = builder.pipeline.shader_stage.vsFs(vertex_vs, vertex_fs, .{});
+    const text_stage_create_info = builder.pipeline.shader_stage.vsFs(text_vs, text_fs, .{});
     const sprite_opaque_stage_create_info = builder.pipeline.shader_stage.vsFs(sprite_vs, sprite_opaque_fs, .{});
     const present_shader_stage_create_info = builder.pipeline.shader_stage.vsFs(fullscreen_vs, present_fs, .{});
-    const dynamic_state_create_info = builder.pipeline.dynamicState(.minimal);
-    const triangle_assembly_stage_create_info = builder.pipeline.assemblyState(.triangle_strip);
+    const dynamic_state_minimal_create_info = builder.pipeline.dynamicState(.minimal);
+    const triangle_assembly_stage_create_info = builder.pipeline.assemblyState(.triangle_list);
+    const triangle_strip_assembly_stage_create_info = builder.pipeline.assemblyState(.triangle_strip);
     const line_assembly_stage_create_info = builder.pipeline.assemblyState(.line_list);
+    const point_assembly_stage_create_info = builder.pipeline.assemblyState(.point_list);
 
     self.pipelines.descriptor_set_layout = try self.vkd.createDescriptorSetLayout(self.device, &.{
         .binding_count = builder.pipeline.dslb_bindings.len,
@@ -576,6 +628,15 @@ fn createPipelines(self: *@This()) !void {
     errdefer self.vkd.destroyDescriptorSetLayout(self.device, self.pipelines.descriptor_set_layout, null);
 
     const push_constant = builder.pipeline.pushConstantVsFs(@sizeOf(types.BasicPushConstant));
+    const push_constant_text = builder.pipeline.pushConstantVsFs(@sizeOf(types.TextPushConstant));
+
+    self.pipelines.pipeline_point.layout = try self.vkd.createPipelineLayout(self.device, &.{
+        .set_layout_count = 1,
+        .p_set_layouts = meta.asConstArray(&self.pipelines.descriptor_set_layout),
+        .push_constant_range_count = 1,
+        .p_push_constant_ranges = meta.asConstArray(&push_constant),
+    }, null);
+    errdefer self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_point.layout, null);
 
     self.pipelines.pipeline_line.layout = try self.vkd.createPipelineLayout(self.device, &.{
         .set_layout_count = 1,
@@ -593,6 +654,22 @@ fn createPipelines(self: *@This()) !void {
     }, null);
     errdefer self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_landscape.layout, null);
 
+    self.pipelines.pipeline_triangles.layout = try self.vkd.createPipelineLayout(self.device, &.{
+        .set_layout_count = 1,
+        .p_set_layouts = meta.asConstArray(&self.pipelines.descriptor_set_layout),
+        .push_constant_range_count = 1,
+        .p_push_constant_ranges = meta.asConstArray(&push_constant),
+    }, null);
+    errdefer self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_triangles.layout, null);
+
+    self.pipelines.pipeline_text.layout = try self.vkd.createPipelineLayout(self.device, &.{
+        .set_layout_count = 1,
+        .p_set_layouts = meta.asConstArray(&self.pipelines.descriptor_set_layout),
+        .push_constant_range_count = 1,
+        .p_push_constant_ranges = meta.asConstArray(&push_constant_text),
+    }, null);
+    errdefer self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_text.layout, null);
+
     self.pipelines.pipeline_sprite_opaque.layout = try self.vkd.createPipelineLayout(self.device, &.{
         .set_layout_count = 1,
         .p_set_layouts = meta.asConstArray(&self.pipelines.descriptor_set_layout),
@@ -600,6 +677,14 @@ fn createPipelines(self: *@This()) !void {
         .p_push_constant_ranges = meta.asConstArray(&push_constant),
     }, null);
     errdefer self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_sprite_opaque.layout, null);
+
+    self.pipelines.pipeline_gui.layout = try self.vkd.createPipelineLayout(self.device, &.{
+        .set_layout_count = 1,
+        .p_set_layouts = meta.asConstArray(&self.pipelines.descriptor_set_layout),
+        .push_constant_range_count = 1,
+        .p_push_constant_ranges = meta.asConstArray(&push_constant),
+    }, null);
+    errdefer self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_gui.layout, null);
 
     self.pipelines.pipeline_present.layout = try self.vkd.createPipelineLayout(self.device, &.{
         .set_layout_count = 1,
@@ -625,9 +710,26 @@ fn createPipelines(self: *@This()) !void {
         .stencil_attachment_format = .undefined,
     };
 
+    const pipeline_point_opaque_info = vk.GraphicsPipelineCreateInfo{
+        .stage_count = 2,
+        .p_dynamic_state = &dynamic_state_minimal_create_info,
+        .p_stages = &point_opaque_stage_create_info,
+        .p_vertex_input_state = &.{},
+        .p_input_assembly_state = &point_assembly_stage_create_info,
+        .p_viewport_state = &builder.pipeline.dummy_viewport_state,
+        .p_rasterization_state = &builder.pipeline.default_rasterization,
+        .p_multisample_state = &builder.pipeline.disabled_multisampling,
+        .p_depth_stencil_state = &builder.pipeline.enabled_depth_attachment,
+        .p_color_blend_state = &builder.pipeline.disabled_color_blending,
+        .layout = self.pipelines.pipeline_line.layout,
+        .p_next = &target_render_info,
+        .subpass = 0,
+        .base_pipeline_index = 0,
+    };
+
     const pipeline_line_opaque_info = vk.GraphicsPipelineCreateInfo{
         .stage_count = 2,
-        .p_dynamic_state = &dynamic_state_create_info,
+        .p_dynamic_state = &dynamic_state_minimal_create_info,
         .p_stages = &line_opaque_stage_create_info,
         .p_vertex_input_state = &.{},
         .p_input_assembly_state = &line_assembly_stage_create_info,
@@ -644,10 +746,10 @@ fn createPipelines(self: *@This()) !void {
 
     const pipeline_landscape_info = vk.GraphicsPipelineCreateInfo{
         .stage_count = 2,
-        .p_dynamic_state = &dynamic_state_create_info,
+        .p_dynamic_state = &dynamic_state_minimal_create_info,
         .p_stages = &landscape_stage_create_info,
         .p_vertex_input_state = &.{},
-        .p_input_assembly_state = &triangle_assembly_stage_create_info,
+        .p_input_assembly_state = &triangle_strip_assembly_stage_create_info,
         .p_viewport_state = &builder.pipeline.dummy_viewport_state,
         .p_rasterization_state = &builder.pipeline.default_rasterization,
         .p_multisample_state = &builder.pipeline.disabled_multisampling,
@@ -659,12 +761,46 @@ fn createPipelines(self: *@This()) !void {
         .base_pipeline_index = 0,
     };
 
-    const pipeline_sprite_opaque_info = vk.GraphicsPipelineCreateInfo{
+    const pipeline_triangle_info = vk.GraphicsPipelineCreateInfo{
         .stage_count = 2,
-        .p_dynamic_state = &dynamic_state_create_info,
-        .p_stages = &sprite_opaque_stage_create_info,
+        .p_dynamic_state = &dynamic_state_minimal_create_info,
+        .p_stages = &triangle_stage_create_info,
         .p_vertex_input_state = &.{},
         .p_input_assembly_state = &triangle_assembly_stage_create_info,
+        .p_viewport_state = &builder.pipeline.dummy_viewport_state,
+        .p_rasterization_state = &builder.pipeline.default_rasterization,
+        .p_multisample_state = &builder.pipeline.disabled_multisampling,
+        .p_depth_stencil_state = &builder.pipeline.enabled_depth_attachment,
+        .p_color_blend_state = &builder.pipeline.disabled_color_blending,
+        .layout = self.pipelines.pipeline_triangles.layout,
+        .p_next = &target_render_info,
+        .subpass = 0,
+        .base_pipeline_index = 0,
+    };
+
+    const pipeline_text_info = vk.GraphicsPipelineCreateInfo{
+        .stage_count = 2,
+        .p_dynamic_state = &dynamic_state_minimal_create_info,
+        .p_stages = &text_stage_create_info,
+        .p_vertex_input_state = &.{},
+        .p_input_assembly_state = &triangle_strip_assembly_stage_create_info,
+        .p_viewport_state = &builder.pipeline.dummy_viewport_state,
+        .p_rasterization_state = &builder.pipeline.default_rasterization,
+        .p_multisample_state = &builder.pipeline.disabled_multisampling,
+        .p_depth_stencil_state = &builder.pipeline.enabled_depth_attachment,
+        .p_color_blend_state = &builder.pipeline.disabled_color_blending,
+        .layout = self.pipelines.pipeline_text.layout,
+        .p_next = &target_render_info,
+        .subpass = 0,
+        .base_pipeline_index = 0,
+    };
+
+    const pipeline_sprite_opaque_info = vk.GraphicsPipelineCreateInfo{
+        .stage_count = 2,
+        .p_dynamic_state = &dynamic_state_minimal_create_info,
+        .p_stages = &sprite_opaque_stage_create_info,
+        .p_vertex_input_state = &.{},
+        .p_input_assembly_state = &triangle_strip_assembly_stage_create_info,
         .p_viewport_state = &builder.pipeline.dummy_viewport_state,
         .p_rasterization_state = &builder.pipeline.default_rasterization,
         .p_multisample_state = &builder.pipeline.disabled_multisampling,
@@ -676,12 +812,29 @@ fn createPipelines(self: *@This()) !void {
         .base_pipeline_index = 0,
     };
 
-    const pipeline_present_info = vk.GraphicsPipelineCreateInfo{
+    const pipeline_gui_info = vk.GraphicsPipelineCreateInfo{
         .stage_count = 2,
-        .p_dynamic_state = &dynamic_state_create_info,
-        .p_stages = &present_shader_stage_create_info,
+        .p_dynamic_state = &dynamic_state_minimal_create_info,
+        .p_stages = &triangle_stage_create_info,
         .p_vertex_input_state = &.{},
         .p_input_assembly_state = &triangle_assembly_stage_create_info,
+        .p_viewport_state = &builder.pipeline.dummy_viewport_state,
+        .p_rasterization_state = &builder.pipeline.default_rasterization,
+        .p_multisample_state = &builder.pipeline.disabled_multisampling,
+        .p_depth_stencil_state = &builder.pipeline.disabled_depth_attachment,
+        .p_color_blend_state = &builder.pipeline.disabled_color_blending,
+        .layout = self.pipelines.pipeline_gui.layout,
+        .p_next = &present_render_info,
+        .subpass = 0,
+        .base_pipeline_index = 0,
+    };
+
+    const pipeline_present_info = vk.GraphicsPipelineCreateInfo{
+        .stage_count = 2,
+        .p_dynamic_state = &dynamic_state_minimal_create_info,
+        .p_stages = &present_shader_stage_create_info,
+        .p_vertex_input_state = &.{},
+        .p_input_assembly_state = &triangle_strip_assembly_stage_create_info,
         .p_viewport_state = &builder.pipeline.dummy_viewport_state,
         .p_rasterization_state = &builder.pipeline.default_rasterization,
         .p_multisample_state = &builder.pipeline.disabled_multisampling,
@@ -692,6 +845,16 @@ fn createPipelines(self: *@This()) !void {
         .subpass = 0,
         .base_pipeline_index = 0,
     };
+
+    if (try self.vkd.createGraphicsPipelines(
+        self.device,
+        .null_handle,
+        1,
+        meta.asConstArray(&pipeline_point_opaque_info),
+        null,
+        meta.asArray(&self.pipelines.pipeline_point.handle),
+    ) != .success) return error.InitializationFailed;
+    errdefer self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_point.handle, null);
 
     if (try self.vkd.createGraphicsPipelines(
         self.device,
@@ -717,11 +880,41 @@ fn createPipelines(self: *@This()) !void {
         self.device,
         .null_handle,
         1,
+        meta.asConstArray(&pipeline_triangle_info),
+        null,
+        meta.asArray(&self.pipelines.pipeline_triangles.handle),
+    ) != .success) return error.InitializationFailed;
+    errdefer self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_triangles.handle, null);
+
+    if (try self.vkd.createGraphicsPipelines(
+        self.device,
+        .null_handle,
+        1,
+        meta.asConstArray(&pipeline_text_info),
+        null,
+        meta.asArray(&self.pipelines.pipeline_text.handle),
+    ) != .success) return error.InitializationFailed;
+    errdefer self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_text.handle, null);
+
+    if (try self.vkd.createGraphicsPipelines(
+        self.device,
+        .null_handle,
+        1,
         meta.asConstArray(&pipeline_sprite_opaque_info),
         null,
         meta.asArray(&self.pipelines.pipeline_sprite_opaque.handle),
     ) != .success) return error.InitializationFailed;
     errdefer self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_sprite_opaque.handle, null);
+
+    if (try self.vkd.createGraphicsPipelines(
+        self.device,
+        .null_handle,
+        1,
+        meta.asConstArray(&pipeline_gui_info),
+        null,
+        meta.asArray(&self.pipelines.pipeline_gui.handle),
+    ) != .success) return error.InitializationFailed;
+    errdefer self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_gui.handle, null);
 
     if (try self.vkd.createGraphicsPipelines(
         self.device,
@@ -735,13 +928,21 @@ fn createPipelines(self: *@This()) !void {
 
 fn destroyPipelines(self: *@This()) void {
     self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_present.handle, null);
+    self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_gui.handle, null);
     self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_sprite_opaque.handle, null);
+    self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_text.handle, null);
+    self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_triangles.handle, null);
     self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_landscape.handle, null);
     self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_line.handle, null);
+    self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_point.handle, null);
     self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_present.layout, null);
+    self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_gui.layout, null);
     self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_sprite_opaque.layout, null);
+    self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_text.layout, null);
+    self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_triangles.layout, null);
     self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_landscape.layout, null);
     self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_line.layout, null);
+    self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_point.layout, null);
     self.vkd.destroyDescriptorSetLayout(self.device, self.pipelines.descriptor_set_layout, null);
 }
 
@@ -976,6 +1177,33 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         .camera_pos = self.camera_pos,
     };
 
+    const push_text = types.TextPushConstant{
+        .atlas_size = push.atlas_size,
+        .target_size = push.target_size,
+        .camera_pos = self.camera_pos,
+        .base_stride = 8,
+        .stride_len = self.font.extent.width / 8,
+        .font_sheet_base = .{
+            @intCast(self.font.offset.x),
+            @intCast(self.font.offset.y),
+        },
+    };
+
+    const push_gui = types.BasicPushConstant{
+        .atlas_size = .{
+            self.atlas.image.extent.width,
+            self.atlas.image.extent.height,
+        },
+        .target_size = .{
+            self.swapchain.extent.width,
+            self.swapchain.extent.height,
+        },
+        .camera_pos = .{
+            @as(i32, @intCast(self.swapchain.extent.width / 2)),
+            @as(i32, @intCast(self.swapchain.extent.height / 2)),
+        },
+    };
+
     {
         self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_sprite_opaque.handle);
 
@@ -1067,6 +1295,51 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         );
     }
     {
+        self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_point.handle);
+
+        self.vkd.cmdBindDescriptorSets(
+            frame.command_buffer,
+            .graphics,
+            self.pipelines.pipeline_point.layout,
+            0,
+            1,
+            meta.asConstArray(&frame.descriptor_set),
+            0,
+            null,
+        );
+
+        self.vkd.cmdSetViewport(frame.command_buffer, 0, 1, meta.asConstArray(&vk.Viewport{
+            .x = 0,
+            .y = 0,
+            .width = @floatFromInt(frame.image_color.extent.width),
+            .height = @floatFromInt(frame.image_color.extent.height),
+            .min_depth = 0,
+            .max_depth = 1,
+        }));
+
+        self.vkd.cmdSetScissor(frame.command_buffer, 0, 1, meta.asConstArray(&vk.Rect2D{
+            .offset = .{ .x = 0, .y = 0 },
+            .extent = frame.image_color.extent,
+        }));
+
+        self.vkd.cmdPushConstants(
+            frame.command_buffer,
+            self.pipelines.pipeline_point.layout,
+            .{ .vertex_bit = true, .fragment_bit = true },
+            0,
+            @sizeOf(@TypeOf(push)),
+            &push,
+        );
+
+        self.vkd.cmdDraw(
+            frame.command_buffer,
+            frame.draw_point_range,
+            1,
+            frame.draw_point_index,
+            0,
+        );
+    }
+    {
         self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_landscape.handle);
 
         self.vkd.cmdBindDescriptorSets(
@@ -1105,37 +1378,179 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
 
         self.vkd.cmdDraw(frame.command_buffer, 4, frame.draw_landscape_range, 0, frame.draw_landscape_index);
     }
+    {
+        self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_triangles.handle);
+
+        self.vkd.cmdBindDescriptorSets(
+            frame.command_buffer,
+            .graphics,
+            self.pipelines.pipeline_triangles.layout,
+            0,
+            1,
+            meta.asConstArray(&frame.descriptor_set),
+            0,
+            null,
+        );
+
+        self.vkd.cmdSetViewport(frame.command_buffer, 0, 1, meta.asConstArray(&vk.Viewport{
+            .x = 0,
+            .y = 0,
+            .width = @floatFromInt(frame.image_color.extent.width),
+            .height = @floatFromInt(frame.image_color.extent.height),
+            .min_depth = 0,
+            .max_depth = 1,
+        }));
+
+        self.vkd.cmdSetScissor(frame.command_buffer, 0, 1, meta.asConstArray(&vk.Rect2D{
+            .offset = .{ .x = 0, .y = 0 },
+            .extent = frame.image_color.extent,
+        }));
+
+        self.vkd.cmdPushConstants(
+            frame.command_buffer,
+            self.pipelines.pipeline_triangles.layout,
+            .{ .vertex_bit = true, .fragment_bit = true },
+            0,
+            @sizeOf(@TypeOf(push)),
+            &push,
+        );
+
+        self.vkd.cmdDraw(frame.command_buffer, frame.draw_triangles_range, 1, frame.draw_triangles_index, 0);
+    }
+    {
+        self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_text.handle);
+
+        self.vkd.cmdBindDescriptorSets(
+            frame.command_buffer,
+            .graphics,
+            self.pipelines.pipeline_text.layout,
+            0,
+            1,
+            meta.asConstArray(&frame.descriptor_set),
+            0,
+            null,
+        );
+
+        self.vkd.cmdSetViewport(frame.command_buffer, 0, 1, meta.asConstArray(&vk.Viewport{
+            .x = 0,
+            .y = 0,
+            .width = @floatFromInt(frame.image_color.extent.width),
+            .height = @floatFromInt(frame.image_color.extent.height),
+            .min_depth = 0,
+            .max_depth = 1,
+        }));
+
+        self.vkd.cmdSetScissor(frame.command_buffer, 0, 1, meta.asConstArray(&vk.Rect2D{
+            .offset = .{ .x = 0, .y = 0 },
+            .extent = frame.image_color.extent,
+        }));
+
+        self.vkd.cmdPushConstants(
+            frame.command_buffer,
+            self.pipelines.pipeline_text.layout,
+            .{ .vertex_bit = true, .fragment_bit = true },
+            0,
+            @sizeOf(@TypeOf(push_text)),
+            &push_text,
+        );
+
+        self.vkd.cmdDraw(frame.command_buffer, 4, frame.draw_text_range, 0, frame.draw_text_index);
+    }
 
     self.vkd.cmdEndRendering(frame.command_buffer);
     self.transitionFrameImagesFinal(frame, swapchain_image_index);
     self.beginRenderingFinal(frame, swapchain_image_index);
-    self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_present.handle);
+    {
+        self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_present.handle);
 
-    self.vkd.cmdBindDescriptorSets(
-        frame.command_buffer,
-        .graphics,
-        self.pipelines.pipeline_present.layout,
-        0,
-        1,
-        meta.asConstArray(&frame.descriptor_set),
-        0,
-        null,
-    );
+        self.vkd.cmdBindDescriptorSets(
+            frame.command_buffer,
+            .graphics,
+            self.pipelines.pipeline_present.layout,
+            0,
+            1,
+            meta.asConstArray(&frame.descriptor_set),
+            0,
+            null,
+        );
 
-    const integer_scaling = integerScaling(self.swapchain.extent, frame.image_color.extent);
+        const integer_scaling = integerScaling(self.swapchain.extent, frame.image_color.extent);
 
-    self.vkd.cmdSetViewport(frame.command_buffer, 0, 1, meta.asConstArray(&vk.Viewport{
-        .x = @floatFromInt(integer_scaling.offset.x),
-        .y = @floatFromInt(integer_scaling.offset.y),
-        .width = @floatFromInt(integer_scaling.extent.width),
-        .height = @floatFromInt(integer_scaling.extent.height),
-        .min_depth = 0,
-        .max_depth = 1,
-    }));
+        self.vkd.cmdSetViewport(frame.command_buffer, 0, 1, meta.asConstArray(&vk.Viewport{
+            .x = @floatFromInt(integer_scaling.offset.x),
+            .y = @floatFromInt(integer_scaling.offset.y),
+            .width = @floatFromInt(integer_scaling.extent.width),
+            .height = @floatFromInt(integer_scaling.extent.height),
+            .min_depth = 0,
+            .max_depth = 1,
+        }));
 
-    self.vkd.cmdSetScissor(frame.command_buffer, 0, 1, meta.asConstArray(&integer_scaling));
+        self.vkd.cmdSetScissor(frame.command_buffer, 0, 1, meta.asConstArray(&integer_scaling));
 
-    self.vkd.cmdDraw(frame.command_buffer, 3, 1, 0, 0);
+        self.vkd.cmdDraw(frame.command_buffer, 3, 1, 0, 0);
+    }
+    {
+        self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_gui.handle);
+
+        self.vkd.cmdBindDescriptorSets(
+            frame.command_buffer,
+            .graphics,
+            self.pipelines.pipeline_gui.layout,
+            0,
+            1,
+            meta.asConstArray(&frame.descriptor_set),
+            0,
+            null,
+        );
+
+        self.vkd.cmdSetViewport(frame.command_buffer, 0, 1, meta.asConstArray(&vk.Viewport{
+            .x = 0,
+            .y = 0,
+            .width = @floatFromInt(self.swapchain.extent.width),
+            .height = @floatFromInt(self.swapchain.extent.height),
+            .min_depth = 0,
+            .max_depth = 1,
+        }));
+
+        self.vkd.cmdSetScissor(frame.command_buffer, 0, 1, meta.asConstArray(&vk.Rect2D{
+            .offset = .{ .x = 0, .y = 0 },
+            .extent = self.swapchain.extent,
+        }));
+
+        self.vkd.cmdPushConstants(
+            frame.command_buffer,
+            self.pipelines.pipeline_gui.layout,
+            .{ .vertex_bit = true, .fragment_bit = true },
+            0,
+            @sizeOf(@TypeOf(push_gui)),
+            &push_gui,
+        );
+
+        for (frame.draw_cmd_gui_slice) |cmds| {
+            switch (cmds) {
+                .scissor => |s_in| {
+                    var s = s_in;
+
+                    inline for (0..2) |i| if (s.offset[i] < 0) {
+                        s.extent[i] -= @intCast(-s.offset[i]);
+                        s.offset[i] = 0;
+                    };
+
+                    self.vkd.cmdSetScissor(frame.command_buffer, 0, 1, meta.asConstArray(&vk.Rect2D{
+                        .offset = .{ .x = s.offset[0], .y = s.offset[1] },
+                        .extent = .{ .width = s.extent[0], .height = s.extent[1] },
+                    }));
+                },
+                .triangles => |t| {
+                    self.vkd.cmdDraw(frame.command_buffer, t.end - t.begin, 1, t.begin, 0);
+                },
+                else => {
+                    @panic("Unimplemented");
+                },
+            }
+        }
+    }
+
     self.vkd.cmdEndRendering(frame.command_buffer);
     self.transitionFrameImagesPresent(frame, swapchain_image_index);
 }
@@ -1343,6 +1758,26 @@ pub fn scheduleLine(self: *@This(), points: [2]@Vector(2, f32), color: @Vector(4
     });
 }
 
+pub fn scheduleVertex(self: *@This(), vertex: types.VertexData) !void {
+    try self.upload_triangle_data.append(self.allocator, vertex);
+}
+
+pub inline fn scheduleGuiChar(self: *@This(), data: types.TextData) !void {
+    try push_commands.pushGuiChar(self, data);
+}
+
+pub inline fn scheduleGuiScissor(self: *@This(), scissor: types.GuiHeader.Scissor) !void {
+    return push_commands.pushGuiScissor(self, scissor);
+}
+
+pub inline fn scheduleGuiTriangle(self: *@This(), vertices: []const types.VertexData) !void {
+    return push_commands.pushGuiTriangle(self, vertices);
+}
+
+pub inline fn scheduleGuiLine(self: *@This(), vertices: []const types.VertexData) !void {
+    return push_commands.pushGuiLine(self, vertices);
+}
+
 fn uploadScheduledData(self: *@This(), frame: *FrameData) !void {
     var current_index: u32 = 0;
 
@@ -1362,39 +1797,41 @@ fn uploadScheduledData(self: *@This(), frame: *FrameData) !void {
     frame.draw_landscape_range = self.frames[self.frame_index].landscape.active_sets.len;
     current_index += self.frames[self.frame_index].landscape.active_sets.len;
 
-    var prng = std.rand.DefaultPrng.init(@intCast(std.time.nanoTimestamp() & 0xffffffffffffffff));
-    var position: [5]@Vector(2, f32) = undefined;
-    const point: [5]@Vector(2, f32) = .{
-        .{ -40, -80 },
-        .{ -20, -60 },
-        .{ -30, -53 },
-        .{ -25, -46 },
-        .{ -10, -30 },
-    };
+    // Draw points
+    frame.draw_point_index = current_index;
+    frame.draw_point_range = @intCast(self.upload_line_data.items.len * 2);
+    {
+        const begin = current_index;
 
-    for (position[0..]) |*pos| pos.* = .{
-        prng.random().floatNorm(f32),
-        prng.random().floatNorm(f32),
-    };
+        for (0..self.upload_line_data.items.len) |i| {
+            const dst_a = &frame.draw_buffer.map[begin + i * 2 + 0];
+            const dst_b = &frame.draw_buffer.map[begin + i * 2 + 1];
 
-    const lines_count = 4;
+            dst_a.point = .{
+                .point = .{
+                    self.upload_line_data.items[i].points[0][0],
+                    self.upload_line_data.items[i].points[0][1],
+                    self.upload_line_data.items[i].depth,
+                },
+                .color = self.upload_line_data.items[i].color,
+            };
 
-    for (frame.draw_buffer.map[current_index .. current_index + lines_count], 0..) |*cmd, i| {
-        cmd.line = .{
-            .color = .{ 0.7, 0.8, 1.0, 1.0 },
-            .alpha_gradient = .{ 1.0, 1.0 },
-            .depth = 0.5,
-            .points = .{
-                position[i + 0] + point[i + 0],
-                position[i + 1] + point[i + 1],
-            },
-        };
+            dst_b.point = .{
+                .point = .{
+                    self.upload_line_data.items[i].points[1][0],
+                    self.upload_line_data.items[i].points[1][1],
+                    self.upload_line_data.items[i].depth,
+                },
+                .color = self.upload_line_data.items[i].color,
+            };
+        }
+
+        current_index += @intCast(self.upload_line_data.items.len * 2);
     }
 
-    // Upload scheduled lines
+    // Draw lines
     frame.draw_line_index = current_index;
     frame.draw_line_range = @intCast(self.upload_line_data.items.len);
-
     {
         const begin = current_index;
         const end = begin + self.upload_line_data.items.len;
@@ -1402,8 +1839,60 @@ fn uploadScheduledData(self: *@This(), frame: *FrameData) !void {
         for (self.upload_line_data.items, frame.draw_buffer.map[begin..end]) |src, *dst| dst.line = src;
 
         current_index += @intCast(self.upload_line_data.items.len);
-        self.upload_line_data.clearRetainingCapacity();
     }
+
+    self.upload_line_data.clearRetainingCapacity();
+
+    // Draw Nk Rect Filled (actually just draw some triangles for now)
+    std.debug.assert(self.upload_triangle_data.items.len % 3 == 0);
+    frame.draw_triangles_index = current_index;
+    frame.draw_triangles_range = @intCast(self.upload_triangle_data.items.len);
+    {
+        const begin = current_index;
+        const end = begin + self.upload_triangle_data.items.len;
+
+        for (self.upload_triangle_data.items, frame.draw_buffer.map[begin..end]) |src, *dst| dst.vertex = src;
+
+        current_index += @intCast(self.upload_triangle_data.items.len);
+    }
+
+    self.upload_triangle_data.clearRetainingCapacity();
+
+    // Draw text data
+    frame.draw_text_index = current_index;
+    frame.draw_text_range = @intCast(self.upload_text_data.items.len);
+    {
+        const begin = current_index;
+        const end = begin + self.upload_text_data.items.len;
+
+        for (self.upload_text_data.items, frame.draw_buffer.map[begin..end]) |src, *dst| dst.character = src;
+
+        current_index += @intCast(self.upload_text_data.items.len);
+    }
+
+    self.upload_text_data.clearRetainingCapacity();
+
+    // Adjust and draw gui data
+    for (self.upload_gui_data.items[0..]) |*item| switch (item.*) {
+        .triangles => {
+            item.triangles.begin += current_index;
+            item.triangles.end += current_index;
+        },
+        else => {},
+    };
+    {
+        const begin = current_index;
+        const end = begin + self.upload_gui_vertices.items.len;
+
+        for (self.upload_gui_vertices.items, frame.draw_buffer.map[begin..end]) |src, *dst| dst.vertex = src;
+
+        current_index += @intCast(self.upload_gui_vertices.items.len);
+    }
+
+    // Does not deallocate buffer, will not be written until the next frame, so this is ok to do.
+    frame.draw_cmd_gui_slice = self.upload_gui_data.items;
+    self.upload_gui_data.clearRetainingCapacity();
+    self.upload_gui_vertices.clearRetainingCapacity();
 }
 
 fn floatToSnorm16(value: f32, comptime range: f32) i16 {

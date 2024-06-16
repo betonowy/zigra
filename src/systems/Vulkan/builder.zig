@@ -3,12 +3,12 @@ const builtin = @import("builtin");
 const glfw = @import("glfw");
 
 const vk = @import("./vk.zig");
-const types = @import("./vulkan_types.zig");
-const initialization = @import("./vulkan_init.zig");
-const meta = @import("./meta.zig");
-const Atlas = @import("VulkanAtlas.zig");
-const Landscape = @import("VulkanLandscape.zig");
-const spv = @import("shaders/spv.zig");
+const types = @import("types.zig");
+const initialization = @import("init.zig");
+const meta = @import("../../meta.zig");
+const Atlas = @import("Atlas.zig");
+const Landscape = @import("Landscape.zig");
+const spv = @import("../../shaders/spv.zig");
 
 const stb = @cImport(@cInclude("stb/stb_image.h"));
 
@@ -75,12 +75,12 @@ pub const pipeline = struct {
     };
 
     pub fn dynamicState(comptime info_type: DynamicStateType) vk.PipelineDynamicStateCreateInfo {
-        const minimal_state = [_]vk.DynamicState{ .viewport, .scissor };
+        const minimal_states = [_]vk.DynamicState{ .viewport, .scissor };
 
         return switch (info_type) {
             .minimal => .{
-                .dynamic_state_count = minimal_state.len,
-                .p_dynamic_states = &minimal_state,
+                .dynamic_state_count = minimal_states.len,
+                .p_dynamic_states = &minimal_states,
             },
         };
     }
@@ -139,7 +139,7 @@ pub const pipeline = struct {
     pub const enabled_depth_attachment = vk.PipelineDepthStencilStateCreateInfo{
         .depth_test_enable = vk.TRUE,
         .depth_write_enable = vk.TRUE,
-        .depth_compare_op = .less,
+        .depth_compare_op = .less_or_equal,
         .depth_bounds_test_enable = vk.FALSE,
         .stencil_test_enable = vk.FALSE,
         .front = undefined,

@@ -1,16 +1,18 @@
 const std = @import("std");
 const stb = @cImport(@cInclude("stb/stb_image.h"));
 
-const Cell = @import("./landscape_cell_types.zig").Cell;
-const cell_types = @import("./landscape_cell_types.zig").cell_types;
+const sand_sim_defs = @import("sand_sim_definitions.zig");
+const Cell = sand_sim_defs.Cell;
+const cell_types = sand_sim_defs.cell_types;
 
 pub const tile_size = 128;
+pub const tile_size_v2 = @Vector(2, i32){ tile_size, tile_size };
 
 const BoundType = enum { Min, Max };
 
 test "Cell:is_one_byte" {
-    comptime try std.testing.expectEqual(1, @sizeOf(Cell));
-    comptime try std.testing.expectEqual(8, @bitSizeOf(Cell));
+    comptime try std.testing.expectEqual(2, @sizeOf(Cell));
+    comptime try std.testing.expectEqual(16, @bitSizeOf(Cell));
 }
 
 pub const Rgba = packed struct {
@@ -387,7 +389,6 @@ pub fn tileCountForArea(_: *@This(), extent: NodeExtent) u32 {
     const aligner = ~((@as(i32, 1) << std.math.log2_int(u16, tile_size)) - 1);
 
     const aligner_v2: @Vector(2, i32) = @splat(aligner);
-    const tile_size_v2: @Vector(2, i32) = @splat(tile_size);
 
     const start_coord = extent.coord & aligner_v2;
     const end_coord = ((extent.coord + @as(@Vector(2, i32), @intCast(extent.size)) - @Vector(2, i32){ 1, 1 }) & aligner_v2) + tile_size_v2;
@@ -514,9 +515,10 @@ const LandscapeView = struct {
         return try self.tryCacheRefresh(pos) orelse error.PositionNotActive;
     }
 
-    pub fn get(self: *@This(), pos: @Vector(2, i32)) Cell {
+    pub fn get(self: *@This(), pos: @Vector(2, i32)) !Cell {
         if (self.tryCacheOnly(pos)) |cell| return cell.*;
-        return self.tryCacheRefresh(pos) orelse cell_types.air;
+        if (try self.tryCacheRefresh(pos)) |cell| return cell.*;
+        return cell_types.air;
     }
 
     fn tryCacheOnly(self: *@This(), pos: @Vector(2, i32)) ?*Cell {
@@ -562,7 +564,7 @@ const LandscapeView = struct {
     }
 };
 
-pub fn simulate(self: *@This()) !void {
+pub fn simulateCells(self: *@This()) !void {
     self.iteration +%= 1;
 
     const sim_extent = NodeExtent{
@@ -620,7 +622,7 @@ pub fn simulate(self: *@This()) !void {
             }
 
             tile_row_is_active = true;
-            try simulateView(&view, center, row_dir, row_rand);
+            try self.simulateCellView(&view, center, row_dir, row_rand);
             ix += 1;
         }
 
@@ -686,17 +688,17 @@ const SwapMove = enum {
     }
 };
 
-fn simulateView(view: *LandscapeView, pos: @Vector(2, i32), dir_order: DirOrder, rand: usize) !void {
+fn simulateCellView(self: *@This(), view: *LandscapeView, pos: @Vector(2, i32), dir_order: DirOrder, rand: usize) !void {
     const current = try view.getMutable(pos);
 
     switch (current.type) {
-        .powder => try simulatePowder(view, current, pos, dir_order),
-        .liquid => try simulateLiquid(view, current, pos, dir_order, rand),
+        .powder => try self.simulatePowder(view, current, pos, dir_order),
+        .liquid => try self.simulateLiquid(view, current, pos, dir_order, rand),
         else => {},
     }
 }
 
-fn simulatePowder(view: *LandscapeView, current: *Cell, pos: @Vector(2, i32), row_order: DirOrder) !void {
+fn simulatePowder(_: *@This(), view: *LandscapeView, current: *Cell, pos: @Vector(2, i32), row_order: DirOrder) !void {
     const swap_orders: []const SwapMove = switch (row_order) {
         .left => &.{ .swap_d, .swap_ld, .swap_rd },
         .right => &.{ .swap_d, .swap_rd, .swap_ld },
@@ -712,7 +714,16 @@ fn simulatePowder(view: *LandscapeView, current: *Cell, pos: @Vector(2, i32), ro
     }
 }
 
-fn simulateLiquid(view: *LandscapeView, current: *Cell, pos: @Vector(2, i32), dir_order: DirOrder, rand: usize) !void {
+fn simulateLiquid(self: *@This(), view: *LandscapeView, current_in: *Cell, pos_in: @Vector(2, i32), dir_order: DirOrder, rand: usize) !void {
+    var pos = pos_in;
+    var current = current_in;
+
+    // if (current_in.property_2 == @as(u4, @truncate(self.iteration))) {
+    //     return;
+    // }
+
+    // current_in.property_2 = @as(u4, @truncate(self.iteration));
+
     { // trivial case: free spot below
         const other_pos = pos + SwapMove.swap_d.toOffset();
         const other = try view.getMutable(other_pos);
@@ -742,9 +753,30 @@ fn simulateLiquid(view: *LandscapeView, current: *Cell, pos: @Vector(2, i32), di
                 (try view.getTile(pos)).?.touch();
                 (try view.getTile(other_pos)).?.touch();
 
-                current.property_1 +%= 1;
+                const cell_below_other = try view.get(other_pos + SwapMove.swap_d.toOffset());
 
-                return current.swap(other);
+                if (cell_below_other.type == .air) {
+                    current.property_1 = 0;
+                    current.property_2 = 0;
+
+                    var sfc = std.rand.Sfc64.init(rand +% @as(u64, @bitCast(pos_in)));
+
+                    try self.pushParticle(.{
+                        .pos = @floatFromInt(other_pos),
+                        .vel = .{ sfc.random().floatNorm(f32) * 5, 30 + sfc.random().floatNorm(f32) * 5 },
+                        .cell = current.*,
+                    });
+
+                    const remember_bkg = current.has_bkg;
+                    current.* = cell_types.air;
+                    current.has_bkg = remember_bkg;
+                    return;
+                } else {
+                    current.property_1 +%= 1;
+                    current.swap(other);
+                    pos = other_pos;
+                    current = other;
+                }
             },
             else => {},
         }
@@ -867,6 +899,83 @@ fn simulateLiquid(view: *LandscapeView, current: *Cell, pos: @Vector(2, i32), di
         current.property_1 -= 1;
         (try view.getTile(pos)).?.touch();
     }
+}
+
+fn pushParticle(self: *@This(), particle: CellParticle) !void {
+    try self.particles.append(self.allocator, particle);
+}
+
+pub fn simulateParticles(self: *@This(), delta: f32) !void {
+    var i: usize = 0;
+
+    var view = self.getView();
+
+    while (i < self.particles.items.len) {
+        const current = &self.particles.items[i];
+
+        const cell_before_move = try view.getMutable(@intFromFloat(current.pos));
+
+        if (cell_before_move.type != .air) {
+            try self.spawnCell(&view, self.particles.swapRemove(i));
+            continue;
+        }
+
+        current.pos += current.vel * @as(@Vector(2, f32), @splat(delta));
+        current.vel += @Vector(2, f32){ 0, 100 * delta };
+
+        i += 1;
+    }
+}
+
+pub fn spawnCell(_: *@This(), view: *LandscapeView, particle: CellParticle) !void {
+    const max_search_len = 1024;
+    var origin_pos: @Vector(2, i32) = @intFromFloat(particle.pos);
+
+    const step_patterns = [_]@Vector(2, i32){
+        .{ 1, 0 },
+        .{ 0, 1 },
+        .{ -1, 0 },
+        .{ 0, -1 },
+    };
+
+    const step_len_change_period = 2;
+    var step_len_change_progress: usize = 0;
+    var step_pattern_index: usize = 0;
+    var step_progress: usize = 0;
+    var step_len: usize = 1;
+
+    for (0..max_search_len) |_| {
+        step_progress += 1;
+
+        if (step_progress == step_len) {
+            step_progress = 0;
+            step_len_change_progress += 1;
+            step_pattern_index += 1;
+            if (step_pattern_index == step_patterns.len) step_pattern_index = 0;
+        }
+
+        if (step_len_change_progress == step_len_change_period) {
+            step_len_change_progress = 0;
+            step_len += 1;
+        }
+
+        origin_pos += step_patterns[step_pattern_index];
+
+        const cell = try view.getMutable(origin_pos);
+
+        if (cell.type != .air) continue;
+
+        const tile = try view.getTile(origin_pos);
+        tile.?.touch();
+
+        const remember_bkg = cell.has_bkg;
+        cell.* = particle.cell;
+        cell.has_bkg = remember_bkg;
+        return;
+    }
+
+    std.log.err("Particle lost!: {any}, max_search_len: {}, origin_pos: {}", .{ particle, max_search_len, origin_pos });
+    unreachable;
 }
 
 test "Minimal lifetime" {

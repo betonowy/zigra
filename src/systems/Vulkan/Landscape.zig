@@ -1,8 +1,8 @@
 const std = @import("std");
 const vk = @import("vk.zig");
-const types = @import("vulkan_types.zig");
-const Backend = @import("VulkanBackend.zig");
-const meta = @import("meta.zig");
+const types = @import("types.zig");
+const Backend = @import("Backend.zig");
+const meta = @import("../../meta.zig");
 const stb = @cImport(@cInclude("stb/stb_image.h"));
 
 pub const image_size = 128;
@@ -10,7 +10,7 @@ const tiles_width_count = Backend.frame_target_width / image_size + 2;
 const tiles_height_count = Backend.frame_target_height / image_size + 2;
 pub const tile_count = tiles_width_count * tiles_height_count;
 
-const Tile = struct {
+pub const Tile = struct {
     upload_image: types.ImageData,
     device_image: types.ImageData,
     coord: @Vector(2, i16),
@@ -19,12 +19,12 @@ const Tile = struct {
     table_index: u32,
 };
 
-const ActiveSet = struct {
+pub const ActiveSet = struct {
     tile: *Tile,
     is_reused: bool,
 };
 
-const UploadSet = struct {
+pub const UploadSet = struct {
     tile: *Tile,
     data: []const u8,
 };

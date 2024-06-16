@@ -10,3 +10,6 @@
 [submodule "thirdparty/stb/stb"]
 	path = thirdparty/stb/stb
 	url = https://github.com/nothings/stb.git
+[submodule "thirdparty/nuklear/Nuklear"]
+	path = thirdparty/nuklear/Nuklear
+	url = https://github.com/Immediate-Mode-UI/Nuklear.git

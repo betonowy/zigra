@@ -1,7 +1,7 @@
 const std = @import("std");
 
-const cell_types = @import("../src/landscape_cell_types.zig").cell_types;
-const types = @import("../src/vulkan_types.zig");
+const cell_types = @import("../src/systems/World/sand_sim_definitions.zig").cell_types;
+const types = @import("../src/systems/Vulkan/types.zig");
 
 pub fn step(b: *std.Build) *std.Build.Step {
     var build_step = b.step("glsl_gen", "Generate glsl code");
@@ -22,6 +22,7 @@ fn make(build_step: *std.Build.Step, parent_node: *std.Progress.Node) anyerror!v
     build_step.result_cached = true;
 
     if (try genPushConstant(b, types.BasicPushConstant, &arena, &node)) build_step.result_cached = false;
+    if (try genPushConstant(b, types.TextPushConstant, &arena, &node)) build_step.result_cached = false;
     if (try genLandscapeCells(b, &arena, &node)) build_step.result_cached = false;
 }
 
@@ -62,7 +63,7 @@ fn toGlslTypeName(comptime T: type) []const u8 {
     comptime std.debug.assert(@alignOf(T) >= 4);
 
     return switch (@typeInfo(T)) {
-        .Type => simpleGlslName(T),
+        .Int, .Float => simpleGlslName(T),
         .Vector => |v| vectorGlslName(v),
         else => unreachable,
     };

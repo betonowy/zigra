@@ -1,8 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const meta = @import("./meta.zig");
-const vk = @import("./vk.zig");
+const meta = @import("../../meta.zig");
+const vk = @import("vk.zig");
 
 pub const Pipeline = struct {
     handle: vk.Pipeline = .null_handle,
@@ -10,10 +10,16 @@ pub const Pipeline = struct {
 };
 
 pub const Pipelines = struct {
-    pipeline_present: Pipeline = .{},
     pipeline_sprite_opaque: Pipeline = .{},
     pipeline_landscape: Pipeline = .{},
     pipeline_line: Pipeline = .{},
+    pipeline_point: Pipeline = .{},
+    pipeline_triangles: Pipeline = .{},
+    pipeline_text: Pipeline = .{},
+
+    pipeline_present: Pipeline = .{},
+    pipeline_gui: Pipeline = .{},
+
     descriptor_set_layout: vk.DescriptorSetLayout = .null_handle,
     resolved_depth_format: vk.Format = .undefined,
     resolved_depth_layout: vk.ImageLayout = .undefined,
@@ -24,6 +30,15 @@ pub const BasicPushConstant = extern struct {
     atlas_size: @Vector(2, u32),
     target_size: @Vector(2, u32),
     camera_pos: @Vector(2, i32),
+};
+
+pub const TextPushConstant = extern struct {
+    atlas_size: @Vector(2, u32),
+    target_size: @Vector(2, u32),
+    camera_pos: @Vector(2, i32),
+    font_sheet_base: @Vector(2, u32),
+    base_stride: u32,
+    stride_len: u32,
 };
 
 pub const SpriteData = extern struct {
@@ -64,12 +79,26 @@ pub const LandscapeData = extern struct {
     depth: f32,
 };
 
+pub const VertexData = extern struct {
+    point: @Vector(3, f32),
+    color: @Vector(4, f16),
+    uv: @Vector(2, f32),
+};
+
+pub const TextData = extern struct {
+    offset: @Vector(3, f32),
+    color: @Vector(4, f16),
+    char: u32,
+};
+
 pub const DrawData = extern union {
     sprite: SpriteData,
     line: LineData,
     point: PointData,
     background: BackgroundData,
     landscape: LandscapeData,
+    vertex: VertexData,
+    character: TextData,
 };
 
 test "DrawDataLayout" {
@@ -79,20 +108,41 @@ test "DrawDataLayout" {
     try comptime std.testing.expectEqual(32, @sizeOf(PointData));
     try comptime std.testing.expectEqual(32, @sizeOf(BackgroundData));
     try comptime std.testing.expectEqual(24, @sizeOf(LandscapeData));
+    try comptime std.testing.expectEqual(32, @sizeOf(VertexData));
+    try comptime std.testing.expectEqual(32, @sizeOf(TextData));
 
     try comptime std.testing.expectEqual(16, @alignOf(DrawData));
     try comptime std.testing.expectEqual(8, @alignOf(SpriteData));
     try comptime std.testing.expectEqual(8, @alignOf(LineData));
     try comptime std.testing.expectEqual(16, @alignOf(PointData));
     try comptime std.testing.expectEqual(8, @alignOf(BackgroundData));
+    try comptime std.testing.expectEqual(16, @alignOf(VertexData));
+    try comptime std.testing.expectEqual(16, @alignOf(TextData));
 
     try comptime std.testing.expectEqual(24, @sizeOf(BasicPushConstant));
+    try comptime std.testing.expectEqual(32, @sizeOf(TextPushConstant));
 
     const data: DrawData = undefined; // extern unions are never type checked
     try std.testing.expectEqual(@intFromPtr(&data), @intFromPtr(&data.sprite));
     try std.testing.expectEqual(@intFromPtr(&data), @intFromPtr(&data.line));
     try std.testing.expectEqual(@intFromPtr(&data), @intFromPtr(&data.point));
 }
+
+pub const GuiHeader = union(enum) {
+    pub const Scissor = struct {
+        extent: @Vector(2, u32),
+        offset: @Vector(2, i32),
+    };
+
+    pub const Indices = struct {
+        begin: u32,
+        end: u32,
+    };
+
+    scissor: Scissor,
+    triangles: Indices,
+    lines: Indices,
+};
 
 pub fn BufferVisible(comptime T: type) type {
     return struct {
@@ -306,4 +356,5 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .cmdPushConstants = true,
     .cmdClearDepthStencilImage = true,
     .cmdCopyImage2 = true,
+    .cmdSetPrimitiveTopology = true,
 });
