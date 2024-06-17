@@ -26,7 +26,7 @@ fn vulkanIncludeDir(b: *std.Build) []const u8 {
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const profiling = b.option(bool, "profile", "Enable profiling features.");
+    const profiling = b.option(bool, "profiling", "Enable profiling features.");
     const debug_ui = b.option(bool, "debug-ui", "Enable debug ui tools.");
 
     const build_options = b.addOptions();

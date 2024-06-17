@@ -20,12 +20,12 @@ tick_drift_ns: i64 = 0,
 ticks_this_checkpoint: u64 = 0,
 
 perf: struct {
-    fps_last: f32,
+    fps_now: f32,
     fps_avg: f32,
     fps_min: f32,
     fps_max: f32,
 
-    frame_time_ms_last: f32,
+    frame_time_ms_now: f32,
     frame_time_ms_avg: f32,
     frame_time_ms_min: f32,
     frame_time_ms_max: f32,
@@ -91,11 +91,11 @@ pub fn checkpointDelay(self: *const @This()) f32 {
 
 fn calculatePerfCounters(self: *@This()) void {
     self.perf_internal.frame_times[self.perf_internal.index_current] = @floatFromInt(self.time_checkpoint_delay_ns);
-    self.perf_internal.index_extent = @max(self.perf_internal.index_current, self.perf_internal.index_extent);
+    self.perf_internal.index_extent = @max(self.perf_internal.index_current + 1, self.perf_internal.index_extent);
 
-    self.perf.frame_time_ms_last = self.perf_internal.frame_times[self.perf_internal.index_current];
-    self.perf.frame_time_ms_max = self.perf.frame_time_ms_last;
-    self.perf.frame_time_ms_min = self.perf.frame_time_ms_last;
+    self.perf.frame_time_ms_now = self.perf_internal.frame_times[self.perf_internal.index_current];
+    self.perf.frame_time_ms_max = self.perf.frame_time_ms_now;
+    self.perf.frame_time_ms_min = self.perf.frame_time_ms_now;
     self.perf.frame_time_ms_avg = 0;
 
     for (self.perf_internal.frame_times[0..self.perf_internal.index_extent]) |n| {
@@ -107,12 +107,12 @@ fn calculatePerfCounters(self: *@This()) void {
     self.perf.frame_time_ms_avg /= @floatFromInt(self.perf_internal.index_extent);
     self.perf_internal.index_current = (self.perf_internal.index_current + 1) % self.perf_internal.frame_times.len;
 
-    self.perf.fps_last = @as(f32, std.time.ns_per_s) / self.perf.frame_time_ms_last;
+    self.perf.fps_now = @as(f32, std.time.ns_per_s) / self.perf.frame_time_ms_now;
     self.perf.fps_max = @as(f32, std.time.ns_per_s) / self.perf.frame_time_ms_min;
     self.perf.fps_min = @as(f32, std.time.ns_per_s) / self.perf.frame_time_ms_max;
     self.perf.fps_avg = @as(f32, std.time.ns_per_s) / self.perf.frame_time_ms_avg;
 
-    self.perf.frame_time_ms_last *= (1.0 / @as(f32, std.time.ns_per_ms));
+    self.perf.frame_time_ms_now *= (1.0 / @as(f32, std.time.ns_per_ms));
     self.perf.frame_time_ms_max *= (1.0 / @as(f32, std.time.ns_per_ms));
     self.perf.frame_time_ms_min *= (1.0 / @as(f32, std.time.ns_per_ms));
     self.perf.frame_time_ms_avg *= (1.0 / @as(f32, std.time.ns_per_ms));

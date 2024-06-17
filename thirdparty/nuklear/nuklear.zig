@@ -117,6 +117,26 @@ pub fn buttonLabel(ctx: *Context, title: [*:0]const u8) bool {
     return c.nk_button_label(ctx, title) == c.nk_true;
 }
 
+pub fn rule(ctx: *Context, color: Color) void {
+    c.nk_rule_horizontal(ctx, color, c.nk_false);
+}
+
+pub fn buttonLabelColored(
+    ctx: *Context,
+    title: [*:0]const u8,
+    color_normal: c.nk_color,
+    color_hover: c.nk_color,
+    color_active: c.nk_color,
+) bool {
+    if (c.nk_style_push_style_item(ctx, &ctx.style.button.normal, c.nk_style_item_color(color_normal)) == c.nk_false) unreachable;
+    if (c.nk_style_push_style_item(ctx, &ctx.style.button.hover, c.nk_style_item_color(color_hover)) == c.nk_false) unreachable;
+    if (c.nk_style_push_style_item(ctx, &ctx.style.button.active, c.nk_style_item_color(color_active)) == c.nk_false) unreachable;
+
+    defer for (0..3) |_| if (c.nk_style_pop_style_item(ctx) == c.nk_false) unreachable;
+
+    return c.nk_button_label(ctx, title) == c.nk_true;
+}
+
 pub fn label(ctx: *Context, title: [*:0]const u8, flags: c.nk_flags) void {
     c.nk_label(ctx, title, flags);
 }
