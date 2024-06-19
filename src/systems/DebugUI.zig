@@ -16,6 +16,16 @@ profiling_ctx_map: CtxHashMap,
 profiling_system_ctx_map: SysCtxHashMap,
 
 state: WindowState = .General,
+pref_chart_height: i32 = 50,
+pref_chart_type: ChartType = .Scanning,
+
+const chart_base_color = nk.Color{ .r = 0x60, .g = 0x00, .b = 0x00, .a = 0xff };
+const chart_active_color = nk.Color{ .r = 0xa0, .g = 0x40, .b = 0x40, .a = 0xff };
+
+const ChartType = enum {
+    Running,
+    Scanning,
+};
 
 const CtxHashMap = std.StringHashMap(CallProfilingCtx);
 const SysCtxHashMap = std.StringHashMap(CallProfilingCtx);
@@ -24,16 +34,19 @@ pub const WindowState = enum {
     Disabled,
     General,
     Systems,
+    Preferences,
 };
 
 const CallProfilingCtx = struct {
-    times_ms: [256]f32 = undefined,
+    times_ms: [256]f32 = std.mem.zeroes([256]f32),
     index_current: usize = 0,
     index_extent: usize = 0,
     time_updated: u64 = 0,
+    all_time_max: f32 = 0,
 
     pub fn push(self: *@This(), ns: u64, timestamp: u64) void {
-        self.times_ms[self.index_current] = nsToMs(ns);
+        const value = nsToMs(ns);
+        self.times_ms[self.index_current] = value;
         self.index_extent = @max(self.index_current + 1, self.index_extent);
         self.index_current = (self.index_current + 1) % self.times_ms.len;
 
@@ -52,7 +65,7 @@ const CallProfilingCtx = struct {
         max: f32,
     };
 
-    pub fn stats(self: *const @This()) Stats {
+    pub fn stats(self: *@This()) Stats {
         const now = self.times_ms[self.index_current];
         var min = now;
         var max = now;
@@ -65,6 +78,13 @@ const CallProfilingCtx = struct {
         }
 
         avg *= (1.0 / @as(f32, @floatFromInt(self.index_extent)));
+
+        self.all_time_max = @max(self.all_time_max, max);
+
+        const target_a = (max - avg) * 2 + avg;
+        const target_b = avg * 1.5;
+
+        self.all_time_max = std.math.lerp(self.all_time_max, @max(target_a, target_b), 0.01);
 
         return .{ .now = now, .avg = avg, .min = min, .max = max };
     }
@@ -165,12 +185,13 @@ pub fn processUi(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void 
     if (nk.begin(
         nk_ctx,
         "Debug UI",
-        .{ .x = 10, .y = 10, .w = 300, .h = 400 },
+        .{ .x = 10, .y = 10, .w = 340, .h = 400 },
         &.{ .closeable, .movable, .scalable },
     )) {
-        nk.layoutRowStatic(nk_ctx, 20, 80, 2);
-        if (processUi_tabButton(nk_ctx, "General", self.state == .General)) self.state = .General;
-        if (processUi_tabButton(nk_ctx, "Systems", self.state == .Systems)) self.state = .Systems;
+        nk.layoutRowStatic(nk_ctx, 20, 100, 3);
+        if (self.processUi_tabButton(nk_ctx, "General", self.state == .General)) self.state = .General;
+        if (self.processUi_tabButton(nk_ctx, "Systems", self.state == .Systems)) self.state = .Systems;
+        if (self.processUi_tabButton(nk_ctx, "Preferences", self.state == .Preferences)) self.state = .Preferences;
 
         nk.layoutRowDynamic(nk_ctx, 1, 1);
         nk.rule(nk_ctx, nk_ctx.style.text.color);
@@ -178,6 +199,7 @@ pub fn processUi(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void 
         switch (self.state) {
             .General => try self.processUi_General(ctx),
             .Systems => try self.processUi_Systems(ctx),
+            .Preferences => try self.processUi_Preferences(ctx),
             .Disabled => {},
         }
     } else {
@@ -186,7 +208,8 @@ pub fn processUi(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void 
     nk.end(nk_ctx);
 }
 
-fn processUi_tabButton(nk_ctx: *nk.Context, title: [*:0]const u8, selected: bool) bool {
+fn processUi_tabButton(self: *@This(), nk_ctx: *nk.Context, title: [*:0]const u8, selected: bool) bool {
+    _ = self; // autofix
     const normal = nk.Color{ .r = 0x20, .g = 0x60, .b = 0x10, .a = 0xff };
     const hover = nk.Color{ .r = 0x20, .g = 0x40, .b = 0x10, .a = 0xff };
     const active = nk.Color{ .r = 0x20, .g = 0x20, .b = 0x10, .a = 0xff };
@@ -203,7 +226,7 @@ fn processUi_General(self: *@This(), ctx: *zigra.Context) !void {
     if (nk.treeBeginHashed(nk_ctx, .node, "Performance", @src(), 0, .maximized)) {
         defer nk.treePop(nk_ctx);
 
-        var buf: [256]u8 = undefined;
+        var buf: [64]u8 = undefined;
         const perf = ctx.systems.time.perf;
 
         nk.label(nk_ctx, try std.fmt.bufPrintZ(buf[0..], "Frame time (avg): {d:.1} ms", .{perf.frame_time_ms_avg}), nk.text_left);
@@ -225,7 +248,7 @@ fn processUi_General(self: *@This(), ctx: *zigra.Context) !void {
         }
 
         for (self.view_call_profiling_data[0..], 0..) |data, i| {
-            try processUi_statsEntry(nk_ctx, data.key_ptr.*, data.value_ptr.stats(), i);
+            try self.processUi_statsEntry(nk_ctx, data.key_ptr.*, data.value_ptr, i, @src());
         }
     }
 }
@@ -234,22 +257,71 @@ fn processUi_Systems(self: *@This(), ctx: *zigra.Context) !void {
     const nk_ctx = &ctx.systems.imgui.nk;
 
     for (self.view_system_call_profiling_data[0..], 0..) |data, i| {
-        try processUi_statsEntry(nk_ctx, data.key_ptr.*, data.value_ptr.stats(), i);
+        // TODO add filter and colors for quality of life
+        try self.processUi_statsEntry(nk_ctx, data.key_ptr.*, data.value_ptr, i, @src());
     }
 }
 
-fn processUi_statsEntry(nk_ctx: *nk.Context, name: []const u8, stats: CallProfilingCtx.Stats, index: usize) !void {
+fn processUi_Preferences(self: *@This(), ctx: *zigra.Context) !void {
+    const nk_ctx = &ctx.systems.imgui.nk;
+    nk.layoutRowDynamic(nk_ctx, 0, 1);
+    nk.label(nk_ctx, "Chart height", nk.text_center);
+    _ = nk.sliderI32(nk_ctx, 20, &self.pref_chart_height, 200, 1);
+
+    nk.layoutRowDynamic(nk_ctx, @floatFromInt(self.pref_chart_height), 1);
+    if (nk.chartBeginColored(nk_ctx, .lines, chart_base_color, chart_active_color, 10, -1, 1)) {
+        const mod = @as(f32, @floatFromInt(ctx.systems.time.time_ns)) / std.time.ns_per_s;
+        for (0..10) |i| nk.chartPush(nk_ctx, @sin(@as(f32, @floatFromInt(i)) + mod));
+        nk.chartEnd(nk_ctx);
+    }
+
+    nk.layoutRowDynamic(nk_ctx, 1, 1);
+    nk.rule(nk_ctx, nk_ctx.style.text.color);
+    nk.layoutRowDynamic(nk_ctx, 10, 1);
+    nk.label(nk_ctx, "Chart update method", nk.text_center);
+    nk.layoutRowDynamic(nk_ctx, 10, 2);
+    {
+        var active = self.pref_chart_type == .Running;
+        nk.radioLabel(nk_ctx, "Running", &active);
+        if (active) self.pref_chart_type = .Running;
+    }
+    {
+        var active = self.pref_chart_type == .Scanning;
+        nk.radioLabel(nk_ctx, "Scanning", &active);
+        if (active) self.pref_chart_type = .Scanning;
+    }
+}
+
+fn processUi_statsEntry(self: *@This(), nk_ctx: *nk.Context, name: []const u8, profiling_ctx: *CallProfilingCtx, index: usize, comptime src: std.builtin.SourceLocation) !void {
     var buf: [256]u8 = undefined;
+
+    const stats = profiling_ctx.stats();
 
     if (nk.treeBeginHashed(nk_ctx, .tab, try std.fmt.bufPrintZ(
         buf[0..],
         "{s} (avg): {d:.3} ms",
         .{ name, stats.avg },
-    ), @src(), @intCast(index), .minimized)) {
+    ), src, @intCast(index), .minimized)) {
         defer nk.treePop(nk_ctx);
 
         nk.label(nk_ctx, try std.fmt.bufPrintZ(buf[0..], "{s} (min): {d:.3} ms", .{ name, stats.min }), nk.text_left);
         nk.label(nk_ctx, try std.fmt.bufPrintZ(buf[0..], "{s} (max): {d:.3} ms", .{ name, stats.max }), nk.text_left);
         nk.label(nk_ctx, try std.fmt.bufPrintZ(buf[0..], "{s} (now): {d:.3} ms", .{ name, stats.now }), nk.text_left);
+
+        self.processUi_plot(nk_ctx, profiling_ctx);
+    }
+}
+
+fn processUi_plot(self: *@This(), nk_ctx: *nk.Context, profiling_ctx: *CallProfilingCtx) void {
+    nk.layoutRowDynamic(nk_ctx, @floatFromInt(self.pref_chart_height), 1);
+    if (nk.chartBeginColored(nk_ctx, .lines, chart_base_color, chart_active_color, @intCast(profiling_ctx.index_extent), 0, profiling_ctx.all_time_max)) {
+        switch (self.pref_chart_type) {
+            .Scanning => for (profiling_ctx.times_ms[0..]) |v| nk.chartPush(nk_ctx, v),
+            .Running => {
+                for (profiling_ctx.times_ms[profiling_ctx.index_current + 1 ..]) |v| nk.chartPush(nk_ctx, v);
+                for (profiling_ctx.times_ms[0..profiling_ctx.index_current]) |v| nk.chartPush(nk_ctx, v);
+            },
+        }
+        nk.chartEnd(nk_ctx);
     }
 }

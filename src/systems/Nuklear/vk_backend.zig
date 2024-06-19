@@ -7,13 +7,13 @@ pub fn renderCallback(nk_ctx: *nk.Context, cmd: *const nk.Command, ctx: *zigra.C
     switch (cmd.type) {
         nk.command_nop => @panic("Unimplemented"),
         nk.command_scissor => try renderScissor(nk_ctx, @ptrCast(cmd), ctx),
-        nk.command_line => @panic("Unimplemented"),
+        nk.command_line => try renderLine(nk_ctx, @ptrCast(cmd), ctx),
         nk.command_curve => @panic("Unimplemented"),
         nk.command_rect => try renderRect(nk_ctx, @ptrCast(cmd), ctx),
         nk.command_rect_filled => try renderRectFilled(nk_ctx, @ptrCast(cmd), ctx),
         nk.command_rect_multi_color => @panic("Unimplemented"),
         nk.command_circle => @panic("Unimplemented"),
-        nk.command_circle_filled => @panic("Unimplemented"),
+        nk.command_circle_filled => try renderCircleFilled(nk_ctx, @ptrCast(cmd), ctx),
         nk.command_arc => @panic("Unimplemented"),
         nk.command_arc_filled => @panic("Unimplemented"),
         nk.command_triangle => @panic("Unimplemented"),
@@ -162,4 +162,92 @@ pub fn renderTriangleFilled(_: *nk.Context, cmd: *const nk.CommandTriangleFilled
     };
 
     try ctx.systems.vulkan.pushGuiTriangle(vertices[0..]);
+}
+
+pub fn renderLine(_: *nk.Context, cmd: *const nk.CommandLine, ctx: *zigra.Context) !void {
+    const begin = @Vector(2, f32){ @floatFromInt(cmd.begin.x), @floatFromInt(cmd.begin.y) };
+    const end = @Vector(2, f32){ @floatFromInt(cmd.end.x), @floatFromInt(cmd.end.y) };
+    const color = nkRgba8ToF16Srgb(cmd.color);
+    const width: f32 = @floatFromInt(cmd.line_thickness);
+
+    const diff = (end - begin);
+    const len = std.math.sqrt(@reduce(.Add, diff * diff));
+    const dir = diff / @as(@Vector(2, f32), @splat(len));
+    const tvec = @Vector(2, f32){ -dir[1], dir[0] } * @as(@Vector(2, f32), @splat(0.5 * width));
+
+    const vertices: [4]vk_types.VertexData = .{
+        .{
+            .point = .{ begin[0] + tvec[0], begin[1] + tvec[1], 0 },
+            .color = color,
+            .uv = @splat(std.math.nan(f32)),
+        },
+        .{
+            .point = .{ begin[0] - tvec[0], begin[1] - tvec[1], 0 },
+            .color = color,
+            .uv = @splat(std.math.nan(f32)),
+        },
+        .{
+            .point = .{ end[0] + tvec[0], end[1] + tvec[1], 0 },
+            .color = color,
+            .uv = @splat(std.math.nan(f32)),
+        },
+        .{
+            .point = .{ end[0] - tvec[0], end[1] - tvec[1], 0 },
+            .color = color,
+            .uv = @splat(std.math.nan(f32)),
+        },
+    };
+
+    try ctx.systems.vulkan.pushGuiTriangle(vertices[0..3]);
+    try ctx.systems.vulkan.pushGuiTriangle(vertices[1..4]);
+}
+
+pub fn renderCircleFilled(_: *nk.Context, cmd: *const nk.CommandCircleFilled, ctx: *zigra.Context) !void {
+    const ul: @Vector(2, f32) = .{
+        @floatFromInt(cmd.x),
+        @floatFromInt(cmd.y),
+    };
+
+    const br: @Vector(2, f32) = .{
+        @floatFromInt(cmd.x + @as(i32, @intCast(cmd.w))),
+        @floatFromInt(cmd.y + @as(i32, @intCast(cmd.h))),
+    };
+
+    const center = (ul + br) * @as(@Vector(2, f32), @splat(0.5));
+    const radius = br - center;
+
+    const segments: usize = @intFromFloat(4 + (radius[0] + radius[1]));
+    const color = nkRgba8ToF16Srgb(cmd.color);
+
+    for (0..segments) |i| {
+        const p_a: @Vector(2, f32) = .{
+            radius[0] * @sin(@as(f32, @floatFromInt(i + 0)) * 2 * std.math.pi / @as(f32, @floatFromInt(segments))),
+            radius[1] * @cos(@as(f32, @floatFromInt(i + 0)) * 2 * std.math.pi / @as(f32, @floatFromInt(segments))),
+        };
+
+        const p_b: @Vector(2, f32) = .{
+            radius[0] * @sin(@as(f32, @floatFromInt(i + 1)) * 2 * std.math.pi / @as(f32, @floatFromInt(segments))),
+            radius[1] * @cos(@as(f32, @floatFromInt(i + 1)) * 2 * std.math.pi / @as(f32, @floatFromInt(segments))),
+        };
+
+        const vertices = [3]vk_types.VertexData{
+            .{
+                .point = .{ center[0], center[1], 0 },
+                .color = color,
+                .uv = @splat(std.math.nan(f32)),
+            },
+            .{
+                .point = .{ center[0] + p_a[0], center[1] + p_a[1], 0 },
+                .color = color,
+                .uv = @splat(std.math.nan(f32)),
+            },
+            .{
+                .point = .{ center[0] + p_b[0], center[1] + p_b[1], 0 },
+                .color = color,
+                .uv = @splat(std.math.nan(f32)),
+            },
+        };
+
+        try ctx.systems.vulkan.pushGuiTriangle(vertices[0..]);
+    }
 }

@@ -74,7 +74,14 @@ pub const TreeType = enum(u32) {
     tab = c.NK_TREE_TAB,
 };
 
+pub const ChartType = enum(u32) {
+    lines = c.NK_CHART_LINES,
+    columns = c.NK_CHART_COLUMN,
+};
+
 pub const text_left = c.NK_TEXT_LEFT;
+pub const text_center = c.NK_TEXT_CENTERED;
+pub const text_right = c.NK_TEXT_RIGHT;
 
 pub const TextWidthCb = c.nk_text_width_f;
 pub const GlyphQueryCb = c.nk_query_font_glyph_f;
@@ -173,6 +180,36 @@ pub fn treeBeginHashed(
 
 pub fn treePop(ctx: *Context) void {
     c.nk_tree_pop(ctx);
+}
+
+pub fn chartBegin(ctx: *Context, chart_type: ChartType, count: i32, min: f32, max: f32) bool {
+    return c.nk_chart_begin(ctx, @intFromEnum(chart_type), @intCast(count), min, max) == c.nk_true;
+}
+
+pub fn chartBeginColored(ctx: *Context, chart_type: ChartType, base: Color, active: Color, count: i32, min: f32, max: f32) bool {
+    return c.nk_chart_begin_colored(ctx, @intFromEnum(chart_type), base, active, @intCast(count), min, max) == c.nk_true;
+}
+
+pub fn chartEnd(ctx: *Context) void {
+    c.nk_chart_end(ctx);
+}
+
+pub fn chartPush(ctx: *Context, value: f32) void {
+    _ = c.nk_chart_push(ctx, value);
+}
+
+pub fn propertyI32(ctx: *Context, name: [*:0]const u8, min: i32, val: *i32, max: i32, step: i32, inc_per_pixel: f32) void {
+    c.nk_property_int(ctx, name, @intCast(min), @ptrCast(val), @intCast(max), @intCast(step), inc_per_pixel);
+}
+
+pub fn sliderI32(ctx: *Context, min: i32, val: *i32, max: i32, step: i32) bool {
+    return c.nk_slider_int(ctx, @intCast(min), @ptrCast(val), @intCast(max), @intCast(step)) == c.nk_true;
+}
+
+pub fn radioLabel(ctx: *Context, name: [*:0]const u8, active: *bool) void {
+    var active_nk = if (active.*) c.nk_true else c.nk_false;
+    _ = c.nk_radio_label(ctx, name, &active_nk);
+    active.* = active_nk == c.nk_true;
 }
 
 pub fn clear(ctx: *Context) void {
