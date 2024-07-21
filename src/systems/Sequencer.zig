@@ -112,6 +112,7 @@ fn runLoopTick(_: *@This(), ctx: *zigra.Context) !void {
     try run(ctx, .world, .tickProcessSandSimCells);
     try run(ctx, .world, .tickProcessSandSimParticles);
     try run(ctx, .playground, .tickProcess);
+    try run(ctx, .bodies, .tickProcessPointBodies);
     try run(ctx, .time, .finishTick);
 }
 

@@ -28,6 +28,8 @@ const one_2f: @Vector(2, f32) = @splat(1);
 const two_2i: @Vector(2, i32) = @splat(2);
 
 pub fn init(start: @Vector(2, f32), target: @Vector(2, f32)) @This() {
+    std.debug.assert(@reduce(.Or, start != target));
+
     const dir = normalize(target - start);
     const delta = @abs(one_2f / dir);
 
@@ -59,7 +61,8 @@ pub fn next(self: *@This()) bool {
     self.current_cell += self.step * ratio_i;
     self.side += self.delta * ratio_f;
 
-    self.finished = @reduce(.Or, self.step * (self.target_cell - self.current_cell) < zero_2i);
+    self.finished = !@reduce(.And, self.step * (self.target_cell - self.current_cell) >= zero_2i);
+
     return !self.finished;
 }
 

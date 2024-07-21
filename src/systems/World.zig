@@ -29,10 +29,6 @@ pub fn deinit(self: *@This()) void {
     self.* = undefined;
 }
 
-pub fn tickProcessPointBodies(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
-    self.bodies.simulatePointBodies();
-}
-
 pub fn tickProcessSandSimCells(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
     try self.sand_sim.simulateCells();
 }

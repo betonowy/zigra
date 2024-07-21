@@ -4,6 +4,7 @@ const systems = @import("../systems.zig");
 fn deinit(_: systems.Entities.Entity, ctx: *zigra.Context, id: u32) void {
     ctx.systems.sprite_man.destroyByEntityId(id);
     ctx.systems.transform.destroyByEntityId(id);
+    ctx.systems.bodies.destroyByEntityId(id);
 }
 
 pub fn default(ctx: *zigra.Context, pos: @Vector(2, f32), vel: @Vector(2, f32)) !u32 {
@@ -16,6 +17,8 @@ pub fn default(ctx: *zigra.Context, pos: @Vector(2, f32), vel: @Vector(2, f32)) 
         .id_vk_sprite = id_vk_sprite,
         .type = .Opaque,
     }, entity.id);
+
+    _ = try ctx.systems.bodies.createId(.{}, entity.id);
 
     return entity.id;
 }

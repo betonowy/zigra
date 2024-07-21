@@ -7,6 +7,7 @@ pub const DebugUI = @import("systems/DebugUI.zig");
 pub const SpriteMan = @import("systems/SpriteMan.zig");
 pub const Entities = @import("systems/Entities.zig");
 pub const Transform = @import("systems/Transform.zig");
+pub const Bodies = @import("systems/Bodies.zig");
 
 pub const Sequencer = @import("systems/Sequencer.zig");
 pub const Playground = @import("systems/Playground.zig");

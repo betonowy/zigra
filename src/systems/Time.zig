@@ -59,7 +59,7 @@ pub fn checkpoint(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
 
     const target_tick = (self.time_ns + cfg_ns_per_tick / 2) / cfg_ns_per_tick;
     self.ticks_this_checkpoint = target_tick - self.tick_final;
-    self.tick_drift_ns = @as(i64, @intCast(target_tick * cfg_ns_per_tick)) - @as(i64, @intCast(self.time_ns));
+    self.tick_drift_ns = @as(i64, @intCast(self.time_ns)) - @as(i64, @intCast(target_tick * cfg_ns_per_tick));
 
     self.ticks_this_checkpoint = @min(self.ticks_this_checkpoint, cfg_tick_per_checkpoint_max);
     self.tick_final = target_tick;

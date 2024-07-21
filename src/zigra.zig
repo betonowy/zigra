@@ -14,6 +14,7 @@ pub const Modules = struct {
     sprite_man: systems.SpriteMan,
     entities: systems.Entities,
     transform: systems.Transform,
+    bodies: systems.Bodies,
 };
 
 pub const Context = lifetime.Context(Modules);

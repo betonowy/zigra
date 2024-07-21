@@ -2,8 +2,8 @@ const std = @import("std");
 const stb = @cImport(@cInclude("stb/stb_image.h"));
 
 const sand_sim_defs = @import("sand_sim_definitions.zig");
-const Cell = sand_sim_defs.Cell;
-const cell_types = sand_sim_defs.cell_types;
+pub const Cell = sand_sim_defs.Cell;
+pub const cell_types = sand_sim_defs.cell_types;
 
 pub const tile_size = 128;
 pub const tile_size_v2 = @Vector(2, i32){ tile_size, tile_size };

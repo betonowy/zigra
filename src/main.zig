@@ -1,3 +1,7 @@
+comptime {
+    @setFloatMode(.Optimized);
+}
+
 const std = @import("std");
 const zigra = @import("zigra");
 
