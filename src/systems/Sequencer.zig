@@ -40,7 +40,7 @@ pub fn runLoop(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     const ctx = ctx_base.parent(zigra.Context);
 
     switch (self.state_game) {
-        .GameNormal => try self.runLoop_GameNormal(ctx_base, ctx),
+        .GameNormal => try self.runLoop_GameNormal(ctx),
     }
 
     if (options.profiling) {
@@ -48,8 +48,7 @@ pub fn runLoop(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     }
 }
 
-fn runLoop_GameNormal(self: *@This(), ctx_base: *lifetime.ContextBase, ctx: *zigra.Context) !void {
-    _ = ctx_base; // autofix
+fn runLoop_GameNormal(self: *@This(), ctx: *zigra.Context) !void {
     {
         var timer = try std.time.Timer.start();
 
@@ -113,12 +112,15 @@ fn runLoopTick(_: *@This(), ctx: *zigra.Context) !void {
     try run(ctx, .world, .tickProcessSandSimCells);
     try run(ctx, .world, .tickProcessSandSimParticles);
     try run(ctx, .playground, .tickProcess);
+    try run(ctx, .time, .finishTick);
 }
 
 fn runLoopPostTicks(_: *@This(), ctx: *zigra.Context) !void {
+    try run(ctx, .transform, .calculateVisualPositions);
     try run(ctx, .vulkan, .waitForPreviousWorkToFinish);
     try run(ctx, .world, .render);
     try run(ctx, .imgui, .render);
+    try run(ctx, .sprite_man, .render);
     try run(ctx, .vulkan, .process);
 }
 

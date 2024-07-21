@@ -1,6 +1,7 @@
 const std = @import("std");
 
-const SandSim = @import("World/SandSim.zig");
+pub const SandSim = @import("World/SandSim.zig");
+pub const Marching = @import("World/Marching.zig");
 
 const lifetime = @import("../lifetime.zig");
 const zigra = @import("../zigra.zig");
@@ -26,6 +27,10 @@ pub fn systemDeinit(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
 
 pub fn deinit(self: *@This()) void {
     self.* = undefined;
+}
+
+pub fn tickProcessPointBodies(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
+    self.bodies.simulatePointBodies();
 }
 
 pub fn tickProcessSandSimCells(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
@@ -65,7 +70,7 @@ pub fn render(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
 
         try ctx.systems.vulkan.pushCmdLine(.{
             .points = .{ point_a, point_b },
-            .color = .{ 0.0, 0.0, 1.0, 1.0 },
+            .color = .{ 0.0125, 0.025, 0.5, 1.0 },
             .depth = 0.01,
             .alpha_gradient = .{ 1.0, 1.0 },
         });

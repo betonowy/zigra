@@ -6,7 +6,8 @@ const meta = @import("../../meta.zig");
 
 const stb = @cImport(@cInclude("stb/stb_image.h"));
 
-map: std.StringArrayHashMap(vk.Rect2D),
+map: std.StringArrayHashMap(u32),
+rects: std.ArrayList(vk.Rect2D),
 image: types.ImageData,
 sampler: vk.Sampler,
 
@@ -16,25 +17,25 @@ pub fn init(backend: *VulkanBackend, paths: []const []const u8) !@This() {
 
     for (paths) |path| try extents.append(try readPngSize(path));
 
-    var rects = std.ArrayList(vk.Rect2D).init(backend.allocator);
-    defer rects.deinit();
-    try rects.resize(extents.items.len);
+    var self: @This() = undefined;
+    self.rects = std.ArrayList(vk.Rect2D).init(backend.allocator);
+    errdefer self.rects.deinit();
+    try self.rects.resize(extents.items.len);
 
-    for (extents.items, rects.items, 0..) |extent, *rect, i| {
-        rect.* = findFreeRect(extent, rects.items[0..i], .{ .width = 2048, .height = 2048 }) orelse {
+    for (extents.items, self.rects.items, 0..) |extent, *rect, i| {
+        rect.* = findFreeRect(extent, self.rects.items[0..i], .{ .width = 2048, .height = 2048 }) orelse {
             return error.OutOfAtlasSpace;
         };
     }
 
-    var self: @This() = undefined;
-    self.map = std.StringArrayHashMap(vk.Rect2D).init(backend.allocator);
+    self.map = std.StringArrayHashMap(u32).init(backend.allocator);
     errdefer {
         var it = self.map.iterator();
         while (it.next()) |next| self.map.allocator.free(next.key_ptr.*);
         self.map.deinit();
     }
 
-    const required_extent = calculateRequiredExtent(rects.items);
+    const required_extent = calculateRequiredExtent(self.rects.items);
 
     const staging_image = try backend.createImage(.{
         .aspect_mask = .{ .color_bit = true },
@@ -49,7 +50,7 @@ pub fn init(backend: *VulkanBackend, paths: []const []const u8) !@This() {
     });
     defer backend.destroyImage(staging_image);
 
-    for (paths, rects.items) |path, rect| {
+    for (paths, self.rects.items) |path, rect| {
         var heap: [1024]u8 = undefined;
         var fixed = std.heap.FixedBufferAllocator.init(&heap);
         const c_str = try fixed.allocator().allocSentinel(u8, path.len, 0);
@@ -92,7 +93,6 @@ pub fn init(backend: *VulkanBackend, paths: []const []const u8) !@This() {
         .command_pool = backend.graphic_command_pool,
         .level = .primary,
     }, meta.asArray(&cmd));
-
     defer backend.vkd.freeCommandBuffers(backend.device, backend.graphic_command_pool, 1, meta.asConstArray(&cmd));
 
     {
@@ -179,9 +179,7 @@ pub fn init(backend: *VulkanBackend, paths: []const []const u8) !@This() {
 
     _ = try backend.vkd.waitForFences(backend.device, 1, meta.asConstArray(&fence), vk.TRUE, 1_000_000_000);
 
-    for (rects.items, paths) |rect, path| {
-        try self.map.put(try backend.allocator.dupe(u8, path), rect);
-    }
+    for (0.., paths) |i, path| try self.map.put(try backend.allocator.dupe(u8, path), @intCast(i));
 
     return self;
 }
@@ -192,6 +190,19 @@ pub fn deinit(self: *@This(), backend: *VulkanBackend) void {
     var it = self.map.iterator();
     while (it.next()) |next| self.map.allocator.free(next.key_ptr.*);
     self.map.deinit();
+    self.rects.deinit();
+}
+
+pub fn getRectById(self: *const @This(), id: u32) vk.Rect2D {
+    return self.rects.items[id];
+}
+
+pub fn getRectIdByPath(self: *const @This(), path: []const u8) ?u32 {
+    return self.map.get(path);
+}
+
+pub fn getRectByPath(self: *const @This(), path: []const u8) ?vk.Rect2D {
+    return if (self.getRectIdByPath(path)) |id| self.getRectById(id) else null;
 }
 
 pub fn descriptorImageInfo(self: *@This()) vk.DescriptorImageInfo {

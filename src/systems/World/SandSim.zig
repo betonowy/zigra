@@ -281,7 +281,7 @@ pub fn init(allocator: std.mem.Allocator) !@This() {
     var self: @This() = undefined;
 
     self.allocator = allocator;
-    self.tile_pool = try TilePool.initPreheated(self.allocator, 4 * 4);
+    self.tile_pool = try TilePool.initPreheated(self.allocator, 16);
     self.node_pool = try NodePool.initPreheated(self.allocator, 128);
     self.iteration = 0;
 
@@ -502,7 +502,7 @@ fn forEachNodeRecurse(actor: anytype, node: *const TreeNode) void {
     }
 }
 
-const LandscapeView = struct {
+pub const LandscapeView = struct {
     target: *TreeNode,
     tile_cache: TileCache = TileCache.init(0) catch unreachable,
     stack: NodeStack = NodeStack.init(0) catch unreachable,

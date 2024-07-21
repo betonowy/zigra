@@ -11,6 +11,9 @@ pub const Modules = struct {
     sequencer: systems.Sequencer,
     imgui: systems.Nuklear,
     debug_ui: systems.DebugUI,
+    sprite_man: systems.SpriteMan,
+    entities: systems.Entities,
+    transform: systems.Transform,
 };
 
 pub const Context = lifetime.Context(Modules);

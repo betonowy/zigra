@@ -154,7 +154,7 @@ pub fn init(
     });
     errdefer self.atlas.deinit(&self);
 
-    self.font = self.atlas.map.get(font_file) orelse unreachable;
+    self.font = self.atlas.getRectByPath(font_file) orelse unreachable;
 
     try self.createFrameData();
     errdefer self.destroyFrameData();

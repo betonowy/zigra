@@ -9,20 +9,11 @@ pub fn includeDir() []const u8 {
     return std.fs.path.dirname(@src().file) orelse unreachable;
 }
 
-pub fn build(
-    b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-) *std.Build.Step.Compile {
-    const lib = b.addStaticLibrary(.{
-        .name = "stb",
-        .optimize = optimize,
-        .target = target,
-    });
+pub fn build(b: *std.Build) *std.Build.Module {
+    const mod = b.addModule("stb", .{ .link_libcpp = true });
 
-    lib.addIncludePath(.{ .path = includeDir() });
-    lib.addCSourceFile(.{ .file = .{ .path = sourceFileRelative("impl.cpp", b.allocator) } });
-    lib.linkLibCpp();
+    mod.addIncludePath(.{ .path = includeDir() });
+    mod.addCSourceFile(.{ .file = .{ .path = sourceFileRelative("impl.cpp", b.allocator) } });
 
-    return lib;
+    return mod;
 }

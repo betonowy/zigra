@@ -14,6 +14,8 @@ time_checkpoint_delay_ns: u64 = 0,
 
 /// target tick number for checkpoint
 tick_final: u64 = 0,
+/// current tick number
+tick_current: u64 = 0,
 /// drift of the last tick
 tick_drift_ns: i64 = 0,
 /// ticks that need be performed this checkpoint
@@ -77,8 +79,12 @@ pub fn ensureMinimumCheckpointTime(self: *@This(), _: *lifetime.ContextBase) any
     std.time.sleep(@intCast(wait_for_ns));
 }
 
+pub fn finishTick(self: *@This(), _: *lifetime.ContextBase) !void {
+    self.tick_current += 1;
+}
+
 pub fn tickDrift(self: *const @This()) f32 {
-    self.tick_drift_ns * (1.0 / std.time.ns_per_s);
+    return @as(f32, @floatFromInt(self.tick_drift_ns)) * (1.0 / @as(comptime_float, std.time.ns_per_s));
 }
 
 pub fn tickDelay(_: *const @This()) f32 {

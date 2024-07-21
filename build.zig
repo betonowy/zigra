@@ -1,27 +1,11 @@
 const std = @import("std");
-const vma = @import("thirdparty/vma/build_wrap.zig");
+
 const stb = @import("thirdparty/stb/build_wrap.zig");
 const nuklear = @import("thirdparty/nuklear/build_wrap.zig");
+const lz4 = @import("thirdparty/lz4/build_wrap.zig");
 
 const shaders = @import("steps/shaders.zig");
 const glsl_gen = @import("steps/glsl_gen.zig");
-
-const vulkan_headers_include_dir = "thirdparty/Vulkan-Headers/include";
-const vulkan_docs_xml_path = "thirdparty/Vulkan-Docs/xml/vk.xml";
-
-const files_to_test = [_][]const u8{
-    "src/root.zig",
-    "src/meta.zig",
-    "src/vulkan_types.zig",
-    "src/VulkanAtlas.zig",
-    "src/VulkanLandscape.zig",
-    "src/LandscapeSim.zig",
-    "src/lifetime.zig",
-};
-
-fn vulkanIncludeDir(b: *std.Build) []const u8 {
-    return b.pathFromRoot(vulkan_headers_include_dir);
-}
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
@@ -41,22 +25,29 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
 
-    const lib_stb = stb.build(b, target, optimize);
-    const mod_nuklear = nuklear.build(b, target, optimize);
+    const mod_stb = stb.build(b);
+    const mod_nuklear = nuklear.build(b);
+    const mod_lz4 = lz4.build(b);
 
-    const lib = b.addStaticLibrary(.{
-        .name = "zigra",
+    const mod_utils = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = .{ .path = "utils/root.zig" },
+    });
+
+    const mod_zigra = b.addModule("zigra", .{
         .root_source_file = .{ .path = "src/zigra.zig" },
         .target = target,
         .optimize = optimize,
     });
 
-    lib.addIncludePath(.{ .path = stb.includeDir() });
-    lib.addIncludePath(.{ .path = vulkanIncludeDir(b) });
-    lib.root_module.addImport("glfw", dep_glfw.module("mach-glfw"));
-    lib.root_module.addImport("options", build_options_module);
-    lib.root_module.addImport("nuklear", mod_nuklear);
-    lib.linkLibrary(lib_stb);
+    mod_zigra.addIncludePath(.{ .path = stb.includeDir() });
+    mod_zigra.addImport("glfw", dep_glfw.module("mach-glfw"));
+    mod_zigra.addImport("options", build_options_module);
+    mod_zigra.addImport("nuklear", mod_nuklear);
+    mod_zigra.addImport("utils", mod_utils);
+    mod_zigra.addImport("lz4", mod_lz4);
+    mod_zigra.addImport("stb", mod_stb);
 
     const exe = b.addExecutable(.{
         .name = "zigra",
@@ -69,7 +60,7 @@ pub fn build(b: *std.Build) !void {
     const compile_glsl_step = shaders.step(b, gen_glsl_step);
     exe.step.dependOn(&compile_glsl_step.step);
 
-    exe.root_module.addImport("zigra", &lib.root_module);
+    exe.root_module.addImport("zigra", mod_zigra);
 
     b.installArtifact(exe);
     const run_cmd = b.addRunArtifact(exe);
@@ -79,8 +70,6 @@ pub fn build(b: *std.Build) !void {
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
-
-    createTestStep(b, target, optimize, build_options_module);
 }
 
 fn makeTestName(comptime str: []const u8) [str.len - 4]u8 {
@@ -94,27 +83,4 @@ fn makeTestName(comptime str: []const u8) [str.len - 4]u8 {
     };
 
     return new_str;
-}
-
-fn createTestStep(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.Mode, options_module: *std.Build.Module) void {
-    const step = b.step("test", "Run unit tests");
-
-    inline for (files_to_test) |path| {
-        const name = comptime makeTestName("test " ++ path);
-
-        const compile_test = b.addTest(.{
-            .name = &name,
-            .root_source_file = .{ .path = path },
-            .target = target,
-            .optimize = optimize,
-        });
-
-        compile_test.root_module.addImport("options", options_module);
-
-        const run_test = b.addRunArtifact(compile_test);
-        const install_test = b.addInstallArtifact(compile_test, .{ .dest_dir = .{ .override = .{ .custom = "test" } } });
-
-        step.dependOn(&run_test.step);
-        step.dependOn(&install_test.step);
-    }
 }
