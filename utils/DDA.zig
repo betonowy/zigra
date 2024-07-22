@@ -51,7 +51,7 @@ pub fn init(start: @Vector(2, f32), target: @Vector(2, f32)) @This() {
     };
 }
 
-pub fn next(self: *@This()) bool {
+pub fn next(self: *@This()) void {
     self.iterations += 1;
     self.hit_side = self.side[0] >= self.side[1];
 
@@ -62,8 +62,6 @@ pub fn next(self: *@This()) bool {
     self.side += self.delta * ratio_f;
 
     self.finished = !@reduce(.And, self.step * (self.target_cell - self.current_cell) >= zero_2i);
-
-    return !self.finished;
 }
 
 pub fn dist(self: *const @This()) f32 {

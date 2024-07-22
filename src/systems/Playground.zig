@@ -19,9 +19,14 @@ pub fn init(allocator: std.mem.Allocator) !@This() {
     };
 }
 
-pub fn systemInit(_: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
+pub fn systemInit(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     const ctx = ctx_base.parent(zigra.Context);
     try ctx.systems.world.sand_sim.loadFromPngFile(.{ .coord = .{ -256, -256 }, .size = .{ 512, 512 } }, "land/TEST_LEVEL_WATERFALL_BIGGAP.png");
+
+    for (0..3) |_| {
+        _ = self.rand.random().floatNorm(f32);
+        _ = self.rand.random().floatNorm(f32);
+    }
 }
 
 pub fn systemDeinit(_: *@This(), _: *lifetime.ContextBase) anyerror!void {}

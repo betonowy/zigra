@@ -103,21 +103,22 @@ pub fn tickProcessPointBodies(self: *@This(), ctx_base: *lifetime.ContextBase) !
 
         t_next.pos = hit_pos;
 
-        if (@reduce(.Add, hit_nor * hit_dir) < 0) {
+        if (dot(hit_nor, hit_dir) < 0) {
             t_next.vel = mix(t_curr.vel, t_next.vel, @min(scale_ratio, 0));
         }
 
         const hit_dot = dot(hit_nor, t_next.vel);
-        const speed = length(t_next.vel);
 
         if (hit_dot <= 0) {
             t_next.vel -= @as(@Vector(2, f32), @splat(2 * hit_dot)) * hit_nor;
+            const speed = length(t_next.vel);
             if (speed > 0) t_next.vel *= @splat(1 + b_curr.bounce_loss * hit_dot / speed);
         } else {
+            const speed = length(t_next.vel);
             if (speed > 0) t_next.vel *= @splat(1 - b_curr.bounce_loss);
         }
 
-        if (@sqrt(@reduce(.Add, (t_next.pos - t_curr.pos) * (t_next.pos - t_curr.pos))) < 3e-2 and
+        if (length(t_curr.pos - t_next.pos) < 3e-2 and
             hit_dot > 0 and scale_ratio == 0 and @abs(dot(t_next.vel, .{ hit_nor[1], -hit_nor[0] })) < 1e-3)
         {
             b_next.sleeping = true;
