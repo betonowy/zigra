@@ -1,6 +1,5 @@
 zig-cache/
 zig-out/
 
-src/shaders/gen
-*.spv
-spv.zig
+modules/shaders/gen
+modules/shaders/*.zig

@@ -1,0 +1,81 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "zig build",
+            "type": "shell",
+            "command": "zig",
+            "args": [
+                "build",
+                "${input:zig.step}",
+                "${input:zig.optimization}",
+                "${input:zig.profiling}",
+                "--summary",
+                "all",
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": false,
+                "clear": true
+            }
+        },
+    ],
+    "inputs": [
+        {
+            "id": "zig.step",
+            "description": "Step",
+            "type": "pickString",
+            "default": "install",
+            "options": [
+                "install",
+                "run",
+            ],
+        },
+        {
+            "id": "zig.optimization",
+            "description": "Optimization",
+            "type": "pickString",
+            "default": "Debug",
+            "options": [
+                {
+                    "label": "Debug",
+                    "value": "-Doptimize=Debug"
+                },
+                {
+                    "label": "Release fast",
+                    "value": "-Doptimize=ReleaseFast",
+                },
+                {
+                    "label": "Release small",
+                    "value": "-Doptimize=ReleaseSmall",
+                },
+                {
+                    "label": "Release safe",
+                    "value": "-Doptimize=ReleaseSafe",
+                },
+            ],
+        },
+        {
+            "id": "zig.profiling",
+            "description": "Extended profiling in DebugUI",
+            "type": "pickString",
+            "default": "profiling",
+            "options": [
+                {
+                    "label": "Enabled",
+                    "value": "-Dprofiling",
+                },
+                {
+                    "label": "Disabled",
+                    "value": "",
+                },
+            ]
+        }
+    ]
+}
