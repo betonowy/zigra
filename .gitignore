@@ -2,4 +2,4 @@ zig-cache/
 zig-out/
 
 modules/shaders/gen
-modules/shaders/*.zig
+*.gen.zig

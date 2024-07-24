@@ -9,13 +9,14 @@ const prototypes = @import("../prototypes.zig");
 allocator: std.mem.Allocator,
 begin_cam: @Vector(2, i32) = undefined,
 
-id_first_crate: u32 = undefined,
-rand: std.Random.Sfc64,
+id_chunk: u32 = undefined,
+id_crate: u32 = undefined,
+rand: std.Random.DefaultPrng,
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
     return .{
         .allocator = allocator,
-        .rand = std.Random.Sfc64.init(1),
+        .rand = std.Random.DefaultPrng.init(395828523321213),
     };
 }
 
@@ -38,14 +39,25 @@ pub fn deinit(self: *@This()) void {
 pub fn tickProcess(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     const ctx = ctx_base.parent(zigra.Context);
 
-    const random_vel: @Vector(2, f32) = .{
-        self.rand.random().floatNorm(f32) * 15,
-        (self.rand.random().floatNorm(f32) + 1) * 15,
+    const random_vel_chunk: @Vector(2, f32) = .{
+        self.rand.random().floatNorm(f32) * 40,
+        (self.rand.random().floatNorm(f32) + 1) * -40,
+    };
+
+    const random_vel_crate: @Vector(2, f32) = .{
+        self.rand.random().floatNorm(f32) * 40,
+        (self.rand.random().floatNorm(f32) + 1) * -40,
     };
 
     switch (ctx.systems.time.tick_current % 400) {
-        0 => self.id_first_crate = try prototypes.Chunk.default(ctx, .{ 0.1, 10 }, random_vel),
-        390 => ctx.systems.entities.destroyEntity(ctx, self.id_first_crate),
+        0 => {
+            self.id_chunk = try prototypes.Chunk.default(ctx, .{ 0.1, -50 }, random_vel_chunk);
+            self.id_crate = try prototypes.Crate.default(ctx, .{ 10, -50 }, random_vel_crate);
+        },
+        390 => {
+            ctx.systems.entities.destroyEntity(ctx, self.id_chunk);
+            ctx.systems.entities.destroyEntity(ctx, self.id_crate);
+        },
         else => {},
     }
 }

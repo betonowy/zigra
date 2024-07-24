@@ -12,8 +12,8 @@
                 "${input:zig.step}",
                 "${input:zig.optimization}",
                 "${input:zig.profiling}",
-                "--summary",
-                "all",
+                // "--summary",
+                // "all",
             ],
             "problemMatcher": [],
             "presentation": {

@@ -15,7 +15,7 @@ pub fn step(b: *std.Build, opt_gen_step: ?*std.Build.Step) *ShaderStep {
             .first_ret_addr = @returnAddress(),
             .id = .custom,
             .makeFn = &make,
-            .name = "shaders",
+            .name = "gen_spv_zig",
             .owner = b,
         }),
     };
@@ -26,7 +26,7 @@ pub fn step(b: *std.Build, opt_gen_step: ?*std.Build.Step) *ShaderStep {
 }
 
 pub fn module(b: *std.Build) *std.Build.Module {
-    return b.createModule(.{ .root_source_file = .{ .path = "modules/shaders/module.zig" } });
+    return b.createModule(.{ .root_source_file = .{ .path = "modules/shaders/module.gen.zig" } });
 }
 
 const Shader = struct {
@@ -112,13 +112,13 @@ fn make(build_step: *std.Build.Step, parent_node: *std.Progress.Node) anyerror!v
         build_step.result_peak_rss = @max(build_step.result_peak_rss, run.step.result_peak_rss);
     }
 
-    // if (build_step.result_cached) return;
+    if (build_step.result_cached) return;
 
     try zigGen(b, shaders.items);
 }
 
 fn zigGen(b: *std.Build, input: []Shader) !void {
-    const generated_zig_path = "modules/shaders/module.zig";
+    const generated_zig_path = "modules/shaders/module.gen.zig";
 
     const file = try b.build_root.handle.createFile(generated_zig_path, .{});
     defer file.close();

@@ -1,16 +1,6 @@
 const std = @import("std");
-
-fn normalize(v: @Vector(2, f32)) @Vector(2, f32) {
-    return v / @as(@TypeOf(v), @splat(@sqrt(@reduce(.Add, v * v))));
-}
-
-fn fract(v: anytype) @TypeOf(v) {
-    return v - @floor(v);
-}
-
-fn floatFromBool(b: @Vector(2, bool)) @Vector(2, f32) {
-    return @floatFromInt(@intFromBool(b));
-}
+const builtin = @import("builtin");
+const la = @import("la");
 
 dir: @Vector(2, f32),
 target_cell: @Vector(2, i32),
@@ -30,15 +20,15 @@ const two_2i: @Vector(2, i32) = @splat(2);
 pub fn init(start: @Vector(2, f32), target: @Vector(2, f32)) @This() {
     std.debug.assert(@reduce(.Or, start != target));
 
-    const dir = normalize(target - start);
+    const dir = la.normalize(target - start);
     const delta = @abs(one_2f / dir);
 
     const cond_i: @Vector(2, i32) = @intFromBool(target > start);
     const cond_f: @Vector(2, f32) = @floatFromInt(cond_i);
     const cond_f_neg = one_2f - cond_f;
 
-    const fract_pos = fract(start);
-    const fract_inv = fract(one_2f - start);
+    const fract_pos = la.fract(start);
+    const fract_inv = la.fract(one_2f - start);
 
     return @This(){
         .dir = dir,

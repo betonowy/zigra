@@ -18,7 +18,14 @@ pub fn default(ctx: *zigra.Context, pos: @Vector(2, f32), vel: @Vector(2, f32)) 
         .type = .Opaque,
     }, entity.id);
 
-    _ = try ctx.systems.bodies.createId(.{ .point = .{} }, entity.id);
+    _ = try ctx.systems.bodies.createId(.{ .point = .{
+        .bounce_loss = 0.1,
+        .drag = 0.05,
+        .id_entity = entity.id,
+        .id_transform = id_transform,
+        .sleeping = false,
+        .weight = 1,
+    } }, entity.id);
 
     return entity.id;
 }

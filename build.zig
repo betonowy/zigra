@@ -22,6 +22,8 @@ pub fn build(b: *std.Build) !void {
 
     const mod_la = b.createModule(.{ .root_source_file = .{ .path = "modules/la/root.zig" } });
     const mod_utils = b.createModule(.{ .root_source_file = .{ .path = "modules/utils/root.zig" } });
+    mod_utils.addImport("la", mod_la);
+
     const mod_lifetime = b.createModule(.{ .root_source_file = .{ .path = "modules/lifetime/lifetime.zig" } });
     mod_lifetime.addImport("options", mod_options);
 

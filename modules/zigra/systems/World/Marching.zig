@@ -1,60 +1,65 @@
 const std = @import("std");
 const SandSim = @import("SandSim.zig");
 const utils = @import("utils");
+const la = @import("la");
 
 const Result = struct {
     pos: @Vector(2, f32),
     nor: ?@Vector(2, f32),
     dir: @Vector(2, f32),
+    no_intersection: bool = false,
 };
 
 const CellCompareFn = fn (cell: SandSim.Cell) f32;
 
 pub fn intersect(view: *SandSim.LandscapeView, start: @Vector(2, f32), target: @Vector(2, f32), cmp_fn: CellCompareFn) !?Result {
     var intersection_pos_opt: ?@Vector(2, f32) = null;
-    var kbi = utils.KBI.init(.{ 0, 0, 0, 0 });
-    var dda = utils.DDA.init(start, target);
+    var kbi = try getKernel(view, start, cmp_fn);
 
-    while (!dda.finished) : (dda.next()) {
-        const pos = start + dda.dir * @as(@Vector(2, f32), @splat(if (dda.iterations > 0) dda.dist() else 0));
-        kbi = utils.KBI.init(try getKernel(view, pos, cmp_fn));
-        const result = kbi.getIntersection(pos - @floor(pos), dda.dir);
+    if (@reduce(.And, start != target)) {
+        var dda = utils.DDA.init(start, target);
 
-        switch (result) {
-            .hit => |v| {
-                intersection_pos_opt = v + @floor(pos);
-                break;
-            },
-            .inside, .inside_trivial => {
-                intersection_pos_opt = pos;
-                break;
-            },
-            else => {},
+        while (!dda.finished) : (dda.next()) {
+            const pos = start + dda.dir * @as(@Vector(2, f32), @splat(if (dda.iterations > 0) dda.dist() else 0));
+            kbi = try getKernel(view, pos, cmp_fn);
+            const result = utils.KBI.intersection(kbi, pos - @floor(pos), dda.dir);
+
+            switch (result) {
+                .hit => |v| {
+                    intersection_pos_opt = v + @floor(pos);
+                    break;
+                },
+                .inside, .inside_trivial => {
+                    intersection_pos_opt = pos;
+                    break;
+                },
+                else => {},
+            }
+        }
+
+        if (intersection_pos_opt) |pos| {
+            const isect_diff = pos - start;
+            const max_diff = target - start;
+
+            if (@reduce(.Add, isect_diff * isect_diff) > @reduce(.Add, max_diff * max_diff)) {
+                return noIntersection(start, dda.dir, kbi);
+            }
+
+            return .{
+                .pos = pos,
+                .nor = utils.KBI.normal(kbi, pos - @floor(pos)),
+                .dir = dda.dir,
+            };
         }
     }
 
-    if (intersection_pos_opt) |pos| {
-        const isect_diff = pos - start;
-        const max_diff = target - start;
-
-        if (@reduce(.Add, isect_diff * isect_diff) > @reduce(.Add, max_diff * max_diff)) {
-            return noIntersection(start, dda.dir, kbi);
-        }
-
-        return .{
-            .pos = pos,
-            .nor = kbi.getNormal(pos - @floor(pos)),
-            .dir = dda.dir,
-        };
-    }
-
-    return noIntersection(start, dda.dir, kbi);
+    return noIntersection(start, la.normalize(target - start), kbi);
 }
 
-fn noIntersection(pos: @Vector(2, f32), dir: @Vector(2, f32), kbi: utils.KBI) !?Result {
-    const nor = kbi.getNormal(pos - @floor(pos));
-    return switch (kbi.isInside(pos - @floor(pos))) {
-        true => .{ .pos = pos, .nor = nor, .dir = dir },
+fn noIntersection(pos: @Vector(2, f32), dir: @Vector(2, f32), kbi: @Vector(4, f32)) !?Result {
+    const nor = utils.KBI.normal(kbi, pos - @floor(pos));
+    return switch (utils.KBI.isInside(kbi, pos - @floor(pos))) {
+        true => .{ .pos = pos, .nor = nor, .dir = dir, .no_intersection = true },
         false => null,
     };
 }

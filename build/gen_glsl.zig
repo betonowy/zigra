@@ -4,7 +4,7 @@ const cell_types = @import("../modules/zigra/systems/World/sand_sim_definitions.
 const types = @import("../modules/zigra/systems/Vulkan/types.zig");
 
 pub fn step(b: *std.Build) *std.Build.Step {
-    var build_step = b.step("glsl_gen", "Generate glsl code");
+    var build_step = b.step("gen_glsl", "Generate glsl code");
     build_step.makeFn = &make;
     return build_step;
 }
