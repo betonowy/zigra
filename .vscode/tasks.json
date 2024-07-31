@@ -12,8 +12,47 @@
                 "${input:zig.step}",
                 "${input:zig.optimization}",
                 "${input:zig.profiling}",
-                // "--summary",
-                // "all",
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": false,
+                "clear": true
+            }
+        },
+        {
+            "label": "zig build (hard debug)",
+            "type": "shell",
+            "command": "zig",
+            "args": [
+                "build",
+                "${input:zig.step}",
+                "-Dprofiling",
+                "-Dlock-tick",
+                "-Dlock-fps=1",
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": false,
+                "clear": true
+            }
+        },
+        {
+            "label": "zig build (fast tick lock)",
+            "type": "shell",
+            "command": "zig",
+            "args": [
+                "build",
+                "${input:zig.step}",
+                "-Dprofiling",
+                "-Dlock-tick",
             ],
             "problemMatcher": [],
             "presentation": {
@@ -31,7 +70,7 @@
             "id": "zig.step",
             "description": "Step",
             "type": "pickString",
-            "default": "install",
+            "default": "run",
             "options": [
                 "install",
                 "run",
@@ -65,7 +104,6 @@
             "id": "zig.profiling",
             "description": "Extended profiling in DebugUI",
             "type": "pickString",
-            "default": "profiling",
             "options": [
                 {
                     "label": "Enabled",

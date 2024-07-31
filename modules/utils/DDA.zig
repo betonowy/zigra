@@ -1,6 +1,41 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const la = @import("la");
+
+const la = if (!builtin.is_test) @import("la") else struct {
+    pub fn sqrLength(a: anytype) f32 {
+        return @reduce(.Add, a * a);
+    }
+
+    pub fn length(a: anytype) f32 {
+        return @sqrt(sqrLength(a));
+    }
+
+    pub fn normalize(a: anytype) @TypeOf(a) {
+        return a / @as(@TypeOf(a), @splat(length(a)));
+    }
+
+    pub fn fract(a: anytype) @TypeOf(a) {
+        return switch (@typeInfo(@TypeOf(a))) {
+            else => unreachable,
+            .Array,
+            => fractMatrix(a),
+            .Vector,
+            .Float,
+            .ComptimeFloat,
+            => fractVectorOrScalar(a),
+        };
+    }
+
+    fn fractMatrix(a: anytype) @TypeOf(a) {
+        var out: @TypeOf(a) = undefined;
+        inline for (&a, &out) |a_vec, *out_vec| out_vec.* = fractVectorOrScalar(a_vec);
+        return out;
+    }
+
+    fn fractVectorOrScalar(a: anytype) @TypeOf(a) {
+        return a - @floor(a);
+    }
+};
 
 dir: @Vector(2, f32),
 target_cell: @Vector(2, i32),
@@ -75,10 +110,24 @@ test "simple_shape" {
     var dda = init(.{ 0, 0 }, .{ 4, 3 });
     try std.testing.expectEqual(.{ 0.8, 0.6 }, dda.dir);
 
-    while (dda.next()) {
+    dda.next();
+
+    while (!dda.finished) : (dda.next()) {
         try std.testing.expectEqual(expected_cells[dda.iterations], dda.current_cell);
         try std.testing.expectApproxEqRel(expected_dists[dda.iterations], dda.dist(), 1e-5);
+
+        std.debug.print("cell: {}, fpos: {d:.2}\n", .{ dda.current_cell, @floor(@Vector(2, f32){ 0, 0 } + @as(@Vector(2, f32), @splat(dda.dist())) * dda.dir) });
     }
 
     try std.testing.expectEqual(8, dda.iterations);
+}
+
+test "dda_regression_01" {
+    var dda = init(.{ 5.39839782e+01, -4.56062431e+01 }, .{ 5.58791198e+01, -4.78331947e+01 });
+
+    dda.next();
+
+    while (!dda.finished) : (dda.next()) {
+        std.debug.print("cell: {}, fpos: {d:.2}\n", .{ dda.current_cell, @floor(@Vector(2, f32){ 5.39839782e+01, -4.56062431e+01 } + @as(@Vector(2, f32), @splat(dda.dist())) * dda.dir) });
+    }
 }

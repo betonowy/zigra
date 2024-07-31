@@ -16,13 +16,24 @@ pub fn intersect(view: *SandSim.LandscapeView, start: @Vector(2, f32), target: @
     var intersection_pos_opt: ?@Vector(2, f32) = null;
     var kbi = try getKernel(view, start, cmp_fn);
 
+    // std.debug.print("start: {}, target: {}\n", .{ start, target });
+
     if (@reduce(.And, start != target)) {
         var dda = utils.DDA.init(start, target);
 
         while (!dda.finished) : (dda.next()) {
             const pos = start + dda.dir * @as(@Vector(2, f32), @splat(if (dda.iterations > 0) dda.dist() else 0));
-            kbi = try getKernel(view, pos, cmp_fn);
-            const result = utils.KBI.intersection(kbi, pos - @floor(pos), dda.dir);
+            const kpos = pos - @as(@Vector(2, f32), @floatFromInt(dda.current_cell));
+
+            kbi = try getKernelI(view, dda.current_cell, cmp_fn);
+
+            const result = utils.KBI.intersection(kbi, kpos, dda.dir);
+            // std.log.info("kbi: {}, p: {}, d: {}", .{ kbi, kpos, dda.dir });
+
+            // const kcoords = KCoords.init(pos);
+
+            // std.debug.print("base kcoords: {}\n", .{kcoords});
+            // std.debug.print("kbi: {d:.0}, pos: {d:.5}, kpos: {d:.5}, dir: {d:.5}\n", .{ kbi, pos, kpos, dda.dir });
 
             switch (result) {
                 .hit => |v| {
@@ -89,6 +100,21 @@ const KCoords = struct {
 
 fn getKernel(view: *SandSim.LandscapeView, pos: @Vector(2, f32), cmp_fn: CellCompareFn) !@Vector(4, f32) {
     const coords = KCoords.init(pos);
+    var kernel: @Vector(4, f32) = undefined;
+
+    inline for (@intFromEnum(KPos.ul)..@intFromEnum(KPos.br) + 1) |i| {
+        const cell = try view.get(coords.get(@enumFromInt(i)));
+        kernel[i] = cmp_fn(cell);
+    }
+
+    return kernel;
+}
+
+fn getKernelI(view: *SandSim.LandscapeView, pos: @Vector(2, i32), cmp_fn: CellCompareFn) !@Vector(4, f32) {
+    const coords = KCoords{
+        .minor = pos,
+        .major = pos + @Vector(2, i32){ 1, 1 },
+    };
     var kernel: @Vector(4, f32) = undefined;
 
     inline for (@intFromEnum(KPos.ul)..@intFromEnum(KPos.br) + 1) |i| {

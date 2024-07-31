@@ -1,8 +1,23 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const poly = @import("poly.zig");
-const la = @import("la");
+
+const la = if (!builtin.is_test) @import("la") else struct {
+    pub fn sqrLength(a: anytype) f32 {
+        return @reduce(.Add, a * a);
+    }
+
+    pub fn length(a: anytype) f32 {
+        return @sqrt(sqrLength(a));
+    }
+
+    pub fn normalize(a: anytype) @TypeOf(a) {
+        return a / @as(@TypeOf(a), @splat(length(a)));
+    }
+};
 
 const edge_threshold = 1.0 / 3.0;
+const edge_hit_threshold = edge_threshold + 0;
 
 pub fn isInside(kernel: @Vector(4, f32), pos: @Vector(2, f32)) bool {
     return @reduce(.Add, kernel * bilinearWeights(pos)) > edge_threshold;
@@ -79,7 +94,7 @@ fn intersectImpl(k: @Vector(4, f32), pos: @Vector(2, f32), dir: @Vector(2, f32))
     const intersectionFunction = poly.Quadratic{
         .a = line.a * (k[0] - k[1] - k[2] + k[3]),
         .b = line.b * (k[0] - k[1] - k[2] + k[3]) + line.a * (k[2] - k[0]) + k[1] - k[0],
-        .c = line.b * (k[2] - k[0]) + k[0] - edge_threshold,
+        .c = line.b * (k[2] - k[0]) + k[0] - edge_hit_threshold,
     };
 
     const roots = intersectionFunction.roots() orelse return noIntersection(k, pos);
@@ -91,7 +106,13 @@ fn intersectImpl(k: @Vector(4, f32), pos: @Vector(2, f32), dir: @Vector(2, f32))
 
     const hit: @Vector(2, f32) = .{ root, line.value(root) };
 
-    if ((hit[0] < 0 or hit[0] > 1 or hit[1] < 0 or hit[1] > 1) or (@reduce(.Add, (hit - pos) * dir) < 0)) {
+    if (@reduce(.Add, (hit - pos) * dir) < 0) {
+        // std.log.info("Hit behind: {}", .{hit});
+        return noIntersection(k, pos);
+    }
+
+    if ((hit[0] < 0 or hit[0] > 1 or hit[1] < 0 or hit[1] > 1)) {
+        // std.log.info("Hit outside: {}, r1: {}, r2: {}", .{ hit, @Vector(2, f32){ roots[0], line.value(roots[0]) }, @Vector(2, f32){ roots[1], line.value(roots[1]) } });
         return noIntersection(k, pos);
     }
 
@@ -174,4 +195,15 @@ test "one_cell_ul_hits_in_bounds" {
     try std.testing.expectApproxEqAbs(0.46983, g[1], epsilon);
     try std.testing.expectApproxEqAbs(0.83376, n[0], epsilon);
     try std.testing.expectApproxEqAbs(0.55213, n[1], epsilon);
+}
+
+test "regression_001" {
+    {
+        const result = intersection(.{ 0, 1, 0, 1 }, .{ 3.19065093e-01, -1 }, .{ 6.48091614e-01, -7.61562407e-01 });
+        std.debug.print("result: {}\n", .{result});
+    }
+    {
+        const result = intersection(.{ 0, 1, 0, 1 }, .{ 3.19065093e-01, -1 }, .{ 6.50e-01, -7.61562407e-01 });
+        std.debug.print("result: {}\n", .{result});
+    }
 }

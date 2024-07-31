@@ -49,12 +49,15 @@ pub fn tickProcess(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!voi
         (self.rand.random().floatNorm(f32) + 1) * -40,
     };
 
-    switch (ctx.systems.time.tick_current % 400) {
+    // const random_vel_crate: @Vector(2, f32) = .{ 1.30867904e+02, 9.06891822e-01 };
+
+    switch (ctx.systems.time.tick_current % 410) {
         0 => {
             self.id_chunk = try prototypes.Chunk.default(ctx, .{ 0.1, -50 }, random_vel_chunk);
             self.id_crate = try prototypes.Crate.default(ctx, .{ 10, -50 }, random_vel_crate);
+            std.log.info("Crate spawn vel: {}", .{random_vel_crate});
         },
-        390 => {
+        400 => {
             ctx.systems.entities.destroyEntity(ctx, self.id_chunk);
             ctx.systems.entities.destroyEntity(ctx, self.id_crate);
         },
