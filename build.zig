@@ -1,14 +1,24 @@
 const std = @import("std");
 
-const thirdparty = @import("thirdparty/modules.zig");
-
 const gen_spv = @import("build/gen_spv.zig");
 const gen_glsl = @import("build/gen_glsl.zig");
-const options = @import("build/options.zig");
+const thirdparty = @import("thirdparty/modules.zig");
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    const use_llvm = b.option(bool, "use-llvm", "Use LLVM backend. (default: true)");
+    const profiling = b.option(bool, "profiling", "Enable profiling features. (default: false)");
+    const debug_ui = b.option(bool, "debug-ui", "Enable debug ui tools. (default: false)");
+    const lock_tick = b.option(bool, "lock-tick", "Locks 1 tick per frame. (default: false)");
+    const lock_fps = b.option(f32, "lock-fps", "Limits FPS to this limit. (default: null)");
+
+    const options = b.addOptions();
+    options.addOption(bool, "profiling", profiling orelse false);
+    options.addOption(bool, "debug_ui", debug_ui orelse false);
+    options.addOption(bool, "lock_tick", lock_tick orelse false);
+    options.addOption(?f32, "lock_fps", lock_fps orelse null);
 
     const dep_glfw = b.dependency("mach_glfw", .{
         .target = target,
@@ -21,7 +31,7 @@ pub fn build(b: *std.Build) !void {
     vk_generate_cmd.addFileArg(vk_registry_xml);
     const mod_vk = b.createModule(.{ .root_source_file = vk_generate_cmd.addOutputFileArg("vk.zig") });
 
-    const mod_options = options.module(b);
+    const mod_options = options.createModule();
     const mod_stb = thirdparty.stb.module(b);
     const mod_nuklear = thirdparty.nuklear.module(b);
     const mod_lz4 = thirdparty.lz4.module(b);
@@ -55,7 +65,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("modules/app/main.zig"),
         .target = target,
         .optimize = optimize,
-        .use_llvm = false,
+        .use_llvm = use_llvm,
     });
 
     exe.step.dependOn(&step_gen_spv.step);

@@ -45,36 +45,30 @@ pub const Mesh = struct {
 meshes: utils.IdArray2(Mesh),
 meshes_id_map: std.StringArrayHashMap(u32),
 
-bodies: utils.IdArray2(Body),
-entity_id_map: std.AutoHashMap(u32, u32),
+bodies: utils.ExtIdMappedIdArray2(Body),
 
 gravity: f32 = 100,
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
     return .{
-        .bodies = utils.IdArray2(Body).init(allocator),
-        .entity_id_map = std.AutoHashMap(u32, u32).init(allocator),
+        .bodies = utils.ExtIdMappedIdArray2(Body).init(allocator),
         .meshes = utils.IdArray2(Mesh).init(allocator),
         .meshes_id_map = std.StringArrayHashMap(u32).init(allocator),
     };
 }
 
 pub fn deinit(self: *@This()) void {
-    self.entity_id_map.deinit();
     self.meshes_id_map.deinit();
     self.bodies.deinit();
     self.meshes.deinit();
 }
 
 pub fn createId(self: *@This(), comp: Body, entity_id: u32) !u32 {
-    const internal_id = try self.bodies.add(comp);
-    try self.entity_id_map.put(entity_id, internal_id);
-    return internal_id;
+    return self.bodies.put(entity_id, comp);
 }
 
 pub fn destroyByEntityId(self: *@This(), id: u32) void {
-    const kv = self.entity_id_map.fetchRemove(id) orelse @panic("Entity id not found");
-    self.bodies.remove(kv.value);
+    self.bodies.remove(id);
 }
 
 pub fn getMeshIdForPath(self: *@This(), path: []const u8) !u32 {
