@@ -13,10 +13,10 @@ pub const Entity = struct {
 
 const EntityDeinitFn = fn (self: Entity, ctx: *zigra.Context, id: u32) void;
 
-store: utils.IdStore(Entity),
+store: utils.IdArray(Entity),
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
-    return .{ .store = utils.IdStore(Entity).init(allocator) };
+    return .{ .store = utils.IdArray(Entity).init(allocator) };
 }
 
 pub fn deinit(self: *@This()) void {

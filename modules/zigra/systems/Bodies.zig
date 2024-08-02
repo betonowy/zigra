@@ -42,19 +42,19 @@ pub const Mesh = struct {
     bounce_loss: f16 = 0.1,
 };
 
-meshes: utils.IdStore2(Mesh),
+meshes: utils.IdArray2(Mesh),
 meshes_id_map: std.StringArrayHashMap(u32),
 
-bodies: utils.IdStore2(Body),
+bodies: utils.IdArray2(Body),
 entity_id_map: std.AutoHashMap(u32, u32),
 
 gravity: f32 = 100,
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
     return .{
-        .bodies = utils.IdStore2(Body).init(allocator),
+        .bodies = utils.IdArray2(Body).init(allocator),
         .entity_id_map = std.AutoHashMap(u32, u32).init(allocator),
-        .meshes = utils.IdStore2(Mesh).init(allocator),
+        .meshes = utils.IdArray2(Mesh).init(allocator),
         .meshes_id_map = std.StringArrayHashMap(u32).init(allocator),
     };
 }

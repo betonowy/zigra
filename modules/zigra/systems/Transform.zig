@@ -15,12 +15,12 @@ pub const Transform = struct {
     } = .{},
 };
 
-transforms: utils.IdStore(Transform),
+transforms: utils.IdArray(Transform),
 entity_id_map: std.AutoHashMap(u32, u32),
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
     return .{
-        .transforms = utils.IdStore(Transform).init(allocator),
+        .transforms = utils.IdArray(Transform).init(allocator),
         .entity_id_map = std.AutoHashMap(u32, u32).init(allocator),
     };
 }

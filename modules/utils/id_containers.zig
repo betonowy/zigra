@@ -108,7 +108,7 @@ pub fn IdArray(T: type) type {
                 const new_cap = self.mal.capacity / 4;
 
                 std.log.info(
-                    "Shrinking IdStore active items capacity: len: {}, old cap: {}, new cap: {}",
+                    "Shrinking IdArray active items capacity: len: {}, old cap: {}, new cap: {}",
                     .{ self.mal.len, self.mal.capacity, new_cap },
                 );
 
@@ -121,7 +121,7 @@ pub fn IdArray(T: type) type {
                 const new_cap = self.mal.capacity / 4;
 
                 std.log.info(
-                    "Shrinking IdStore free items capacity: len: {}, old cap: {}, new cap: {}",
+                    "Shrinking IdArray free items capacity: len: {}, old cap: {}, new cap: {}",
                     .{ self.free_list.len, self.free_list.capacity, new_cap },
                 );
 
@@ -343,10 +343,49 @@ pub fn ExtIdMappedIdArray2(T: type) type {
     return struct {
         arr: IdArray2(T),
         map: std.AutoHashMap(u32, u32),
+
+        pub fn init(allocator: std.mem.Allocator) @This() {
+            return .{
+                .arr = IdArray2(T).init(allocator),
+                .map = std.AutoHashMap(u32, u32).init(allocator),
+            };
+        }
+
+        pub fn deinit(self: *@This()) void {
+            self.arr.deinit();
+            self.map.deinit();
+        }
+
+        pub fn iterator(self: *const @This()) IdArray2(T).Iterator {
+            return self.arr.iterator();
+        }
+
+        /// (Slow) get item pointer by it's external id
+        pub fn getByExtId(self: *const @This(), ext_id: u32) ?*T {
+            return if (self.map.get(ext_id)) |int_id| self.arr.at(int_id) else null;
+        }
+
+        /// (Fast) get item pointer by it's internal id
+        pub fn getByIntId(self: *const @This(), int_id: u32) *T {
+            return self.arr.at(int_id);
+        }
+
+        /// returns internal id for quicker lookup
+        pub fn put(self: *@This(), ext_id: u32, v: T) !u32 {
+            const int_id = try self.arr.add(v);
+            try self.map.putNoClobber(ext_id, v);
+            return int_id;
+        }
+
+        /// Asserts that the key is valid
+        pub fn remove(self: *@This(), ext_id: u32) void {
+            const kv = self.map.fetchRemove(ext_id) orelse unreachable;
+            self.arr.remove(kv.value);
+        }
     };
 }
 
-/// Strings used in this container must have a static lifetime
+/// Strings used in this container must outlive the container
 pub fn StaticStringMappedIdArray2(T: type) type {
     return struct {
         arr: IdArray2(T),

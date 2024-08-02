@@ -14,12 +14,12 @@ const SpriteRef = struct {
 
 const SpriteType = enum { Opaque, Blended };
 
-sprite_refs: utils.IdStore(SpriteRef),
+sprite_refs: utils.IdArray(SpriteRef),
 entity_id_map: std.AutoHashMap(u32, u32),
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
     return .{
-        .sprite_refs = utils.IdStore(SpriteRef).init(allocator),
+        .sprite_refs = utils.IdArray(SpriteRef).init(allocator),
         .entity_id_map = std.AutoHashMap(u32, u32).init(allocator),
     };
 }

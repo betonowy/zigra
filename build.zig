@@ -55,6 +55,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("modules/app/main.zig"),
         .target = target,
         .optimize = optimize,
+        .use_llvm = false,
     });
 
     exe.step.dependOn(&step_gen_spv.step);
