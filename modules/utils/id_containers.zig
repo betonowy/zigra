@@ -373,7 +373,7 @@ pub fn ExtIdMappedIdArray2(T: type) type {
         /// returns internal id for quicker lookup
         pub fn put(self: *@This(), ext_id: u32, v: T) !u32 {
             const int_id = try self.arr.add(v);
-            try self.map.putNoClobber(ext_id, v);
+            try self.map.putNoClobber(ext_id, int_id);
             return int_id;
         }
 

@@ -13,10 +13,10 @@ pub const Entity = struct {
 
 const EntityDeinitFn = fn (self: Entity, ctx: *zigra.Context, id: u32) void;
 
-store: utils.IdArray(Entity),
+store: utils.IdArray2(Entity),
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
-    return .{ .store = utils.IdArray(Entity).init(allocator) };
+    return .{ .store = utils.IdArray2(Entity).init(allocator) };
 }
 
 pub fn deinit(self: *@This()) void {
@@ -24,27 +24,10 @@ pub fn deinit(self: *@This()) void {
 }
 
 pub fn destroyEntity(self: *@This(), ctx: *zigra.Context, id: u32) void {
-    const slice = self.store.slice();
-
-    std.debug.assert(slice.items(.active)[id]);
-
-    const entity: *Entity = &slice.items(.payload)[id];
-    entity.deinit(ctx, id);
-
-    self.store.destroyId(id) catch unreachable;
+    self.store.at(id).deinit(ctx, id);
+    self.store.remove(id);
 }
 
-const CreateEntityResult = struct {
-    entity: *Entity,
-    id: u32,
-};
-
-pub fn create(self: *@This(), deinit_fn: *const EntityDeinitFn) !CreateEntityResult {
-    const id = try self.store.createId();
-    const slice = self.store.slice();
-
-    const entity: *Entity = &slice.items(.payload)[id];
-    entity.deinit_fn = deinit_fn;
-
-    return .{ .entity = entity, .id = id };
+pub fn create(self: *@This(), deinit_fn: *const EntityDeinitFn) !u32 {
+    return try self.store.add(.{ .deinit_fn = deinit_fn });
 }

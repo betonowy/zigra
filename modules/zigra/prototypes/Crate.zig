@@ -8,9 +8,9 @@ fn deinit(_: systems.Entities.Entity, ctx: *zigra.Context, id: u32) void {
 }
 
 pub fn default(ctx: *zigra.Context, pos: @Vector(2, f32), vel: @Vector(2, f32)) !u32 {
-    const entity = try ctx.systems.entities.create(&deinit);
+    const id_entity = try ctx.systems.entities.create(&deinit);
     const id_vk_sprite = ctx.systems.vulkan.impl.atlas.getRectIdByPath("images/crate_16.png") orelse unreachable;
-    const id_transform = try ctx.systems.transform.createId(.{ .pos = pos, .vel = vel }, entity.id);
+    const id_transform = try ctx.systems.transform.createId(.{ .pos = pos, .vel = vel }, id_entity);
 
     const id_mesh = try ctx.systems.bodies.getMeshIdForPath("res/rbm/crate.json");
     const mesh_ptr = ctx.systems.bodies.getMeshById(id_mesh);
@@ -40,13 +40,13 @@ pub fn default(ctx: *zigra.Context, pos: @Vector(2, f32), vel: @Vector(2, f32)) 
         .id_transform = id_transform,
         .id_vk_sprite = id_vk_sprite,
         .type = .Opaque,
-    }, entity.id);
+    }, id_entity);
 
     _ = try ctx.systems.bodies.createId(.{ .rigid = .{
-        .id_entity = entity.id,
+        .id_entity = id_entity,
         .id_mesh = id_mesh,
         .id_transform = id_transform,
-    } }, entity.id);
+    } }, id_entity);
 
-    return entity.id;
+    return id_entity;
 }

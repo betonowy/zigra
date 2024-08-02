@@ -14,43 +14,35 @@ const SpriteRef = struct {
 
 const SpriteType = enum { Opaque, Blended };
 
-sprite_refs: utils.IdArray(SpriteRef),
-entity_id_map: std.AutoHashMap(u32, u32),
+sprite_refs: utils.ExtIdMappedIdArray2(SpriteRef),
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
-    return .{
-        .sprite_refs = utils.IdArray(SpriteRef).init(allocator),
-        .entity_id_map = std.AutoHashMap(u32, u32).init(allocator),
-    };
+    return .{ .sprite_refs = utils.ExtIdMappedIdArray2(SpriteRef).init(allocator) };
 }
 
 pub fn deinit(self: *@This()) void {
-    self.entity_id_map.deinit();
     self.sprite_refs.deinit();
 }
 
 pub fn createId(self: *@This(), comp: SpriteRef, entity_id: u32) !u32 {
-    const internal_id = try self.sprite_refs.push(comp);
-    try self.entity_id_map.put(entity_id, internal_id);
-    return internal_id;
+    return try self.sprite_refs.put(entity_id, comp);
 }
 
-pub fn destroyByEntityId(self: *@This(), id: u32) void {
-    const kv = self.entity_id_map.fetchRemove(id) orelse @panic("Entity id not found");
-    self.sprite_refs.destroyId(kv.value) catch @panic("Failed to destroy sprite id");
+pub fn destroyByEntityId(self: *@This(), eid: u32) void {
+    self.sprite_refs.remove(eid);
 }
 
 pub fn render(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     const ctx = ctx_base.parent(zigra.Context);
-    const transforms = ctx.systems.transform.transforms.slice().items(.payload);
+    const transforms = ctx.systems.transform.data.arr.getDataSlice();
     var iterator = self.sprite_refs.iterator();
 
-    while (iterator.next()) |fields| {
-        const transform: *systems.Transform.Transform = &transforms[fields.payload.id_transform];
-        const depth = fields.payload.depth;
+    while (iterator.next()) |sprite_ref| {
+        const transform: *systems.Transform.Data = &transforms[sprite_ref.id_transform];
+        const depth = sprite_ref.depth;
         const pos = transform.visual.pos;
         const rot = transform.visual.rot;
-        try renderSprite(ctx, pos, -rot, depth, fields.payload.id_vk_sprite);
+        try renderSprite(ctx, pos, -rot, depth, sprite_ref.id_vk_sprite);
     }
 }
 

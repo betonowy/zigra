@@ -8,24 +8,24 @@ fn deinit(_: systems.Entities.Entity, ctx: *zigra.Context, id: u32) void {
 }
 
 pub fn default(ctx: *zigra.Context, pos: @Vector(2, f32), vel: @Vector(2, f32)) !u32 {
-    const entity = try ctx.systems.entities.create(&deinit);
+    const id_entity = try ctx.systems.entities.create(&deinit);
     const id_vk_sprite = ctx.systems.vulkan.impl.atlas.getRectIdByPath("images/chunk_gold.png") orelse unreachable;
-    const id_transform = try ctx.systems.transform.createId(.{ .pos = pos, .vel = vel }, entity.id);
+    const id_transform = try ctx.systems.transform.createId(.{ .pos = pos, .vel = vel }, id_entity);
 
     _ = try ctx.systems.sprite_man.createId(.{
         .id_transform = id_transform,
         .id_vk_sprite = id_vk_sprite,
         .type = .Opaque,
-    }, entity.id);
+    }, id_entity);
 
     _ = try ctx.systems.bodies.createId(.{ .point = .{
         .bounce_loss = 0.1,
         .drag = 0.05,
-        .id_entity = entity.id,
+        .id_entity = id_entity,
         .id_transform = id_transform,
         .sleeping = false,
         .weight = 1,
-    } }, entity.id);
+    } }, id_entity);
 
-    return entity.id;
+    return id_entity;
 }

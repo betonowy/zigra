@@ -91,8 +91,7 @@ pub fn tickProcessBodies(self: *@This(), ctx_base: *lifetime.ContextBase) !void 
     const delay = ctx.systems.time.tickDelay();
     var view = ctx.systems.world.sand_sim.getView();
     const meshes: []Mesh = self.meshes.getDataSlice();
-    const transforms: []systems.Transform.Transform =
-        ctx.systems.transform.transforms.slice().items(.payload);
+    const transforms: []systems.Transform.Data = ctx.systems.transform.data.arr.getDataSlice();
 
     var iterator = self.bodies.iterator();
 
@@ -108,7 +107,7 @@ pub fn tickProcessBodies(self: *@This(), ctx_base: *lifetime.ContextBase) !void 
 fn processBodyPoint(
     self: *@This(),
     view: *systems.World.SandSim.LandscapeView,
-    t_curr: *systems.Transform.Transform,
+    t_curr: *systems.Transform.Data,
     b_curr: *Point,
     delay: f32,
 ) !void {
@@ -170,7 +169,7 @@ fn processBodyPoint(
 fn processBodyRigid(
     self: *@This(),
     view: *systems.World.SandSim.LandscapeView,
-    t_curr: *systems.Transform.Transform,
+    t_curr: *systems.Transform.Data,
     b_curr: *Rigid,
     mesh: *Mesh,
     delay: f32,
@@ -260,9 +259,9 @@ const CollisionDeltas = struct {
 fn processBodyRigidPointCollision(
     self: *@This(),
     view: *systems.World.SandSim.LandscapeView,
-    t_curr: *systems.Transform.Transform,
+    t_curr: *systems.Transform.Data,
     b_curr: *Rigid,
-    t_next: *systems.Transform.Transform,
+    t_next: *systems.Transform.Data,
     b_next: *Rigid,
     mesh: *Mesh,
     point: @Vector(2, f32),
@@ -395,9 +394,9 @@ fn processBodyRigidPointCollision(
 fn processBodyRigidPointSinking(
     self: *@This(),
     view: *systems.World.SandSim.LandscapeView,
-    t_curr: *systems.Transform.Transform,
+    t_curr: *systems.Transform.Data,
     b_curr: *Rigid,
-    t_next: *systems.Transform.Transform,
+    t_next: *systems.Transform.Data,
     b_next: *Rigid,
     mesh: *Mesh,
     point: @Vector(2, f32),
