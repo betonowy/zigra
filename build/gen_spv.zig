@@ -26,7 +26,7 @@ pub fn step(b: *std.Build, opt_gen_step: ?*std.Build.Step) *ShaderStep {
 }
 
 pub fn module(b: *std.Build) *std.Build.Module {
-    return b.createModule(.{ .root_source_file = .{ .path = "modules/shaders/module.gen.zig" } });
+    return b.createModule(.{ .root_source_file = b.path("modules/shaders/module.gen.zig") });
 }
 
 const Shader = struct {
@@ -46,9 +46,9 @@ fn strEqlAnyOf(lhs: []const u8, list: []const []const u8) bool {
     return false;
 }
 
-fn make(build_step: *std.Build.Step, parent_node: *std.Progress.Node) anyerror!void {
+fn make(build_step: *std.Build.Step, make_options: std.Build.Step.MakeOptions) anyerror!void {
     var timer = try std.time.Timer.start();
-    const shader_step = @fieldParentPtr(ShaderStep, "step", build_step);
+    const shader_step: *ShaderStep = @fieldParentPtr("step", build_step);
 
     defer build_step.result_duration_ns = timer.read();
     const b = build_step.owner;
@@ -82,7 +82,7 @@ fn make(build_step: *std.Build.Step, parent_node: *std.Progress.Node) anyerror!v
         }
     }
 
-    var node = parent_node.start("glslc", shaders.items.len);
+    var node = make_options.progress_node.start("glslc", shaders.items.len);
     defer node.end();
 
     const glslc = b.findProgram(&.{"glslc"}, &.{}) catch |err| {
@@ -92,7 +92,7 @@ fn make(build_step: *std.Build.Step, parent_node: *std.Progress.Node) anyerror!v
 
     for (shaders.items) |shader| {
         defer node.completeOne();
-        node.setUnit(try std.mem.concat(allocator, u8, &.{ ": ", shader.input }));
+        // node.setUnit(try std.mem.concat(allocator, u8, &.{ ": ", shader.input }));
 
         const source_stat = try b.build_root.handle.statFile(shader.input);
         const opt_output_stat: ?std.fs.Dir.Stat = b.build_root.handle.statFile(shader.output) catch |err| brk: {
@@ -106,7 +106,7 @@ fn make(build_step: *std.Build.Step, parent_node: *std.Progress.Node) anyerror!v
 
         var run = std.Build.Step.Run.create(b, "glslc");
         run.addArgs(&.{ glslc, "-I", shaders_path, "--target-env=vulkan1.2", shader.input, "-o", shader.output });
-        try run.step.make(&node);
+        try run.step.make(make_options);
 
         build_step.result_cached = false;
         build_step.result_peak_rss = @max(build_step.result_peak_rss, run.step.result_peak_rss);

@@ -23,7 +23,7 @@ pub const ContextBase = struct {
     }
 
     pub fn parent(self: *@This(), T: type) *T {
-        return @fieldParentPtr(T, "base", self);
+        return @alignCast(@fieldParentPtr("base", self));
     }
 };
 
@@ -336,7 +336,7 @@ const ThreadWorker = struct {
             data.wait_mtx.lock();
             defer data.wait_mtx.unlock();
 
-            _ = data.unfinished_tasks.fetchSub(1, .SeqCst);
+            _ = data.unfinished_tasks.fetchSub(1, .seq_cst);
             data.wait_cnd.broadcast();
         }
     }

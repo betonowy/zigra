@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const glfw = @import("glfw");
 
-const vk = @import("./vk.zig");
+const vk = @import("vk");
 const types = @import("types.zig");
 const initialization = @import("init.zig");
 const Atlas = @import("Atlas.zig");

@@ -118,7 +118,7 @@ fn glfwCbError(error_code: glfw.ErrorCode, description: [:0]const u8) void {
 }
 
 fn vkCbCreateWindowSurface(child_ptr: *const Vulkan.WindowCallbacks, instance: Vulkan.vk.Instance) anyerror!Vulkan.vk.SurfaceKHR {
-    const self = @fieldParentPtr(@This(), "cbs_vulkan", child_ptr);
+    const self: *const @This() = @fieldParentPtr("cbs_vulkan", child_ptr);
     var surface: Vulkan.vk.SurfaceKHR = undefined;
 
     const result = @as(Vulkan.vk.Result, @enumFromInt(
@@ -131,7 +131,7 @@ fn vkCbCreateWindowSurface(child_ptr: *const Vulkan.WindowCallbacks, instance: V
 }
 
 fn vkCbGetFramebufferSize(child_ptr: *const Vulkan.WindowCallbacks) Vulkan.vk.Extent2D {
-    const self = @fieldParentPtr(@This(), "cbs_vulkan", child_ptr);
+    const self: *const @This() = @fieldParentPtr("cbs_vulkan", child_ptr);
     const size = self.window.getFramebufferSize();
     return .{ .width = size.width, .height = size.height };
 }

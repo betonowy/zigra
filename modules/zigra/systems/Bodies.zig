@@ -42,19 +42,19 @@ pub const Mesh = struct {
     bounce_loss: f16 = 0.1,
 };
 
-meshes: utils.IdStore(Mesh),
+meshes: utils.IdStore2(Mesh),
 meshes_id_map: std.StringArrayHashMap(u32),
 
-bodies: utils.IdStore(Body),
+bodies: utils.IdStore2(Body),
 entity_id_map: std.AutoHashMap(u32, u32),
 
 gravity: f32 = 100,
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
     return .{
-        .bodies = utils.IdStore(Body).init(allocator),
+        .bodies = utils.IdStore2(Body).init(allocator),
         .entity_id_map = std.AutoHashMap(u32, u32).init(allocator),
-        .meshes = utils.IdStore(Mesh).init(allocator),
+        .meshes = utils.IdStore2(Mesh).init(allocator),
         .meshes_id_map = std.StringArrayHashMap(u32).init(allocator),
     };
 }
@@ -67,24 +67,24 @@ pub fn deinit(self: *@This()) void {
 }
 
 pub fn createId(self: *@This(), comp: Body, entity_id: u32) !u32 {
-    const internal_id = try self.bodies.push(comp);
+    const internal_id = try self.bodies.add(comp);
     try self.entity_id_map.put(entity_id, internal_id);
     return internal_id;
 }
 
 pub fn destroyByEntityId(self: *@This(), id: u32) void {
     const kv = self.entity_id_map.fetchRemove(id) orelse @panic("Entity id not found");
-    self.bodies.destroyId(kv.value) catch @panic("Transform id not found");
+    self.bodies.remove(kv.value);
 }
 
 pub fn getMeshIdForPath(self: *@This(), path: []const u8) !u32 {
     const res = try self.meshes_id_map.getOrPut(path);
-    if (!res.found_existing) res.value_ptr.* = try self.meshes.createId();
+    if (!res.found_existing) res.value_ptr.* = try self.meshes.add(undefined);
     return res.value_ptr.*;
 }
 
-pub fn getMeshById(self: *@This(), id: u32) !*Mesh {
-    return &self.meshes.slice().items(.payload)[id];
+pub fn getMeshById(self: *@This(), id: u32) *Mesh {
+    return self.meshes.at(id);
 }
 
 fn solidCmp(cell: systems.World.SandSim.Cell) f32 {
@@ -96,14 +96,14 @@ pub fn tickProcessBodies(self: *@This(), ctx_base: *lifetime.ContextBase) !void 
 
     const delay = ctx.systems.time.tickDelay();
     var view = ctx.systems.world.sand_sim.getView();
-    const meshes: []Mesh = self.meshes.slice().items(.payload);
+    const meshes: []Mesh = self.meshes.getDataSlice();
     const transforms: []systems.Transform.Transform =
         ctx.systems.transform.transforms.slice().items(.payload);
 
     var iterator = self.bodies.iterator();
 
-    while (iterator.next()) |fields| {
-        switch (fields.payload.*) {
+    while (iterator.next()) |body| {
+        switch (body.*) {
             .point => |*p| try self.processBodyPoint(&view, &transforms[p.id_transform], p, delay),
             .rigid => |*r| try self.processBodyRigid(&view, &transforms[r.id_transform], r, &meshes[r.id_mesh], delay, ctx),
             else => @panic("Unimplemented"),

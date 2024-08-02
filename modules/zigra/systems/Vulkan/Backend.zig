@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const vk = @import("vk.zig");
+const vk = @import("vk");
 const types = @import("types.zig");
 const initialization = @import("init.zig");
 const builder = @import("builder.zig");
@@ -1057,6 +1057,8 @@ fn createFrameData(self: *@This()) !void {
             .dst_binding = 0,
             .dst_set = frame.descriptor_set,
             .p_buffer_info = utils.meta.asConstArray(&ds_ssb_info),
+            .p_image_info = undefined,
+            .p_texel_buffer_view = undefined,
         };
 
         const write_atlas = vk.WriteDescriptorSet{
@@ -1066,6 +1068,8 @@ fn createFrameData(self: *@This()) !void {
             .dst_binding = 1,
             .dst_set = frame.descriptor_set,
             .p_image_info = utils.meta.asConstArray(&ds_atlas_info),
+            .p_buffer_info = undefined,
+            .p_texel_buffer_view = undefined,
         };
 
         const write_img = vk.WriteDescriptorSet{
@@ -1075,6 +1079,8 @@ fn createFrameData(self: *@This()) !void {
             .dst_binding = 2,
             .dst_set = frame.descriptor_set,
             .p_image_info = utils.meta.asConstArray(&ds_target_info),
+            .p_buffer_info = undefined,
+            .p_texel_buffer_view = undefined,
         };
 
         const write_landscape = vk.WriteDescriptorSet{
@@ -1084,6 +1090,8 @@ fn createFrameData(self: *@This()) !void {
             .dst_binding = 3,
             .dst_set = frame.descriptor_set,
             .p_image_info = &ds_landscape_info,
+            .p_buffer_info = undefined,
+            .p_texel_buffer_view = undefined,
         };
 
         const writes = [_]vk.WriteDescriptorSet{ write_ssb, write_atlas, write_img, write_landscape };

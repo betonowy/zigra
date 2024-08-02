@@ -578,7 +578,7 @@ pub fn simulateCells(self: *@This()) !void {
     };
 
     try self.ensureArea(ensure_extent);
-    var rand = std.rand.Sfc64.init(self.iteration);
+    var rand = std.Random.Sfc64.init(self.iteration);
     var view = self.getView();
 
     var iy: usize = 0;
@@ -759,7 +759,7 @@ fn simulateLiquid(self: *@This(), view: *LandscapeView, current_in: *Cell, pos_i
                     current.property_1 = 0;
                     current.property_2 = 0;
 
-                    var sfc = std.rand.Sfc64.init(rand +% @as(u64, @bitCast(pos_in)));
+                    var sfc = std.Random.Sfc64.init(rand +% @as(u64, @bitCast(pos_in)));
 
                     try self.pushParticle(.{
                         .pos = @floatFromInt(other_pos),

@@ -13,7 +13,7 @@ pub fn default(ctx: *zigra.Context, pos: @Vector(2, f32), vel: @Vector(2, f32)) 
     const id_transform = try ctx.systems.transform.createId(.{ .pos = pos, .vel = vel }, entity.id);
 
     const id_mesh = try ctx.systems.bodies.getMeshIdForPath("res/rbm/crate.json");
-    const mesh_ptr = try ctx.systems.bodies.getMeshById(id_mesh);
+    const mesh_ptr = ctx.systems.bodies.getMeshById(id_mesh);
 
     {
         mesh_ptr.points = .{};

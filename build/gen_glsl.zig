@@ -9,12 +9,13 @@ pub fn step(b: *std.Build) *std.Build.Step {
     return build_step;
 }
 
-fn make(build_step: *std.Build.Step, parent_node: *std.Progress.Node) anyerror!void {
+fn make(build_step: *std.Build.Step, make_options: std.Build.Step.MakeOptions) anyerror!void {
     var timer = try std.time.Timer.start();
     defer build_step.result_duration_ns = timer.read();
 
     const b = build_step.owner;
-    var node = parent_node.start("generating", 0);
+    var node = make_options.progress_node.start("Generating glsl code from zig types", 0);
+    defer make_options.progress_node.end();
 
     var arena = std.heap.ArenaAllocator.init(b.allocator);
     defer arena.deinit();
@@ -112,7 +113,7 @@ fn areContentsUpToDate(b: *std.Build, path: []const u8, contents: []const u8, al
 fn replaceIfDifferent(b: *std.Build, path: []const u8, contents: []const u8, allocator: std.mem.Allocator) !bool {
     if (try areContentsUpToDate(b, path, contents, allocator)) return false;
     try b.build_root.handle.makePath(std.fs.path.dirname(path).?);
-    try b.build_root.handle.writeFile2(.{ .sub_path = path, .data = contents });
+    try b.build_root.handle.writeFile(.{ .sub_path = path, .data = contents });
     return true;
 }
 

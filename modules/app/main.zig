@@ -1,5 +1,5 @@
 comptime {
-    @setFloatMode(.Optimized);
+    @setFloatMode(.optimized);
 }
 
 const std = @import("std");

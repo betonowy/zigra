@@ -6,7 +6,7 @@ const types = @import("Vulkan/types.zig");
 const lifetime = @import("lifetime");
 const zigra = @import("../root.zig");
 
-pub const vk = @import("Vulkan/vk.zig");
+pub const vk = @import("vk");
 pub const WindowCallbacks = types.WindowCallbacks;
 
 allocator: std.mem.Allocator,

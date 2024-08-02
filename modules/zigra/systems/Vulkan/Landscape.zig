@@ -1,5 +1,5 @@
 const std = @import("std");
-const vk = @import("vk.zig");
+const vk = @import("vk");
 const types = @import("types.zig");
 const Backend = @import("Backend.zig");
 const utils = @import("utils");

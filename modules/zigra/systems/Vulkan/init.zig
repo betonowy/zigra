@@ -1,4 +1,4 @@
-const vk = @import("./vk.zig");
+const vk = @import("vk");
 const types = @import("types.zig");
 const std = @import("std");
 const builtin = @import("builtin");
