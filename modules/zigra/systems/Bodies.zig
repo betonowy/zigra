@@ -90,8 +90,8 @@ pub fn tickProcessBodies(self: *@This(), ctx_base: *lifetime.ContextBase) !void 
 
     const delay = ctx.systems.time.tickDelay();
     var view = ctx.systems.world.sand_sim.getView();
-    const meshes: []Mesh = self.meshes.getDataSlice();
-    const transforms: []systems.Transform.Data = ctx.systems.transform.data.arr.getDataSlice();
+    const meshes: []Mesh = self.meshes.data;
+    const transforms: []systems.Transform.Data = ctx.systems.transform.data.arr.data;
 
     var iterator = self.bodies.iterator();
 

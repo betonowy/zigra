@@ -162,12 +162,15 @@ pub fn IdArray2(T: type) type {
 
         allocator: std.mem.Allocator,
         buffer: []align(buffer_alignment) u8 = undefined,
+
+        data: []T = undefined,
+        keys: []KeyMask = undefined,
+
         capacity: u32 = 0,
+        last_insert_index: u32 = 0,
 
         pub const Iterator = struct {
             parent: *const Self,
-            data: []T,
-            keys: []KeyMask,
             cursor: u32 = 0,
 
             pub fn next(self: *@This()) ?*T {
@@ -177,9 +180,9 @@ pub fn IdArray2(T: type) type {
                     const div = self.cursor / @bitSizeOf(KeyMask);
                     const mod = self.cursor % @bitSizeOf(KeyMask);
 
-                    if ((self.keys[div] & (@as(KeyMask, 1) << @intCast(mod))) == 0) continue;
+                    if ((self.parent.keys[div] & (@as(KeyMask, 1) << @intCast(mod))) == 0) continue;
 
-                    return &self.data[self.cursor];
+                    return &self.parent.data[self.cursor];
                 }
 
                 return null;
@@ -200,11 +203,7 @@ pub fn IdArray2(T: type) type {
         }
 
         pub fn iterator(self: *const @This()) Iterator {
-            return .{
-                .parent = self,
-                .data = self.getDataSlice(),
-                .keys = self.getKeyMaskSlice(),
-            };
+            return .{ .parent = self };
         }
 
         pub fn add(self: *@This(), value: T) !u32 {
@@ -228,7 +227,41 @@ pub fn IdArray2(T: type) type {
 
         pub fn remove(self: *@This(), id: u32) void {
             self.setIdMask(id, false);
-            self.getDataSlice()[id] = undefined;
+            self.data[id] = undefined;
+        }
+
+        pub fn shrinkIfOversized(self: *@This(), ratio: u32) !void {
+            std.debug.assert(ratio > 1);
+
+            if (self.capacity == 0) return;
+            var target_size: u32 = 0;
+
+            for (1..self.keys.len + 1) |i| {
+                const index = self.keys.len - i;
+                if (self.keys[index] != 0) {
+                    target_size = @intCast((index + 1) * @bitSizeOf(KeyMask));
+                    break;
+                }
+            }
+
+            if (target_size == 0) {
+                self.allocator.free(self.buffer);
+                self.last_insert_index = 0;
+                self.capacity = 0;
+                return;
+            }
+
+            if (self.keys.len * @bitSizeOf(KeyMask) / target_size < ratio) return;
+
+            const old = self.*;
+            defer self.allocator.free(old.buffer);
+
+            self.buffer = try self.allocator.alignedAlloc(u8, buffer_alignment, calculateRequiredBufferSize(target_size));
+            self.capacity = target_size;
+            self.updateSlices();
+
+            @memcpy(self.data, old.data[0..self.data.len]);
+            @memcpy(self.keys, old.keys[0..self.keys.len]);
         }
 
         fn findFreeId(self: @This()) ?u32 {
@@ -262,14 +295,27 @@ pub fn IdArray2(T: type) type {
 
         fn setCapacityInit(self: *@This(), size: u32) !void {
             std.debug.assert(self.capacity == 0);
+
             self.buffer = try self.allocator.alignedAlloc(u8, buffer_alignment, calculateRequiredBufferSize(size));
             self.capacity = size;
-            @memset(self.getKeyMaskSlice(), 0);
+            self.updateSlices();
+
+            @memset(self.keys, 0);
         }
 
-        fn setCapacityMove(self: @This(), size: u32) !void {
-            _ = size; // autofix
+        fn setCapacityMove(self: *@This(), size: u32) !void {
             std.debug.assert(self.capacity != 0);
+
+            const old = self.*;
+            defer self.allocator.free(old.buffer);
+
+            self.buffer = try self.allocator.alignedAlloc(u8, buffer_alignment, calculateRequiredBufferSize(size));
+            self.capacity = size;
+            self.updateSlices();
+
+            @memcpy(self.data[0..old.data.len], old.data);
+            @memcpy(self.keys[0..old.keys.len], old.keys);
+            @memset(self.keys[old.keys.len..], 0);
         }
 
         fn getKeyArraySize(capacity: u32) u32 {
@@ -290,12 +336,17 @@ pub fn IdArray2(T: type) type {
             return getDataOffsetStart(capacity) + capacity * @sizeOf(T);
         }
 
-        pub fn getKeyMaskSlice(self: @This()) []KeyMask {
+        fn updateSlices(self: *@This()) void {
+            self.data = self.getDataSlice();
+            self.keys = self.getKeyMaskSlice();
+        }
+
+        fn getKeyMaskSlice(self: @This()) []KeyMask {
             const key_mask_start_ptr = @as([*]KeyMask, @ptrCast(self.buffer.ptr));
             return key_mask_start_ptr[0..@divExact(self.capacity, @bitSizeOf(KeyMask))];
         }
 
-        pub fn getDataSlice(self: @This()) []T {
+        fn getDataSlice(self: @This()) []T {
             const data_start_ptr = @as([*]T, @alignCast(@ptrCast(self.buffer.ptr + getDataOffsetStart(self.capacity))));
             return data_start_ptr[0..self.capacity];
         }
@@ -305,9 +356,9 @@ pub fn IdArray2(T: type) type {
             const mod = id % @bitSizeOf(KeyMask);
 
             if (value) {
-                self.getKeyMaskSlice()[div] |= @as(KeyMask, 1) << @intCast(mod);
+                self.keys[div] |= @as(KeyMask, 1) << @intCast(mod);
             } else {
-                self.getKeyMaskSlice()[div] &= ~(@as(KeyMask, 1) << @intCast(mod));
+                self.keys[div] &= ~(@as(KeyMask, 1) << @intCast(mod));
             }
         }
     };
@@ -317,26 +368,54 @@ test "IdArray2" {
     var ia = IdArray2(f32).init(std.testing.allocator);
     defer ia.deinit();
 
-    try std.testing.expectEqual(0, (try ia.add(0)).id);
-    try std.testing.expectEqual(1, (try ia.add(1)).id);
-    try std.testing.expectEqual(2, (try ia.add(2)).id);
-    try std.testing.expectEqual(3, (try ia.add(3)).id);
-    try std.testing.expectEqual(4, (try ia.add(4)).id);
+    try std.testing.expectEqual(0, try ia.add(0));
+    try std.testing.expectEqual(1, try ia.add(1));
+    try std.testing.expectEqual(2, try ia.add(2));
+    try std.testing.expectEqual(3, try ia.add(3));
+    try std.testing.expectEqual(4, try ia.add(4));
 
     ia.remove(0);
 
-    try std.testing.expectEqual(0, (try ia.add(5)).id);
-    try std.testing.expectEqual(5, (try ia.add(6)).id);
+    try std.testing.expectEqual(0, try ia.add(5));
+    try std.testing.expectEqual(5, try ia.add(6));
 
     ia.remove(3);
 
-    try std.testing.expectEqual(3, (try ia.add(7)).id);
+    try std.testing.expectEqual(3, try ia.add(7));
 
-    var extractedValues = std.BoundedArray(f32, 128){};
+    var extractedValues = std.BoundedArray(f32, 6){};
     var it = ia.iterator();
     while (it.next()) |ptr| try extractedValues.append(ptr.*);
 
     try std.testing.expectEqualSlices(f32, &.{ 5, 1, 2, 7, 4, 6 }, extractedValues.constSlice());
+}
+
+test "IdArray2_GrowAndShrink" {
+    var ia = IdArray2(usize).init(std.testing.allocator);
+    defer ia.deinit();
+
+    const size = 128;
+    const shrink_size = 64;
+
+    for (0..size) |i| try std.testing.expectEqual(i, try ia.add(i));
+    for (0..size) |i| try std.testing.expectEqual(i, ia.at(@intCast(i)).*);
+
+    try std.testing.expectEqual(size, ia.data.len);
+    try std.testing.expectEqual(@divExact(size, @bitSizeOf(@TypeOf(ia).KeyMask)), ia.keys.len);
+
+    for (0..size) |i| ia.remove(@intCast(i));
+
+    try std.testing.expectEqual(size, ia.capacity);
+    try ia.shrinkIfOversized(2);
+    try std.testing.expectEqual(0, ia.capacity);
+
+    for (0..size) |i| try std.testing.expectEqual(i, try ia.add(i + 10000));
+    for (0..size) |i| try std.testing.expectEqual(i + 10000, ia.at(@intCast(i)).*);
+    for (shrink_size..size) |i| ia.remove(@intCast(i));
+
+    try std.testing.expectEqual(size, ia.capacity);
+    try ia.shrinkIfOversized(2);
+    try std.testing.expectEqual(shrink_size, ia.capacity);
 }
 
 pub fn ExtIdMappedIdArray2(T: type) type {

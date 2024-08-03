@@ -34,7 +34,7 @@ pub fn destroyByEntityId(self: *@This(), eid: u32) void {
 
 pub fn render(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     const ctx = ctx_base.parent(zigra.Context);
-    const transforms = ctx.systems.transform.data.arr.getDataSlice();
+    const transforms = ctx.systems.transform.data.arr.data;
     var iterator = self.sprite_refs.iterator();
 
     while (iterator.next()) |sprite_ref| {

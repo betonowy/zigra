@@ -37,7 +37,9 @@ pub fn deinit(self: *@This()) void {
     self.* = undefined;
 }
 
-pub fn waitForPreviousWorkToFinish(_: *@This(), _: *lifetime.ContextBase) anyerror!void {}
+pub fn waitForAvailableFrame(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
+    try self.impl.waitForFreeFrame();
+}
 
 /// TODO Not yet used, encapsulates externally dependent data processing
 pub fn consume(_: *@This(), _: *lifetime.ContextBase) anyerror!void {}

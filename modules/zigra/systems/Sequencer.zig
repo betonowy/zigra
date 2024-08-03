@@ -1,8 +1,9 @@
 const std = @import("std");
 const lifetime = @import("lifetime");
-const zigra = @import("../root.zig");
-
+const tracy = @import("tracy");
 const options = @import("options");
+
+const zigra = @import("../root.zig");
 
 pub const StateGame = union(enum) {
     GameNormal: void,
@@ -17,6 +18,9 @@ state_game: StateGame = .GameNormal,
 state_timer: StateTimer = .Limited,
 
 pub fn runInit(_: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
+    const t = tracy.trace(@src());
+    defer t.end();
+
     const ctx = ctx_base.parent(zigra.Context);
 
     try ctx.systems.window.systemInit(ctx_base);
@@ -27,6 +31,9 @@ pub fn runInit(_: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
 }
 
 pub fn runDeinit(_: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
+    const t = tracy.trace(@src());
+    defer t.end();
+
     const ctx = ctx_base.parent(zigra.Context);
 
     try ctx.systems.playground.systemDeinit(ctx_base);
@@ -37,6 +44,10 @@ pub fn runDeinit(_: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
 }
 
 pub fn runLoop(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
+    tracy.frameMark();
+    const t = tracy.trace(@src());
+    defer t.end();
+
     const ctx = ctx_base.parent(zigra.Context);
 
     switch (self.state_game) {
@@ -49,6 +60,9 @@ pub fn runLoop(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
 }
 
 fn runLoop_GameNormal(self: *@This(), ctx: *zigra.Context) !void {
+    const t = tracy.trace(@src());
+    defer t.end();
+
     {
         var timer = try std.time.Timer.start();
 
@@ -101,6 +115,9 @@ fn runLoop_GameNormal(self: *@This(), ctx: *zigra.Context) !void {
 }
 
 fn runLoopPreTicks(_: *@This(), ctx: *zigra.Context) !void {
+    const t = tracy.trace(@src());
+    defer t.end();
+
     try run(ctx, .time, .checkpoint);
     try run(ctx, .window, .process);
     try run(ctx, .imgui, .inputProcess);
@@ -109,6 +126,9 @@ fn runLoopPreTicks(_: *@This(), ctx: *zigra.Context) !void {
 }
 
 fn runLoopTick(_: *@This(), ctx: *zigra.Context) !void {
+    const t = tracy.trace(@src());
+    defer t.end();
+
     try run(ctx, .world, .tickProcessSandSimCells);
     try run(ctx, .world, .tickProcessSandSimParticles);
     try run(ctx, .playground, .tickProcess);
@@ -117,8 +137,11 @@ fn runLoopTick(_: *@This(), ctx: *zigra.Context) !void {
 }
 
 fn runLoopPostTicks(_: *@This(), ctx: *zigra.Context) !void {
+    const t = tracy.trace(@src());
+    defer t.end();
+
     try run(ctx, .transform, .calculateVisualPositions);
-    try run(ctx, .vulkan, .waitForPreviousWorkToFinish);
+    try run(ctx, .vulkan, .waitForAvailableFrame);
     try run(ctx, .world, .render);
     try run(ctx, .imgui, .render);
     try run(ctx, .sprite_man, .render);
@@ -127,20 +150,25 @@ fn runLoopPostTicks(_: *@This(), ctx: *zigra.Context) !void {
 
 fn run(ctx: *zigra.Context, comptime system_tag: anytype, comptime function_tag: anytype) !void {
     const system_ptr = &@field(ctx.systems, @tagName(system_tag));
+    const routine_name = @tagName(system_tag) ++ "." ++ @tagName(function_tag);
 
     if (options.profiling) {
         var timer = try std.time.Timer.start();
-        try @field(@TypeOf(system_ptr.*), @tagName(function_tag))(system_ptr, &ctx.base);
+        {
+            const t = tracy.traceNamed(@src(), routine_name);
+            defer t.end();
+            try @field(@TypeOf(system_ptr.*), @tagName(function_tag))(system_ptr, &ctx.base);
+        }
         const ns = timer.read();
 
-        const result = try ctx.systems.debug_ui.profiling_system_ctx_map.getOrPut(
-            @tagName(system_tag) ++ "." ++ @tagName(function_tag) ++ "()",
-        );
+        const result = try ctx.systems.debug_ui.profiling_system_ctx_map.getOrPut(routine_name);
 
         if (!result.found_existing) result.value_ptr.* = .{};
 
         result.value_ptr.push(ns, ctx.systems.time.timer_main.read());
     } else {
+        const t = tracy.traceNamed(@src(), routine_name);
+        defer t.end();
         try @field(@TypeOf(system_ptr.*), @tagName(function_tag))(system_ptr, &ctx.base);
     }
 }

@@ -2,6 +2,7 @@ const std = @import("std");
 
 const gen_spv = @import("build/gen_spv.zig");
 const gen_glsl = @import("build/gen_glsl.zig");
+const tracy_profiler = @import("build/tracy.zig");
 const thirdparty = @import("thirdparty/modules.zig");
 
 pub fn build(b: *std.Build) !void {
@@ -9,8 +10,9 @@ pub fn build(b: *std.Build) !void {
     const optimize = b.standardOptimizeOption(.{});
 
     const use_llvm = b.option(bool, "use-llvm", "Use LLVM backend. (default: true)");
-    const profiling = b.option(bool, "profiling", "Enable profiling features. (default: false)");
-    const debug_ui = b.option(bool, "debug-ui", "Enable debug ui tools. (default: false)");
+    const tracy = b.option(bool, "tracy", "Enable tracy-profiler integration. (default: false)");
+    const profiling = b.option(bool, "profiling", "Enable in-app profiling. (default: false)");
+    const debug_ui = b.option(bool, "debug-ui", "Enable debug-ui tools. (default: false)");
     const lock_tick = b.option(bool, "lock-tick", "Locks 1 tick per frame. (default: false)");
     const lock_fps = b.option(f32, "lock-fps", "Limits FPS to this limit. (default: null)");
 
@@ -30,6 +32,13 @@ pub fn build(b: *std.Build) !void {
     const vk_registry_xml = b.dependency("vulkan_headers", .{}).path("registry/vk.xml");
     vk_generate_cmd.addFileArg(vk_registry_xml);
     const mod_vk = b.createModule(.{ .root_source_file = vk_generate_cmd.addOutputFileArg("vk.zig") });
+
+    const mod_tracy = tracy_profiler.module(b, .{
+        .enable_tracy = tracy orelse false,
+        .enable_allocator = false,
+        .enable_callstack = false,
+        .target = target,
+    });
 
     const mod_options = options.createModule();
     const mod_stb = thirdparty.stb.module(b);
@@ -59,6 +68,7 @@ pub fn build(b: *std.Build) !void {
     mod_zigra.addImport("lifetime", mod_lifetime);
     mod_zigra.addImport("spv", mod_spv);
     mod_zigra.addImport("la", mod_la);
+    mod_zigra.addImport("tracy", mod_tracy);
 
     const exe = b.addExecutable(.{
         .name = "zigra",

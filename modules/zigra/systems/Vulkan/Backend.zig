@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const tracy = @import("tracy");
 const vk = @import("vk");
 const types = @import("types.zig");
 const initialization = @import("init.zig");
@@ -202,14 +203,7 @@ pub fn currentFrameData(self: *@This()) *FrameData {
     return &self.frames[self.frame_index];
 }
 
-pub fn process(self: *@This()) !void {
-    var timer = try std.time.Timer.start();
-    const to_ms: f32 = 1e-6;
-    _ = to_ms; // autofix
-
-    const landscape_u_dur: f32 = @floatFromInt(timer.lap());
-    _ = landscape_u_dur; // autofix
-
+pub fn waitForFreeFrame(self: *@This()) !void {
     if (try self.vkd.waitForFences(
         self.device,
         1,
@@ -217,22 +211,19 @@ pub fn process(self: *@This()) !void {
         vk.TRUE,
         1_000_000_000,
     ) != .success) return error.FenceTimeout;
+}
 
-    const fence_dur: f32 = @floatFromInt(timer.lap());
-    _ = fence_dur; // autofix
-
+pub fn process(self: *@This()) !void {
     try self.vkd.resetCommandBuffer(self.frames[self.frame_index].command_buffer, .{});
     try self.vkd.beginCommandBuffer(self.frames[self.frame_index].command_buffer, &.{ .flags = .{ .one_time_submit_bit = true } });
 
-    try self.frames[self.frame_index].landscape.recordUploadData(self, self.frames[self.frame_index].command_buffer, self.frames[self.frame_index].landscape_upload);
-
-    const landscape_r_dur: f32 = @floatFromInt(timer.lap());
-    _ = landscape_r_dur; // autofix
+    try self.frames[self.frame_index].landscape.recordUploadData(
+        self,
+        self.frames[self.frame_index].command_buffer,
+        self.frames[self.frame_index].landscape_upload,
+    );
 
     try self.uploadScheduledData(&self.frames[self.frame_index]);
-
-    const upload_dur: f32 = @floatFromInt(timer.lap());
-    _ = upload_dur; // autofix
 
     const next_image = try self.acquireNextSwapchainImage();
 
@@ -241,18 +232,18 @@ pub fn process(self: *@This()) !void {
         return;
     }
 
-    const acquire_dur: f32 = @floatFromInt(timer.lap());
-    _ = acquire_dur; // autofix
-
     try self.recordDrawFrame(
         self.frames[self.frame_index],
         next_image.image_index,
     );
 
+    const trace = tracy.traceNamed(@src(), "finalize");
+    defer trace.end();
+
     try self.vkd.endCommandBuffer(self.frames[self.frame_index].command_buffer);
 
-    var wait_semaphores = std.BoundedArray(vk.Semaphore, 4).init(0) catch unreachable;
-    var wait_dst_stage_mask = std.BoundedArray(vk.PipelineStageFlags, 4).init(0) catch unreachable;
+    var wait_semaphores = std.BoundedArray(vk.Semaphore, 4){};
+    var wait_dst_stage_mask = std.BoundedArray(vk.PipelineStageFlags, 4){};
 
     try wait_semaphores.append(self.frames[self.frame_index].semaphore_swapchain_image_acquired);
     try wait_dst_stage_mask.append(.{ .color_attachment_output_bit = true });
@@ -272,44 +263,14 @@ pub fn process(self: *@This()) !void {
     try self.vkd.resetFences(self.device, 1, utils.meta.asConstArray(&self.frames[self.frame_index].fence_busy));
     try self.vkd.queueSubmit(self.graphic_queue, 1, utils.meta.asConstArray(&submit_info), self.frames[self.frame_index].fence_busy);
 
-    const draw_dur: f32 = @floatFromInt(timer.lap());
-    _ = draw_dur; // autofix
-
     const present_result = try self.presentSwapchainImage(
         self.frames[self.frame_index],
         next_image.image_index,
     );
 
-    const present_dur: f32 = @floatFromInt(timer.lap());
-    _ = present_dur; // autofix
-
     if (next_image.result != .success or present_result != .success) {
         try self.createSwapchain(.recreate);
     }
-
-    // std.debug.print(
-    //     \\ --------------------
-    //     \\ lu:    {d: >6.3} ms
-    //     \\ fence: {d: >6.3} ms
-    //     \\ lr:    {d: >6.3} ms
-    //     \\ up:    {d: >6.3} ms
-    //     \\ acq:   {d: >6.3} ms
-    //     \\ draw:  {d: >6.3} ms
-    //     \\ p:     {d: >6.3} ms
-    //     \\ total: {d: >6.3} ms
-    //     \\ nofen: {d: >6.3} ms
-    //     \\
-    // , .{
-    //     landscape_u_dur * to_ms,
-    //     fence_dur * to_ms,
-    //     landscape_r_dur * to_ms,
-    //     upload_dur * to_ms,
-    //     acquire_dur * to_ms,
-    //     draw_dur * to_ms,
-    //     present_dur * to_ms,
-    //     (landscape_u_dur + fence_dur + landscape_r_dur + upload_dur + acquire_dur + draw_dur + present_dur) * to_ms,
-    //     (landscape_u_dur + landscape_r_dur + upload_dur + acquire_dur + draw_dur + present_dur) * to_ms,
-    // });
 
     self.advanceFrame();
 }
@@ -1170,6 +1131,9 @@ fn presentSwapchainImage(self: *@This(), frame: FrameData, swapchain_image_index
 }
 
 fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32) !void {
+    const trace = tracy.trace(@src());
+    defer trace.end();
+
     self.transitionFrameImagesBegin(frame);
     self.beginRenderingOpaque(frame);
 
@@ -1787,6 +1751,9 @@ pub inline fn scheduleGuiLine(self: *@This(), vertices: []const types.VertexData
 }
 
 fn uploadScheduledData(self: *@This(), frame: *FrameData) !void {
+    const trace = tracy.trace(@src());
+    defer trace.end();
+
     var current_index: u32 = 0;
 
     for (

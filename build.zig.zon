@@ -15,6 +15,10 @@
             .url = "https://github.com/KhronosGroup/Vulkan-Headers/archive/595c8d4794410a4e64b98dc58d27c0310d7ea2fd.tar.gz",
             .hash = "1220dba588188c5dfba1b294785b0ed360ad1ea2e69bf7c076169cffdeec2fa2c0b4",
         },
+        .tracy = .{
+            .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.11.0.tar.gz",
+            .hash = "1220ec41abde94730af701ba9da16ba3f10bb7d0b62a0b7fdebe10b0aad515e302a6",
+        },
     },
     .paths = .{
         "build.zig",

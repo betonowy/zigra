@@ -1,9 +1,13 @@
 const std = @import("std");
-const vk = @import("vk");
-const types = @import("types.zig");
-const Backend = @import("Backend.zig");
+
+const tracy = @import("tracy");
 const utils = @import("utils");
+const vk = @import("vk");
+
+const types = @import("types.zig");
 const stb = @cImport(@cInclude("stb/stb_image.h"));
+
+const Backend = @import("Backend.zig");
 
 pub const image_size = 128;
 const tiles_width_count = Backend.frame_target_width / image_size + 2;
@@ -99,6 +103,8 @@ pub fn deinit(self: *@This(), backend: *Backend) void {
 }
 
 pub fn recordUploadData(self: *@This(), backend: *Backend, cmd: vk.CommandBuffer, upload_sets: UploadSets) !void {
+    const trace = tracy.traceNamed(@src(), "landscape.recordUploadData");
+    defer trace.end();
     _ = self; // autofix
     for (upload_sets.constSlice()) |set| {
         const dst: [*]u8 = @ptrCast(set.tile.upload_image.map.?);
