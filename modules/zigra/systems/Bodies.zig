@@ -312,17 +312,6 @@ fn processBodyRigidPointCollision(
         return null;
     };
 
-    // std.log.info("tick {}: Bounce: {d:.3} {d:.3} {d:.3}, curr: {d:.3} {d:.3}, next: {d:.3} {d:.3}", .{
-    //     ctx.systems.time.tick_current,
-    //     hit_pos,
-    //     hit_dir,
-    //     hit_nor,
-    //     pos_curr,
-    //     vel_curr,
-    //     pos_next,
-    //     vel_next,
-    // });
-
     {
         const diff = pos_next - pos_curr;
         const hit_diff = hit_pos - pos_curr;
@@ -330,14 +319,6 @@ fn processBodyRigidPointCollision(
         const scale_ratio = @reduce(.Add, diff * hit_diff) / @reduce(.Add, diff * diff);
         if (scale_ratio > 1 or @reduce(.Add, hit_nor * vel_next) > 0) return null;
     }
-
-    // if (@reduce(.Add, hit_nor * hit_dir) < 0) {
-    //     t_next.vel = la.mix(t_curr.vel, t_next.vel, clamp(scale_ratio, 0, 1));
-    //     t_next.pos = la.mix(t_curr.pos, t_next.pos, clamp(scale_ratio, 0, 1));
-    //     t_next.rot = la.mix(t_curr.rot, t_next.rot, clamp(scale_ratio, 0, 1));
-    // }
-
-    // t_next.pos += hit_pos - pos_next + hit_nor * @as(@Vector(2, f32), @splat(0));
 
     {
         offset_curr = rotate2d(point, t_curr.rot);
@@ -353,9 +334,9 @@ fn processBodyRigidPointCollision(
         vel_next = vel_rel_next + t_next.vel;
     }
 
-    // const hit_tangent = @Vector(2, f32){ -hit_nor[1], hit_nor[0] };
+    const hit_tangent = @Vector(2, f32){ -hit_nor[1], hit_nor[0] };
     const dot_nor = -@abs(la.dot(hit_nor, vel_next));
-    // const dot_tangent = la.dot(hit_tangent, vel_next);
+    const dot_tangent = la.dot(hit_tangent, vel_next);
 
     const offset_3d = @Vector(3, f32){ offset_next[0], offset_next[1], 0 };
     const normal_3d = @Vector(3, f32){ hit_nor[0], hit_nor[1], 0 };
@@ -366,14 +347,14 @@ fn processBodyRigidPointCollision(
         const cross_2d = @Vector(2, f32){ cross_2[0], cross_2[1] };
 
         const mag_rebound_normal = -(2 - mesh.bounce_loss) * dot_nor / (1 / mesh.mass + @reduce(.Add, hit_nor * cross_2d)) + @as(f32, 0);
-        // const mag_friction_tangent = -@max(mag_rebound_normal * mesh.bounce_loss * 0.5, 0);
-        // const max_impulse_tangent = @abs(dot_tangent);
+        const mag_friction_tangent = -@max(mag_rebound_normal * mesh.bounce_loss * 0.5, 0);
+        const max_impulse_tangent = @abs(dot_tangent);
 
         const rebound_nor = @as(@Vector(2, f32), @splat(mag_rebound_normal)) * hit_nor;
-        // const tan_sign: f32 = if (dot_tangent < 0) -1 else 1;
-        // const impulse_tan = @as(@Vector(2, f32), @splat(@min(mag_friction_tangent, max_impulse_tangent) * tan_sign)) * hit_tangent;
+        const tan_sign: f32 = if (dot_tangent < 0) -1 else 1;
+        const impulse_tan = @as(@Vector(2, f32), @splat(@min(mag_friction_tangent, max_impulse_tangent) * tan_sign)) * hit_tangent;
 
-        break :brk rebound_nor;
+        break :brk rebound_nor + impulse_tan;
     };
 
     const offset_impulse_cross = cross(offset_3d, @Vector(3, f32){ impulse[0], impulse[1], 0 });

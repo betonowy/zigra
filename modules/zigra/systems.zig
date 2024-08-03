@@ -11,3 +11,5 @@ pub const Bodies = @import("systems/Bodies.zig");
 
 pub const Sequencer = @import("systems/Sequencer.zig");
 pub const Playground = @import("systems/Playground.zig");
+
+pub const Null = struct {};

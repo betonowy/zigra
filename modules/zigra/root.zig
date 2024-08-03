@@ -1,6 +1,7 @@
 const std = @import("std");
 const lifetime = @import("lifetime");
 const systems = @import("systems.zig");
+const options = @import("options");
 
 pub const Modules = struct {
     window: systems.Window,
@@ -9,8 +10,8 @@ pub const Modules = struct {
     playground: systems.Playground,
     time: systems.Time,
     sequencer: systems.Sequencer,
-    imgui: systems.Nuklear,
-    debug_ui: systems.DebugUI,
+    nuklear: systems.Nuklear,
+    debug_ui: if (options.debug_ui) systems.DebugUI else systems.Null,
     sprite_man: systems.SpriteMan,
     entities: systems.Entities,
     transform: systems.Transform,

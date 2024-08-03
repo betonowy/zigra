@@ -180,7 +180,7 @@ pub fn processUi(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void 
     if (self.state == .Disabled) return;
 
     const ctx = ctx_base.parent(zigra.Context);
-    const nk_ctx = &ctx.systems.imgui.nk;
+    const nk_ctx = &ctx.systems.nuklear.nk;
 
     if (nk.begin(
         nk_ctx,
@@ -221,7 +221,7 @@ fn processUi_tabButton(self: *@This(), nk_ctx: *nk.Context, title: [*:0]const u8
 }
 
 fn processUi_General(self: *@This(), ctx: *zigra.Context) !void {
-    const nk_ctx = &ctx.systems.imgui.nk;
+    const nk_ctx = &ctx.systems.nuklear.nk;
 
     if (nk.treeBeginHashed(nk_ctx, .node, "Performance", @src(), 0, .maximized)) {
         defer nk.treePop(nk_ctx);
@@ -254,7 +254,7 @@ fn processUi_General(self: *@This(), ctx: *zigra.Context) !void {
 }
 
 fn processUi_Systems(self: *@This(), ctx: *zigra.Context) !void {
-    const nk_ctx = &ctx.systems.imgui.nk;
+    const nk_ctx = &ctx.systems.nuklear.nk;
 
     for (self.view_system_call_profiling_data[0..], 0..) |data, i| {
         // TODO add filter and colors for quality of life
@@ -263,7 +263,7 @@ fn processUi_Systems(self: *@This(), ctx: *zigra.Context) !void {
 }
 
 fn processUi_Preferences(self: *@This(), ctx: *zigra.Context) !void {
-    const nk_ctx = &ctx.systems.imgui.nk;
+    const nk_ctx = &ctx.systems.nuklear.nk;
     nk.layoutRowDynamic(nk_ctx, 0, 1);
     nk.label(nk_ctx, "Chart height", nk.text_center);
     _ = nk.sliderI32(nk_ctx, 20, &self.pref_chart_height, 200, 1);
