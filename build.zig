@@ -52,6 +52,7 @@ pub fn build(b: *std.Build) !void {
     mod_utils.addImport("la", mod_la);
 
     const mod_lifetime = b.createModule(.{ .root_source_file = b.path("modules/lifetime/lifetime.zig") });
+    mod_lifetime.addImport("tracy", mod_tracy);
     mod_lifetime.addImport("options", mod_options);
 
     const step_gen_glsl = gen_glsl.step(b);

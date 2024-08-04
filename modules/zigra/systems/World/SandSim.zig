@@ -517,7 +517,7 @@ pub const LandscapeView = struct {
 
     pub fn get(self: *@This(), pos: @Vector(2, i32)) !Cell {
         if (self.tryCacheOnly(pos)) |cell| return cell.*;
-        if (try self.tryCacheRefresh(pos)) |cell| return cell.*;
+        if (self.tryCacheRefresh(pos) catch return cell_types.air) |cell| return cell.*;
         return cell_types.air;
     }
 

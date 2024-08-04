@@ -33,7 +33,9 @@ pub fn default(ctx: *zigra.Context, pos: @Vector(2, f32), vel: @Vector(2, f32)) 
 
         mesh_ptr.mass = @floatFromInt(mesh_ptr.points.len + 1);
         mesh_ptr.moi = 0;
-        mesh_ptr.bounce_loss = 0.5;
+        mesh_ptr.bounciness = 0.45;
+        mesh_ptr.friction_dynamic = 0.1;
+        mesh_ptr.friction_static = 0.2;
         mesh_ptr.drag = 0.05;
 
         for (mesh_ptr.points.constSlice()) |p| mesh_ptr.moi += @reduce(.Add, p * p);

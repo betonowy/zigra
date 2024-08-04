@@ -18,9 +18,10 @@ pub fn IdArray(T: type) type {
         pub const Iterator = struct {
             parent: *const Self,
             cursor: u32 = 0,
+            bound: u32 = 0,
 
             pub fn next(self: *@This()) ?*T {
-                while (self.cursor < self.parent.capacity) {
+                while (self.cursor < self.bound) {
                     defer self.cursor += 1;
 
                     const div = self.cursor / @bitSizeOf(KeyMask);
@@ -49,7 +50,11 @@ pub fn IdArray(T: type) type {
         }
 
         pub fn iterator(self: *const @This()) Iterator {
-            return .{ .parent = self };
+            return .{ .parent = self, .bound = self.capacity };
+        }
+
+        pub fn boundedIterator(self: *const @This(), a: u32, b: u32) Iterator {
+            return .{ .parent = self, .cursor = a, .bound = b };
         }
 
         pub fn put(self: *@This(), value: T) !u32 {
@@ -76,10 +81,10 @@ pub fn IdArray(T: type) type {
             self.data[id] = undefined;
         }
 
-        pub fn shrinkIfOversized(self: *@This(), ratio: u32) !void {
+        pub fn shrinkIfOversized(self: *@This(), ratio: u32) !bool {
             std.debug.assert(ratio > 1);
 
-            if (self.capacity == 0) return;
+            if (self.capacity == 0) return false;
             var target_size: u32 = 0;
 
             for (1..self.keys.len + 1) |i| {
@@ -94,10 +99,10 @@ pub fn IdArray(T: type) type {
                 self.allocator.free(self.buffer);
                 self.last_insert_index = 0;
                 self.capacity = 0;
-                return;
+                return false;
             }
 
-            if (self.keys.len * @bitSizeOf(KeyMask) / target_size < ratio) return;
+            if (self.keys.len * @bitSizeOf(KeyMask) / target_size < ratio) return false;
 
             const old = self.*;
             defer self.allocator.free(old.buffer);
@@ -108,6 +113,7 @@ pub fn IdArray(T: type) type {
 
             @memcpy(self.data, old.data[0..self.data.len]);
             @memcpy(self.keys, old.keys[0..self.keys.len]);
+            return true;
         }
 
         fn findFreeId(self: @This()) ?u32 {
@@ -252,7 +258,7 @@ test "IdArray_GrowAndShrink" {
     for (0..size) |i| ia.remove(@intCast(i));
 
     try std.testing.expectEqual(size, ia.capacity);
-    try ia.shrinkIfOversized(2);
+    try std.testing.expect(try ia.shrinkIfOversized(2));
     try std.testing.expectEqual(0, ia.capacity);
 
     for (0..size) |i| try std.testing.expectEqual(i, try ia.put(i + 10000));
@@ -260,7 +266,7 @@ test "IdArray_GrowAndShrink" {
     for (shrink_size..size) |i| ia.remove(@intCast(i));
 
     try std.testing.expectEqual(size, ia.capacity);
-    try ia.shrinkIfOversized(2);
+    try std.testing.expect(try ia.shrinkIfOversized(2));
     try std.testing.expectEqual(shrink_size, ia.capacity);
 }
 
@@ -283,6 +289,10 @@ pub fn ExtIdMappedIdArray(T: type) type {
 
         pub fn iterator(self: *const @This()) IdArray(T).Iterator {
             return self.arr.iterator();
+        }
+
+        pub fn boundedIterator(self: *const @This(), a: u32, b: u32) IdArray(T).Iterator {
+            return self.arr.boundedIterator(a, b);
         }
 
         /// (Slow) Get item pointer by it's external id

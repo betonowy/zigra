@@ -16,7 +16,7 @@ const spv = @import("spv");
 const stb = @cImport(@cInclude("stb/stb_image.h"));
 
 pub const frame_data_count: u8 = 2;
-pub const frame_max_draw_commands = 65536;
+pub const frame_max_draw_commands = 0x40000;
 pub const frame_target_width = 320;
 pub const frame_target_height = 200;
 pub const frame_format = vk.Format.r16g16b16a16_sfloat;

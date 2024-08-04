@@ -1,9 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const options = if (!builtin.is_test) @import("options") else struct {
-    const profiling = false;
-};
+const options = @import("options");
 
 pub const ContextBase = struct {
     allocator: std.mem.Allocator,
@@ -126,16 +124,9 @@ pub const PackagedTask = struct {
     ctx_ptr: *ContextBase,
     function_ptr: *const fn (*anyopaque, *ContextBase) anyerror!void,
     name: if (options.profiling) [:0]const u8 else void,
-    execution_time_ns: if (options.profiling) u64 else void,
 
     pub fn call(self: *@This()) !void {
-        if (options.profiling) {
-            var timer = try std.time.Timer.start();
-            defer self.execution_time_ns = timer.read();
-            return try self.function_ptr(self.self_ptr, self.ctx_ptr);
-        } else {
-            return try self.function_ptr(self.self_ptr, self.ctx_ptr);
-        }
+        return try self.function_ptr(self.self_ptr, self.ctx_ptr);
     }
 
     pub fn init(context_ptr: *ContextBase, struct_ptr: anytype, comptime function_tag: anytype) @This() {
@@ -179,7 +170,6 @@ pub const PackagedTask = struct {
             .ctx_ptr = context_ptr,
             .function_ptr = Wrapper.call,
             .name = if (options.profiling) @typeName(@TypeOf(struct_ptr.*)) ++ "." ++ @tagName(function_tag) else {},
-            .execution_time_ns = if (options.profiling) 0 else {},
         };
     }
 };
@@ -256,13 +246,13 @@ const ThreadWorker = struct {
     }
 
     pub fn tryPush(self: *@This(), task: *PackagedTask) bool {
-        _ = self.data.unfinished_tasks.fetchAdd(1, .SeqCst);
+        _ = self.data.unfinished_tasks.fetchAdd(1, .seq_cst);
 
         self.data.queue_mtx.lock();
         defer self.data.queue_mtx.unlock();
 
         self.data.queue.writeItem(task) catch {
-            _ = self.data.unfinished_tasks.fetchSub(1, .SeqCst);
+            _ = self.data.unfinished_tasks.fetchSub(1, .seq_cst);
             return false;
         };
 
@@ -274,7 +264,7 @@ const ThreadWorker = struct {
     pub fn flush(self: *const @This()) void {
         self.data.wait_mtx.lock();
         defer self.data.wait_mtx.unlock();
-        while (self.data.unfinished_tasks.load(.SeqCst) != 0) self.data.wait_cnd.wait(&self.data.wait_mtx);
+        while (self.data.unfinished_tasks.load(.seq_cst) != 0) self.data.wait_cnd.wait(&self.data.wait_mtx);
     }
 
     pub fn workerFunc(data: *Data) !void {
