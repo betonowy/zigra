@@ -196,14 +196,3 @@ test "one_cell_ul_hits_in_bounds" {
     try std.testing.expectApproxEqAbs(0.83376, n[0], epsilon);
     try std.testing.expectApproxEqAbs(0.55213, n[1], epsilon);
 }
-
-test "regression_001" {
-    {
-        const result = intersection(.{ 0, 1, 0, 1 }, .{ 3.19065093e-01, -1 }, .{ 6.48091614e-01, -7.61562407e-01 });
-        std.debug.print("result: {}\n", .{result});
-    }
-    {
-        const result = intersection(.{ 0, 1, 0, 1 }, .{ 3.19065093e-01, -1 }, .{ 6.50e-01, -7.61562407e-01 });
-        std.debug.print("result: {}\n", .{result});
-    }
-}

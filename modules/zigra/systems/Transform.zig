@@ -15,10 +15,10 @@ pub const Data = struct {
     } = .{},
 };
 
-data: utils.ExtIdMappedIdArray2(Data),
+data: utils.ExtIdMappedIdArray(Data),
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
-    return .{ .data = utils.ExtIdMappedIdArray2(Data).init(allocator) };
+    return .{ .data = utils.ExtIdMappedIdArray(Data).init(allocator) };
 }
 
 pub fn deinit(self: *@This()) void {

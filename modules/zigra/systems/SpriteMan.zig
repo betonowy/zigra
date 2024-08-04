@@ -14,10 +14,10 @@ const SpriteRef = struct {
 
 const SpriteType = enum { Opaque, Blended };
 
-sprite_refs: utils.ExtIdMappedIdArray2(SpriteRef),
+sprite_refs: utils.ExtIdMappedIdArray(SpriteRef),
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
-    return .{ .sprite_refs = utils.ExtIdMappedIdArray2(SpriteRef).init(allocator) };
+    return .{ .sprite_refs = utils.ExtIdMappedIdArray(SpriteRef).init(allocator) };
 }
 
 pub fn deinit(self: *@This()) void {

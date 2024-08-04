@@ -89,13 +89,3 @@ test "simple_shape" {
 
     try std.testing.expectEqual(8, dda.iterations);
 }
-
-test "dda_regression_01" {
-    var dda = init(.{ 5.39839782e+01, -4.56062431e+01 }, .{ 5.58791198e+01, -4.78331947e+01 });
-
-    dda.next();
-
-    while (!dda.finished) : (dda.next()) {
-        std.debug.print("cell: {}, fpos: {d:.2}\n", .{ dda.current_cell, @floor(@Vector(2, f32){ 5.39839782e+01, -4.56062431e+01 } + @as(@Vector(2, f32), @splat(dda.dist())) * dda.dir) });
-    }
-}

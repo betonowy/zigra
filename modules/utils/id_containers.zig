@@ -2,160 +2,6 @@ const std = @import("std");
 
 pub fn IdArray(T: type) type {
     return struct {
-        allocator: std.mem.Allocator,
-        mal: std.MultiArrayList(Container) = .{},
-        free_list: std.ArrayListUnmanaged(u32) = .{},
-
-        const Self = @This();
-        const ArrayType = std.MultiArrayList(Container);
-
-        const Container = struct {
-            active: bool,
-            payload: T,
-        };
-
-        const Iterator = struct {
-            self: *Self,
-            slice: ArrayType.Slice,
-            id: u32,
-
-            const Fields = struct {
-                active: *bool,
-                payload: *T,
-            };
-
-            pub fn next(self: *@This()) ?Fields {
-                while (self.id < self.slice.len) {
-                    defer self.id += 1;
-
-                    const active_field = &self.slice.items(.active)[self.id];
-
-                    if (active_field.*) return .{
-                        .active = active_field,
-                        .payload = &self.slice.items(.payload)[self.id],
-                    };
-                }
-
-                return null;
-            }
-
-            pub fn destroyCurrent(self: *@This()) !void {
-                std.debug.assert(self.mal.items(.active)[self.id]);
-
-                if (self.id == self.slice.len - 1) {
-                    _ = self.self.mal.pop();
-                    self.slice.len -= 1;
-                    return;
-                }
-
-                self.slice.items(.active)[self.id] = false;
-                self.slice.items(.payload)[self.id] = undefined;
-                try self.self.free_list.append(self.self.allocator, self.id);
-            }
-        };
-
-        pub fn init(allocator: std.mem.Allocator) @This() {
-            return .{ .allocator = allocator };
-        }
-
-        pub fn deinit(self: *@This()) void {
-            self.mal.deinit(self.allocator);
-            self.free_list.deinit(self.allocator);
-        }
-
-        pub fn createId(self: *@This()) !u32 {
-            if (self.free_list.popOrNull()) |id| {
-                self.mal.items(.active)[id] = true;
-                return id;
-            }
-
-            try self.mal.append(self.allocator, .{ .active = true, .payload = undefined });
-            return @intCast(self.mal.len - 1);
-        }
-
-        pub fn push(self: *@This(), value: T) !u32 {
-            const id = try self.createId();
-            self.mal.items(.payload)[id] = value;
-            return id;
-        }
-
-        pub fn destroyId(self: *@This(), id: u32) !void {
-            std.debug.assert(self.mal.items(.active)[id]);
-
-            if (id == self.mal.len - 1) {
-                _ = self.mal.pop();
-                return;
-            }
-
-            const s = self.slice();
-            s.items(.active)[id] = false;
-            s.items(.payload)[id] = undefined;
-            try self.free_list.append(self.allocator, id);
-        }
-
-        pub fn slice(self: *@This()) ArrayType.Slice {
-            return self.mal.slice();
-        }
-
-        pub fn iterator(self: *@This()) Iterator {
-            return .{ .self = self, .slice = self.mal.slice(), .id = 0 };
-        }
-
-        pub fn tidy(self: *@This(), timeout_ns: u64) !void {
-            const timer = try std.time.Timer.start();
-
-            if (self.mal.capacity > self.mal.len * 8 and self.mal.capacity > 256) {
-                const new_cap = self.mal.capacity / 4;
-
-                std.log.info(
-                    "Shrinking IdArray active items capacity: len: {}, old cap: {}, new cap: {}",
-                    .{ self.mal.len, self.mal.capacity, new_cap },
-                );
-
-                try self.mal.setCapacity(self.allocator, new_cap);
-            }
-
-            if (timer.read() > timeout_ns) return;
-
-            if (self.free_list.capacity > self.free_list.len * 8 and self.free_list.items.len > 256) {
-                const new_cap = self.mal.capacity / 4;
-
-                std.log.info(
-                    "Shrinking IdArray free items capacity: len: {}, old cap: {}, new cap: {}",
-                    .{ self.free_list.len, self.free_list.capacity, new_cap },
-                );
-
-                try self.mal.setCapacity(self.allocator, self.mal.len * 2);
-            }
-        }
-    };
-}
-
-test {
-    var store = IdArray(usize).init(std.testing.allocator);
-    defer store.deinit();
-
-    try std.testing.expectEqual(0, try store.createId());
-    try std.testing.expectEqual(1, try store.createId());
-    try std.testing.expectEqual(2, try store.createId());
-    try std.testing.expectEqual(0, store.free_list.items.len);
-    try store.destroyId(1);
-    try std.testing.expectEqual(1, store.free_list.items.len);
-    try store.destroyId(2);
-    try std.testing.expectEqual(1, store.free_list.items.len);
-    try std.testing.expectEqual(1, try store.createId());
-    try std.testing.expectEqual(0, store.free_list.items.len);
-    try std.testing.expectEqual(2, try store.createId());
-
-    var iterator = store.iterator();
-
-    while (iterator.next()) |fields| {
-        std.debug.assert(fields.active.*);
-    }
-}
-
-pub fn IdArray2(T: type) type {
-    return struct {
         const Self = @This();
         const KeyMask = u64;
         const buffer_alignment = @max(@alignOf(T), @alignOf(KeyMask));
@@ -206,7 +52,7 @@ pub fn IdArray2(T: type) type {
             return .{ .parent = self };
         }
 
-        pub fn add(self: *@This(), value: T) !u32 {
+        pub fn put(self: *@This(), value: T) !u32 {
             if (self.findFreeId()) |id| {
                 self.getDataSlice()[id] = value;
                 self.setIdMask(id, true);
@@ -364,24 +210,24 @@ pub fn IdArray2(T: type) type {
     };
 }
 
-test "IdArray2" {
-    var ia = IdArray2(f32).init(std.testing.allocator);
+test "IdArray_BasicLifetime" {
+    var ia = IdArray(f32).init(std.testing.allocator);
     defer ia.deinit();
 
-    try std.testing.expectEqual(0, try ia.add(0));
-    try std.testing.expectEqual(1, try ia.add(1));
-    try std.testing.expectEqual(2, try ia.add(2));
-    try std.testing.expectEqual(3, try ia.add(3));
-    try std.testing.expectEqual(4, try ia.add(4));
+    try std.testing.expectEqual(0, try ia.put(0));
+    try std.testing.expectEqual(1, try ia.put(1));
+    try std.testing.expectEqual(2, try ia.put(2));
+    try std.testing.expectEqual(3, try ia.put(3));
+    try std.testing.expectEqual(4, try ia.put(4));
 
     ia.remove(0);
 
-    try std.testing.expectEqual(0, try ia.add(5));
-    try std.testing.expectEqual(5, try ia.add(6));
+    try std.testing.expectEqual(0, try ia.put(5));
+    try std.testing.expectEqual(5, try ia.put(6));
 
     ia.remove(3);
 
-    try std.testing.expectEqual(3, try ia.add(7));
+    try std.testing.expectEqual(3, try ia.put(7));
 
     var extractedValues = std.BoundedArray(f32, 6){};
     var it = ia.iterator();
@@ -390,14 +236,14 @@ test "IdArray2" {
     try std.testing.expectEqualSlices(f32, &.{ 5, 1, 2, 7, 4, 6 }, extractedValues.constSlice());
 }
 
-test "IdArray2_GrowAndShrink" {
-    var ia = IdArray2(usize).init(std.testing.allocator);
+test "IdArray_GrowAndShrink" {
+    var ia = IdArray(usize).init(std.testing.allocator);
     defer ia.deinit();
 
     const size = 128;
     const shrink_size = 64;
 
-    for (0..size) |i| try std.testing.expectEqual(i, try ia.add(i));
+    for (0..size) |i| try std.testing.expectEqual(i, try ia.put(i));
     for (0..size) |i| try std.testing.expectEqual(i, ia.at(@intCast(i)).*);
 
     try std.testing.expectEqual(size, ia.data.len);
@@ -409,7 +255,7 @@ test "IdArray2_GrowAndShrink" {
     try ia.shrinkIfOversized(2);
     try std.testing.expectEqual(0, ia.capacity);
 
-    for (0..size) |i| try std.testing.expectEqual(i, try ia.add(i + 10000));
+    for (0..size) |i| try std.testing.expectEqual(i, try ia.put(i + 10000));
     for (0..size) |i| try std.testing.expectEqual(i + 10000, ia.at(@intCast(i)).*);
     for (shrink_size..size) |i| ia.remove(@intCast(i));
 
@@ -418,15 +264,15 @@ test "IdArray2_GrowAndShrink" {
     try std.testing.expectEqual(shrink_size, ia.capacity);
 }
 
-pub fn ExtIdMappedIdArray2(T: type) type {
+pub fn ExtIdMappedIdArray(T: type) type {
     return struct {
-        arr: IdArray2(T),
-        map: std.AutoHashMap(u32, u32),
+        arr: IdArray(T),
+        map: std.AutoArrayHashMap(u32, u32),
 
         pub fn init(allocator: std.mem.Allocator) @This() {
             return .{
-                .arr = IdArray2(T).init(allocator),
-                .map = std.AutoHashMap(u32, u32).init(allocator),
+                .arr = IdArray(T).init(allocator),
+                .map = std.AutoArrayHashMap(u32, u32).init(allocator),
             };
         }
 
@@ -435,39 +281,102 @@ pub fn ExtIdMappedIdArray2(T: type) type {
             self.map.deinit();
         }
 
-        pub fn iterator(self: *const @This()) IdArray2(T).Iterator {
+        pub fn iterator(self: *const @This()) IdArray(T).Iterator {
             return self.arr.iterator();
         }
 
-        /// (Slow) get item pointer by it's external id
-        pub fn getByExtId(self: *const @This(), ext_id: u32) ?*T {
-            return if (self.map.get(ext_id)) |int_id| self.arr.at(int_id) else null;
+        /// (Slow) Get item pointer by it's external id
+        pub fn getByEid(self: *const @This(), eid: u32) ?*T {
+            return if (self.map.get(eid)) |int_id| self.arr.at(int_id) else null;
         }
 
-        /// (Fast) get item pointer by it's internal id
-        pub fn getByIntId(self: *const @This(), int_id: u32) *T {
-            return self.arr.at(int_id);
+        /// (Fast) Get item pointer by it's internal id
+        pub fn getById(self: *const @This(), id: u32) *T {
+            return self.arr.at(id);
         }
 
-        /// returns internal id for quicker lookup
-        pub fn put(self: *@This(), ext_id: u32, v: T) !u32 {
-            const int_id = try self.arr.add(v);
-            try self.map.putNoClobber(ext_id, int_id);
-            return int_id;
+        /// Returns internal id for quicker lookup
+        pub fn put(self: *@This(), eid: u32, v: T) !u32 {
+            const id = try self.arr.put(v);
+            errdefer self.arr.remove(id);
+            try self.map.putNoClobber(eid, id);
+            return id;
         }
 
         /// Asserts that the key is valid
-        pub fn remove(self: *@This(), ext_id: u32) void {
-            const kv = self.map.fetchRemove(ext_id) orelse unreachable;
+        pub fn remove(self: *@This(), eid: u32) void {
+            const kv = self.map.fetchSwapRemove(eid) orelse unreachable;
             self.arr.remove(kv.value);
         }
     };
 }
 
-/// Strings used in this container must outlive the container
-pub fn StaticStringMappedIdArray2(T: type) type {
+pub fn ShortStringMappedIdArray(T: type, comptime max_len: usize) type {
     return struct {
-        arr: IdArray2(T),
-        map: std.StringHashMap(u32),
+        const ShortString = std.BoundedArray(u8, max_len);
+        const IdMap = std.ArrayHashMap(ShortString, u32, Ctx, true);
+
+        const Ctx = struct {
+            pub fn hash(_: @This(), k: ShortString) u32 {
+                return @truncate(std.hash.Wyhash.hash(0, k.constSlice()));
+            }
+
+            pub fn eql(_: @This(), lhs: ShortString, rhs: ShortString, _: usize) bool {
+                return std.mem.eql(u8, lhs.constSlice(), rhs.constSlice());
+            }
+        };
+
+        arr: IdArray(T),
+        map: std.ArrayHashMap(std.BoundedArray(u8, max_len), u32, Ctx, true),
+
+        pub fn init(allocator: std.mem.Allocator) @This() {
+            return .{
+                .arr = IdArray(T).init(allocator),
+                .map = IdMap.init(allocator),
+            };
+        }
+
+        pub fn deinit(self: *@This()) void {
+            self.arr.deinit();
+            self.map.deinit();
+        }
+
+        pub fn iterator(self: *@This()) IdArray(T).Iterator {
+            return self.arr.iterator();
+        }
+
+        /// (Slow) Get item pointer by it's external id
+        pub fn getByEid(self: *const @This(), str: []const u8) ?*T {
+            return if (self.map.get(ShortString.fromSlice(str) catch unreachable)) |int_id| self.arr.at(int_id) else null;
+        }
+
+        /// (Fast) Get item pointer by it's internal id
+        pub fn getById(self: *const @This(), id: u32) *T {
+            return self.arr.at(id);
+        }
+
+        /// Returns internal id for quicker lookup
+        pub fn put(self: *@This(), str: []const u8, v: T) !u32 {
+            const res = try self.map.getOrPut(try ShortString.fromSlice(str));
+            if (res.found_existing) unreachable;
+            errdefer self.map.orderedRemoveAt(res.index);
+            const id = try self.arr.put(v);
+            res.value_ptr.* = id;
+            return id;
+        }
+
+        /// Asserts that the key is valid
+        pub fn remove(self: *@This(), str: []const u8) void {
+            const kv = self.map.fetchSwapRemove(ShortString.fromSlice(str) catch unreachable) orelse unreachable;
+            self.arr.remove(kv.value);
+        }
     };
+}
+
+test "ShortStringMappedIdArray" {
+    var ssia = ShortStringMappedIdArray(usize, 32).init(std.testing.allocator);
+    defer ssia.deinit();
+    try std.testing.expectEqual(0, try ssia.put("kasia", 0));
+    try std.testing.expectEqual(0, ssia.getByEid("kasia").?.*);
+    ssia.remove("kasia");
 }

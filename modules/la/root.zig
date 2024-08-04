@@ -123,11 +123,15 @@ test "normalize" {
     try std.testing.expectEqual(.{ 0.6, 0.8 }, normalize(types.V(2, f32){ 3, 4 }));
 }
 
-pub fn floatFromBool(T: type, b: anytype) types.Vec(types.len(@TypeOf(b)), T) {
+pub fn floatFromBool(T: type, b: anytype) types.V(types.len(@TypeOf(b)), T) {
     return @floatFromInt(@intFromBool(b));
 }
 
-fn rotate2d(v: @Vector(2, f32), angle: f32) @Vector(2, f32) {
+test "floatFromBool" {
+    try std.testing.expectEqual(.{ 1, 0 }, floatFromBool(f32, @Vector(2, bool){ true, false }));
+}
+
+pub fn rotate2d(v: @Vector(2, f32), angle: f32) @Vector(2, f32) {
     const cos = @cos(angle);
     const sin = @sin(angle);
 
@@ -137,14 +141,90 @@ fn rotate2d(v: @Vector(2, f32), angle: f32) @Vector(2, f32) {
     };
 }
 
-fn clamp(v: anytype, a: anytype, b: anytype) @TypeOf(v, a, b) {
+test "rotate2d" {
+    const res = rotate2d(.{ 1, 0 }, std.math.pi / 3.0);
+    try std.testing.expectApproxEqAbs(0.500, res[0], 1e-3);
+    try std.testing.expectApproxEqAbs(0.866, res[1], 1e-3);
+}
+
+pub fn perp2d(a: @Vector(2, f32)) @Vector(2, f32) {
+    return .{ -a[1], a[0] };
+}
+
+test "perp2d" {
+    try std.testing.expectEqual(.{ -2, 1 }, perp2d(.{ 1, 2 }));
+}
+
+pub fn clamp(v: anytype, a: anytype, b: anytype) @TypeOf(v, a, b) {
     return @min(b, @max(a, v));
 }
 
-fn cross(a: @Vector(3, f32), b: @Vector(3, f32)) @Vector(3, f32) {
+test "clamp" {
+    try std.testing.expectEqual(2, clamp(0, 2, 4));
+    try std.testing.expectEqual(3, clamp(3, 2, 4));
+    try std.testing.expectEqual(4, clamp(6, 2, 4));
+}
+
+pub fn cross(a: @Vector(3, f32), b: @Vector(3, f32)) @Vector(3, f32) {
     return .{
         a[1] * b[2] - b[1] * a[2],
         a[2] * b[0] - b[2] * a[0],
         a[0] * b[1] - b[0] * a[1],
     };
+}
+
+test "cross" {
+    try std.testing.expectEqual(.{ 3, -6, 3 }, cross(.{ 4, 5, 6 }, .{ 1, 2, 3 }));
+}
+
+pub fn splat(len: comptime_int, v: anytype) @Vector(len, @TypeOf(v)) {
+    return @splat(v);
+}
+
+pub fn splatT(len: comptime_int, T: type, v: anytype) @Vector(len, T) {
+    return @splat(v);
+}
+
+test "splat" {
+    try std.testing.expectEqual(@Vector(2, f32){ 2, 2 }, splatT(2, f32, 2));
+}
+
+pub fn extend(len: comptime_int, v: anytype, tuple: anytype) @Vector(len, types.VectorChild(@TypeOf(v))) {
+    var out: @Vector(len, types.VectorChild(@TypeOf(v))) = undefined;
+
+    inline for (0..types.len(@TypeOf(v))) |i| out[i] = v[i];
+    inline for (types.len(@TypeOf(v))..types.len(@TypeOf(out)), 0..) |i, j| out[i] = tuple[j];
+
+    return out;
+}
+
+test "extend" {
+    const v2 = @Vector(2, f32){ 1, 2 };
+    const v4 = @Vector(4, f32){ 1, 2, 3, 4 };
+    try std.testing.expectEqual(v4, extend(4, v2, .{ 3, 4 }));
+}
+
+pub fn zeroExtend(len: comptime_int, v: anytype) @Vector(len, types.VectorChild(@TypeOf(v))) {
+    var out: @Vector(len, types.VectorChild(@TypeOf(v))) = undefined;
+    inline for (0..types.len(@TypeOf(v))) |i| out[i] = v[i];
+    inline for (types.len(@TypeOf(v))..types.len(@TypeOf(out))) |i| out[i] = 0;
+    return out;
+}
+
+test "zeroExtend" {
+    const v2 = @Vector(2, f32){ 1, 2 };
+    const v4 = @Vector(4, f32){ 1, 2, 0, 0 };
+    try std.testing.expectEqual(v4, zeroExtend(4, v2));
+}
+
+pub fn truncate(len: comptime_int, v: anytype) @Vector(len, types.VectorChild(@TypeOf(v))) {
+    var out: @Vector(len, types.VectorChild(@TypeOf(v))) = undefined;
+    inline for (0..len) |i| out[i] = v[i];
+    return out;
+}
+
+test "truncate" {
+    const v2 = @Vector(2, f32){ 1, 2 };
+    const v4 = @Vector(4, f32){ 1, 2, 3, 4 };
+    try std.testing.expectEqual(v2, truncate(2, v4));
 }
