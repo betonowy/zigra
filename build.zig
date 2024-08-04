@@ -4,6 +4,7 @@ const gen_spv = @import("build/gen_spv.zig");
 const gen_glsl = @import("build/gen_glsl.zig");
 const tracy_profiler = @import("build/tracy.zig");
 const thirdparty = @import("thirdparty/modules.zig");
+const tests = @import("build/tests.zig");
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
@@ -15,6 +16,7 @@ pub fn build(b: *std.Build) !void {
     const debug_ui = b.option(bool, "debug-ui", "Enable debug-ui tools. (default: false)");
     const lock_tick = b.option(bool, "lock-tick", "Locks 1 tick per frame. (default: false)");
     const lock_fps = b.option(f32, "lock-fps", "Limits FPS to this limit. (default: null)");
+    const test_filter = b.option([]const u8, "test-filter", "Run/install only [name] test. (default: runs/installs all tests)");
 
     const options = b.addOptions();
     options.addOption(bool, "profiling", profiling orelse false);
@@ -87,6 +89,21 @@ pub fn build(b: *std.Build) !void {
 
     if (b.args) |args| run_cmd.addArgs(args);
 
-    const run_step = b.step("run", "Run the app");
+    const run_step = b.step("run", "Run zigra");
     run_step.dependOn(&run_cmd.step);
+
+    const test_ctx = tests.Ctx{
+        .b = b,
+        .step_run = tests.addParentStep(b),
+        .step_install = tests.addParentInstallStep(b),
+        .target = target,
+        .optimize = optimize,
+        .test_only = test_filter,
+    };
+
+    tests.addTest(test_ctx, "modules-la", "modules/la/root.zig", mod_la);
+    tests.addTest(test_ctx, "modules-lifetime", "modules/lifetime/lifetime.zig", mod_lifetime);
+    tests.addTest(test_ctx, "modules-utils", "modules/utils/root.zig", mod_utils);
+    tests.addTest(test_ctx, "modules-zigra", "modules/zigra/root.zig", mod_zigra);
+    tests.addTest(test_ctx, "thirdparty-lz4", "thirdparty/lz4/lz4.zig", mod_lz4);
 }

@@ -1,3 +1,5 @@
+const std = @import("std");
+
 const zigra = @import("../root.zig");
 const systems = @import("../systems.zig");
 
@@ -10,6 +12,7 @@ fn deinit(_: systems.Entities.Entity, ctx: *zigra.Context, id: u32) void {
 pub fn default(ctx: *zigra.Context, pos: @Vector(2, f32), vel: @Vector(2, f32)) !u32 {
     const id_entity = try ctx.systems.entities.create(&deinit);
     const id_vk_sprite = ctx.systems.vulkan.impl.atlas.getRectIdByPath("images/crate_16.png") orelse unreachable;
+    // const id_transform = try ctx.systems.transform.createId(.{ .pos = pos, .vel = vel, .rot = std.math.pi / 4.0 }, id_entity);
     const id_transform = try ctx.systems.transform.createId(.{ .pos = pos, .vel = vel }, id_entity);
 
     const id_mesh = try ctx.systems.bodies.getMeshIdForPath("res/rbm/crate.json");

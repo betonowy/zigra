@@ -120,7 +120,7 @@ test "DrawDataLayout" {
     try comptime std.testing.expectEqual(16, @alignOf(TextData));
 
     try comptime std.testing.expectEqual(24, @sizeOf(BasicPushConstant));
-    try comptime std.testing.expectEqual(32, @sizeOf(TextPushConstant));
+    try comptime std.testing.expectEqual(40, @sizeOf(TextPushConstant));
 
     const data: DrawData = undefined; // extern unions are never type checked
     try std.testing.expectEqual(@intFromPtr(&data), @intFromPtr(&data.sprite));

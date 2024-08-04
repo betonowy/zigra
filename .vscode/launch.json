@@ -8,21 +8,6 @@
             "program": "${workspaceFolder}/zig-out/bin/zigra",
             "args": [],
             "cwd": "${workspaceFolder}",
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug zls",
-            "program": "/home/araara/src/zigra/zig-cache/o/2eb608f8343271b15724caa949304028/build",
-            "args": [
-                "/home/araara/zig/0.12.0-dev.2063+804cee3b9/files/zig",
-                "/home/araara/src/zigra",
-                "/home/araara/src/zigra/zig-cache",
-                "/home/araara/.cache/zig",
-                "--seed",
-                "0x40d886cd"
-            ],
-            "cwd": "${workspaceFolder}"
-        },
+        }
     ]
 }

@@ -19,7 +19,7 @@ pub fn default(ctx: *zigra.Context, pos: @Vector(2, f32), vel: @Vector(2, f32)) 
     }, id_entity);
 
     _ = try ctx.systems.bodies.createId(.{ .point = .{
-        .bounce_loss = 0.1,
+        .bounce_loss = 0.5,
         .drag = 0.05,
         .id_entity = id_entity,
         .id_transform = id_transform,

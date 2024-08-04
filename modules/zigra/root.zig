@@ -19,3 +19,7 @@ pub const Modules = struct {
 };
 
 pub const Context = lifetime.Context(Modules);
+
+test {
+    comptime std.testing.refAllDeclsRecursive(@This());
+}

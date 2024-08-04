@@ -16,9 +16,7 @@ pub fn intersect(view: *SandSim.LandscapeView, start: @Vector(2, f32), target: @
     var intersection_pos_opt: ?@Vector(2, f32) = null;
     var kbi = try getKernel(view, start, cmp_fn);
 
-    // std.debug.print("start: {}, target: {}\n", .{ start, target });
-
-    if (@reduce(.And, start != target)) {
+    if (@reduce(.Or, start != target)) {
         var dda = utils.DDA.init(start, target);
 
         while (!dda.finished) : (dda.next()) {
@@ -28,12 +26,6 @@ pub fn intersect(view: *SandSim.LandscapeView, start: @Vector(2, f32), target: @
             kbi = try getKernelI(view, dda.current_cell, cmp_fn);
 
             const result = utils.KBI.intersection(kbi, kpos, dda.dir);
-            // std.log.info("kbi: {}, p: {}, d: {}", .{ kbi, kpos, dda.dir });
-
-            // const kcoords = KCoords.init(pos);
-
-            // std.debug.print("base kcoords: {}\n", .{kcoords});
-            // std.debug.print("kbi: {d:.0}, pos: {d:.5}, kpos: {d:.5}, dir: {d:.5}\n", .{ kbi, pos, kpos, dda.dir });
 
             switch (result) {
                 .hit => |v| {

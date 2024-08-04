@@ -7,6 +7,8 @@ const lifetime = @import("lifetime");
 const systems = @import("../systems.zig");
 const zigra = @import("../root.zig");
 
+const max_points_per_mesh = 15;
+
 pub const Character = struct {};
 
 pub const Point = struct {
@@ -35,11 +37,11 @@ pub const Body = union(enum) {
 };
 
 pub const Mesh = struct {
-    points: std.BoundedArray(@Vector(2, f16), 15) = .{},
+    points: std.BoundedArray(@Vector(2, f16), max_points_per_mesh) = .{},
     moi: f16 = 1,
     mass: f16 = 1,
     drag: f16 = 0.05,
-    bounce_loss: f16 = 0.1,
+    bounce_loss: f16 = 0.5,
 };
 
 meshes: utils.IdArray2(Mesh),
@@ -127,25 +129,25 @@ fn processBodyPoint(
 
     const msq_result = try systems.World.Marching.intersect(view, t_curr.pos, t_next.pos, solidCmp) orelse return;
 
-    const hit_pos = msq_result.pos;
-    const hit_dir = msq_result.dir;
+    // const hit_pos = msq_result.pos;
+    // const hit_dir = msq_result.dir;
     const hit_nor = msq_result.nor orelse {
         t_next.vel = .{ 0, 0 };
         b_next.sleeping = true;
         return;
     };
 
-    const diff = t_next.pos - t_curr.pos;
-    const hit_diff = hit_pos - t_curr.pos;
-    const scale_ratio = @reduce(.Add, diff * hit_diff) / @reduce(.Add, diff * diff);
+    // const diff = t_next.pos - t_curr.pos;
+    // const hit_diff = hit_pos - t_curr.pos;
+    // const scale_ratio = @reduce(.Add, diff * hit_diff) / @reduce(.Add, diff * diff);
 
-    if (scale_ratio > 1 or @reduce(.Add, hit_nor * t_next.vel) > 0) return;
+    // if (scale_ratio > 1 or @reduce(.Add, hit_nor * t_next.vel) > 0) return;
 
-    t_next.pos = hit_pos;
+    t_next.pos = t_curr.pos;
 
-    if (@reduce(.Add, hit_nor * hit_dir) < 0) {
-        t_next.vel = la.mix(t_curr.vel, t_next.vel, @min(scale_ratio, 0));
-    }
+    // if (@reduce(.Add, hit_nor * hit_dir) < 0) {
+    // t_next.vel = la.mix(t_curr.vel, t_next.vel, @min(scale_ratio, 0));
+    // }
 
     const hit_dot = @reduce(.Add, hit_nor * t_next.vel);
 
@@ -158,12 +160,12 @@ fn processBodyPoint(
         if (speed > 0) t_next.vel *= @splat(1 - b_curr.bounce_loss);
     }
 
-    if (la.length(t_curr.pos - t_next.pos) < 3e-2 and hit_dot > 0 and scale_ratio == 0 and
-        @abs(@reduce(.Add, t_next.vel * @Vector(2, f32){ hit_nor[1], -hit_nor[0] })) < 1e-3)
-    {
-        b_next.sleeping = true;
-        t_next.vel = .{ 0, 0 };
-    }
+    // if (la.length(t_curr.pos - t_next.pos) < 3e-2 and hit_dot > 0 and scale_ratio == 0 and
+    //     @abs(@reduce(.Add, t_next.vel * @Vector(2, f32){ hit_nor[1], -hit_nor[0] })) < 1e-3)
+    // {
+    //     b_next.sleeping = true;
+    //     t_next.vel = .{ 0, 0 };
+    // }
 }
 
 fn processBodyRigid(
@@ -190,22 +192,36 @@ fn processBodyRigid(
     t_next.vel = integrators.verletVelocity(@Vector(2, f32), t_curr.vel, acc, delay);
     t_next.rot += t_next.spin * delay;
 
-    var collision_deltas = CollisionDeltas{};
+    var point_impulses = std.BoundedArray(Impulse, max_points_per_mesh){};
 
     for (mesh.points.constSlice()) |p| {
-        collision_deltas.add(try self.processBodyRigidPointCollision(view, t_curr, b_curr, &t_next, &b_next, mesh, p, delay, ctx));
+        const opt_impulse = try self.processBodyRigidPointCollision(view, t_curr, b_curr, &t_next, &b_next, mesh, p, delay, ctx);
+        if (opt_impulse) |impulse| try point_impulses.append(impulse);
     }
 
-    // README PLEASE
-    // The reason dividing is working weird is because we're collapsing impulses into points early
-    // Should sum impulses, divide them, and then apply to velocity and spin
+    if (point_impulses.len == 0) return;
 
-    if (!collision_deltas.isNull()) {
-        t_next.pos = t_curr.pos;
-        t_next.vel = t_curr.vel + collision_deltas.vel / collision_deltas.denominatorV2();
-        t_next.spin = t_curr.spin + collision_deltas.spin / collision_deltas.denominator();
-        t_next.rot = t_curr.rot;
-    } else {}
+    var impulse_avg: @Vector(2, f32) = .{ 0, 0 };
+    var point_avg: @Vector(2, f32) = .{ 0, 0 };
+
+    for (point_impulses.constSlice()) |v| {
+        impulse_avg += v.impulse;
+        point_avg += v.offset;
+    }
+
+    const ratio = @sqrt(@as(f32, @floatFromInt(point_impulses.len)));
+
+    impulse_avg /= @splat(ratio);
+    point_avg /= @splat(ratio);
+
+    const offset_impulse_cross = cross(.{ point_avg[0], point_avg[1], 0 }, @Vector(3, f32){ impulse_avg[0], impulse_avg[1], 0 });
+    const vel_delta = impulse_avg / @as(@Vector(2, f32), @splat(mesh.mass));
+    const spin_delta = offset_impulse_cross[2] / mesh.moi;
+
+    t_next.pos = t_curr.pos;
+    t_next.vel = t_curr.vel + vel_delta;
+    t_next.spin = t_curr.spin + spin_delta;
+    t_next.rot = t_curr.rot;
 }
 
 fn rotate2d(v: @Vector(2, f32), angle: f32) @Vector(2, f32) {
@@ -256,6 +272,11 @@ const CollisionDeltas = struct {
     }
 };
 
+const Impulse = struct {
+    offset: @Vector(2, f32),
+    impulse: @Vector(2, f32),
+};
+
 fn processBodyRigidPointCollision(
     self: *@This(),
     view: *systems.World.SandSim.LandscapeView,
@@ -267,8 +288,7 @@ fn processBodyRigidPointCollision(
     point: @Vector(2, f32),
     delay: f32,
     ctx: *zigra.Context,
-) !?CollisionDeltas {
-    _ = ctx; // autofix
+) !?Impulse {
     _ = b_next; // autofix
     _ = self; // autofix
     _ = b_curr; // autofix
@@ -286,25 +306,20 @@ fn processBodyRigidPointCollision(
     var vel_curr = vel_rel_curr + t_curr.vel;
     var vel_next = vel_rel_next + t_next.vel;
 
-    // if (ctx.systems.time.tick_current == 15) @breakpoint();
-
-    // std.log.info("about to do intersect", .{});
-
     const msq_result = try systems.World.Marching.intersect(view, pos_curr, pos_next, solidCmp) orelse return null;
 
     const hit_pos = msq_result.pos;
     const hit_dir = msq_result.dir;
-    _ = hit_dir; // autofix
     const hit_nor = msq_result.nor orelse {
-        // std.log.info("tick {}: Woops! sinking? {} {d:.3}, curr: {d:.3} {d:.3}, next: {d:.3} {d:.3}", .{
-        //     ctx.systems.time.tick_current,
-        //     hit_pos,
-        //     hit_dir,
-        //     pos_curr,
-        //     vel_curr,
-        //     pos_next,
-        //     vel_next,
-        // });
+        std.log.info("tick {}: Woops! sinking? {} {d:.3}, curr: {d:.3} {d:.3}, next: {d:.3} {d:.3}", .{
+            ctx.systems.time.tick_current,
+            hit_pos,
+            hit_dir,
+            pos_curr,
+            vel_curr,
+            pos_next,
+            vel_next,
+        });
         // @panic("elo musk");
         // t_next.vel = .{ 0, 0 };
         // t_next.spin = 0;
@@ -334,62 +349,33 @@ fn processBodyRigidPointCollision(
         vel_next = vel_rel_next + t_next.vel;
     }
 
-    const hit_tangent = @Vector(2, f32){ -hit_nor[1], hit_nor[0] };
-    const dot_nor = -@abs(la.dot(hit_nor, vel_next));
-    const dot_tangent = la.dot(hit_tangent, vel_next);
-
     const offset_3d = @Vector(3, f32){ offset_next[0], offset_next[1], 0 };
+
     const normal_3d = @Vector(3, f32){ hit_nor[0], hit_nor[1], 0 };
+    // const hit_tangent = @Vector(2, f32){ -hit_nor[1], hit_nor[0] };
+    const dot_nor = -@abs(la.dot(hit_nor, vel_next));
+    // const dot_tangent = la.dot(hit_tangent, vel_next);
 
-    const impulse = brk: {
-        const cross_1 = cross(offset_3d, normal_3d) / @as(@Vector(3, f32), @splat(mesh.moi));
-        const cross_2 = cross(cross_1, offset_3d);
-        const cross_2d = @Vector(2, f32){ cross_2[0], cross_2[1] };
+    const cross_1 = cross(offset_3d, normal_3d) / @as(@Vector(3, f32), @splat(mesh.moi));
+    const cross_2 = cross(cross_1, offset_3d);
+    const cross_2d = @Vector(2, f32){ cross_2[0], cross_2[1] };
 
-        const mag_rebound_normal = -(2 - mesh.bounce_loss) * dot_nor / (1 / mesh.mass + @reduce(.Add, hit_nor * cross_2d)) + @as(f32, 0);
-        const mag_friction_tangent = -@max(mag_rebound_normal * mesh.bounce_loss * 0.5, 0);
-        const max_impulse_tangent = @abs(dot_tangent);
+    const mag_rebound_normal = -(2 - mesh.bounce_loss) * dot_nor / (1 / mesh.mass + @reduce(.Add, hit_nor * cross_2d));
+    // const mag_friction_tangent = -@max(mag_rebound_normal * mesh.bounce_loss * 0.5, 0);
+    // const max_impulse_tangent = @abs(dot_tangent);
 
-        const rebound_nor = @as(@Vector(2, f32), @splat(mag_rebound_normal)) * hit_nor;
-        const tan_sign: f32 = if (dot_tangent < 0) -1 else 1;
-        const impulse_tan = @as(@Vector(2, f32), @splat(@min(mag_friction_tangent, max_impulse_tangent) * tan_sign)) * hit_tangent;
+    const rebound_nor = @as(@Vector(2, f32), @splat(mag_rebound_normal)) * hit_nor;
+    // const tan_sign: f32 = if (dot_tangent < 0) -1 else 1;
+    // const impulse_tan = @as(@Vector(2, f32), @splat(@min(mag_friction_tangent, max_impulse_tangent) * tan_sign)) * hit_tangent;
 
-        break :brk rebound_nor + impulse_tan;
-    };
+    // const impulse = rebound_nor + impulse_tan;
 
-    const offset_impulse_cross = cross(offset_3d, @Vector(3, f32){ impulse[0], impulse[1], 0 });
-    const vel_delta = impulse / @as(@Vector(2, f32), @splat(mesh.mass));
-    const spin_delta = offset_impulse_cross[2] / mesh.moi;
-
-    return .{
-        .vel = vel_delta,
-        .spin = spin_delta,
-    };
+    // const offset_impulse_cross = cross(offset_3d, @Vector(3, f32){ impulse[0], impulse[1], 0 });
+    // const vel_delta = impulse / @as(@Vector(2, f32), @splat(mesh.mass));
+    // const spin_delta = offset_impulse_cross[2] / mesh.moi;
 
     // t_next.vel += vel_delta;
     // t_next.spin += spin_delta;
 
-    // return null;
-}
-
-fn processBodyRigidPointSinking(
-    self: *@This(),
-    view: *systems.World.SandSim.LandscapeView,
-    t_curr: *systems.Transform.Data,
-    b_curr: *Rigid,
-    t_next: *systems.Transform.Data,
-    b_next: *Rigid,
-    mesh: *Mesh,
-    point: @Vector(2, f32),
-    delay: f32,
-) !void {
-    _ = self; // autofix
-    _ = view; // autofix
-    _ = t_curr; // autofix
-    _ = b_curr; // autofix
-    _ = t_next; // autofix
-    _ = b_next; // autofix
-    _ = mesh; // autofix
-    _ = point; // autofix
-    _ = delay; // autofix
+    return .{ .offset = offset_next, .impulse = rebound_nor };
 }

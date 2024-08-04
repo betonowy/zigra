@@ -1,43 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const la = if (!builtin.is_test) @import("la") else struct {
-    pub fn sqrLength(a: anytype) f32 {
-        return @reduce(.Add, a * a);
-    }
-
-    pub fn length(a: anytype) f32 {
-        return @sqrt(sqrLength(a));
-    }
-
-    pub fn normalize(a: anytype) @TypeOf(a) {
-        return a / @as(@TypeOf(a), @splat(length(a)));
-    }
-
-    pub fn fract(a: anytype) @TypeOf(a) {
-        return switch (@typeInfo(@TypeOf(a))) {
-            else => unreachable,
-            .Array,
-            => fractMatrix(a),
-            .Vector,
-            .Float,
-            .ComptimeFloat,
-            => fractVectorOrScalar(a),
-        };
-    }
-
-    fn fractMatrix(a: anytype) @TypeOf(a) {
-        var out: @TypeOf(a) = undefined;
-        inline for (&a, &out) |a_vec, *out_vec| out_vec.* = fractVectorOrScalar(a_vec);
-        return out;
-    }
-
-    fn fractVectorOrScalar(a: anytype) @TypeOf(a) {
-        return a - @floor(a);
-    }
-};
+const la = @import("la");
 
 dir: @Vector(2, f32),
+max_dist: f32,
 target_cell: @Vector(2, i32),
 current_cell: @Vector(2, i32),
 step: @Vector(2, i32),
@@ -55,7 +22,9 @@ const two_2i: @Vector(2, i32) = @splat(2);
 pub fn init(start: @Vector(2, f32), target: @Vector(2, f32)) @This() {
     std.debug.assert(@reduce(.Or, start != target));
 
-    const dir = la.normalize(target - start);
+    const diff = target - start;
+    const max_dist = la.length(diff);
+    const dir = la.normalize(diff);
     const delta = @abs(one_2f / dir);
 
     const cond_i: @Vector(2, i32) = @intFromBool(target > start);
@@ -67,6 +36,7 @@ pub fn init(start: @Vector(2, f32), target: @Vector(2, f32)) @This() {
 
     return @This(){
         .dir = dir,
+        .max_dist = max_dist,
         .target_cell = @intFromFloat(@floor(target)),
         .current_cell = @intFromFloat(@floor(start)),
         .step = cond_i * two_2i - one_2i,
@@ -115,8 +85,6 @@ test "simple_shape" {
     while (!dda.finished) : (dda.next()) {
         try std.testing.expectEqual(expected_cells[dda.iterations], dda.current_cell);
         try std.testing.expectApproxEqRel(expected_dists[dda.iterations], dda.dist(), 1e-5);
-
-        std.debug.print("cell: {}, fpos: {d:.2}\n", .{ dda.current_cell, @floor(@Vector(2, f32){ 0, 0 } + @as(@Vector(2, f32), @splat(dda.dist())) * dda.dir) });
     }
 
     try std.testing.expectEqual(8, dda.iterations);
