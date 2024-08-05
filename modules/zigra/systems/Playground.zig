@@ -35,9 +35,9 @@ pub fn deinit(self: *@This()) void {
 pub fn tickProcess(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     const ctx = ctx_base.parent(zigra.Context);
 
-    if (self.active_entities.items.len < 10000) {
-        try self.pushCrateBatch(ctx, 100);
-        try self.pushChunkBatch(ctx, 100);
+    if (self.active_entities.items.len < 40000) {
+        try self.pushCrateBatch(ctx, 1000);
+        try self.pushChunkBatch(ctx, 1000);
     }
 
     try self.removeSleepingBodies(ctx);

@@ -129,101 +129,126 @@ pub fn tickProcessBodies(self: *@This(), ctx_base: *lifetime.ContextBase) !void 
 
     const Self = @This();
 
-    const DispatchCtx = struct {
-        key_counter: std.atomic.Value(u32) = 0,
-    };
-    _ = DispatchCtx; // autofix
-
     const DispatchGroup = struct {
         self: *Self,
-        iterator: utils.IdArray(Body).Iterator,
         delay: f32,
         view: systems.World.SandSim.LandscapeView,
         meshes: []Mesh,
         transforms: []systems.Transform.Data,
         worker_data: lifetime.PackagedTask,
+        index: u32,
+        range: u32,
+        stride: u32,
 
         pub fn work(task: *@This(), base: *lifetime.ContextBase) !void {
             const work_trace = tracy.traceNamed(@src(), "Bodies.tickProcessBodies (MT)");
             defer work_trace.end();
 
-            var buffer: [48]u8 = undefined;
-            work_trace.addText(try std.fmt.bufPrint(&buffer, "begin: {}, end: {}", .{ task.iterator.cursor, task.iterator.bound }));
-
             const worker_ctx = base.parent(zigra.Context);
 
-            while (task.iterator.next()) |body| {
-                switch (body.*) {
-                    .point => |*p| try task.self.processBodyPoint(&task.view, &task.transforms[p.id_transform], p, task.delay, worker_ctx),
-                    .rigid => |*r| try task.self.processBodyRigid(&task.view, &task.transforms[r.id_transform], r, &task.meshes[r.id_mesh], task.delay, worker_ctx),
-                    else => @panic("Unimplemented"),
+            var processed_bodies: u64 = 0;
+
+            while (true) : (task.index += task.stride) {
+                var iterator = task.self.bodies.boundedIterator(task.index, @min(task.index + task.range, task.self.bodies.arr.capacity));
+
+                while (iterator.next()) |body| {
+                    processed_bodies += 1;
+
+                    switch (body.*) {
+                        .point => |*p| try task.self.processBodyPoint(&task.view, &task.transforms[p.id_transform], p, task.delay, worker_ctx),
+                        .rigid => |*r| try task.self.processBodyRigid(&task.view, &task.transforms[r.id_transform], r, &task.meshes[r.id_mesh], task.delay, worker_ctx),
+                        else => @panic("Unimplemented"),
+                    }
                 }
+
+                if (iterator.cursor >= iterator.parent.capacity) break;
             }
+
+            var buf: [64]u8 = undefined;
+            work_trace.addText(try std.fmt.bufPrint(&buf, "Processed bodies: {}", .{processed_bodies}));
         }
     };
 
-    var dispatchGroups = try std.ArrayList(DispatchGroup).initCapacity(self.bodies.arr.allocator, ctx.base.workerGroup.workers.items.len);
+    var dispatchGroups = try std.ArrayList(DispatchGroup).initCapacity(
+        self.bodies.arr.allocator,
+        ctx.base.workerGroup.workers.items.len,
+    );
+
     defer dispatchGroups.deinit();
     try dispatchGroups.resize(dispatchGroups.capacity);
 
-    {
-        const counting_trace = tracy.traceNamed(@src(), "Bodies.tickProcessBodies (Counting)");
+    for (dispatchGroups.items[0..], 0..) |*group, i| {
+        group.self = self;
+        group.delay = delay;
+        group.view = view;
+        group.meshes = meshes;
+        group.transforms = transforms;
+        group.worker_data = lifetime.PackagedTask.init(ctx_base, group, .work);
+        group.range = 256;
+        group.index = @as(u32, @intCast(i)) * group.range;
+        group.stride = @as(u32, @intCast(dispatchGroups.items.len)) * group.range;
 
-        var dispatchIterator = self.bodies.arr.iterator();
-        var counter: u32 = 0;
-        while (dispatchIterator.next()) |_| counter += 1;
-
-        counting_trace.end();
-
-        const divider = @max(1 + counter / dispatchGroups.items.len, 64);
-        dispatchIterator.reset();
-        counter = 0;
-
-        var it_begin: u32 = 0;
-        var it_end: u32 = 0;
-
-        var current_group: u32 = 0;
-
-        const dispatch_trace = tracy.traceNamed(@src(), "Bodies.tickProcessBodies (Dispatch)");
-        defer dispatch_trace.end();
-
-        while (dispatchIterator.next()) |_| : (counter += 1) {
-            if (counter == divider) {
-                const group = &dispatchGroups.items[current_group];
-
-                it_end = dispatchIterator.cursor;
-                defer it_begin = it_end;
-
-                group.self = self;
-                group.iterator = self.bodies.boundedIterator(it_begin, it_end);
-                group.delay = delay;
-                group.view = view;
-                group.meshes = meshes;
-                group.transforms = transforms;
-                group.worker_data = lifetime.PackagedTask.init(ctx_base, group, .work);
-
-                if (!ctx_base.workerGroup.tryPush(&group.worker_data, 1000)) unreachable;
-
-                current_group += 1;
-                counter = 0;
-            }
-        }
-
-        if (counter != 0) {
-            const group = &dispatchGroups.items[current_group];
-
-            it_end = dispatchIterator.cursor;
-            group.self = self;
-            group.iterator = self.bodies.boundedIterator(it_begin, it_end);
-            group.delay = delay;
-            group.view = view;
-            group.meshes = meshes;
-            group.transforms = transforms;
-            group.worker_data = lifetime.PackagedTask.init(ctx_base, group, .work);
-
-            if (!ctx_base.workerGroup.tryPush(&group.worker_data, 1000)) unreachable;
-        }
+        if (!ctx_base.workerGroup.tryPush(&group.worker_data, 1000)) unreachable;
     }
+
+    // {
+    //     const counting_trace = tracy.traceNamed(@src(), "Bodies.tickProcessBodies (Counting)");
+
+    //     var dispatchIterator = self.bodies.arr.iterator();
+    //     var counter: u32 = 0;
+    //     while (dispatchIterator.next()) |_| counter += 1;
+
+    //     counting_trace.end();
+
+    //     const divider = @max(1 + counter / dispatchGroups.items.len, 64);
+    //     dispatchIterator.reset();
+    //     counter = 0;
+
+    //     var it_begin: u32 = 0;
+    //     var it_end: u32 = 0;
+
+    //     var current_group: u32 = 0;
+
+    //     const dispatch_trace = tracy.traceNamed(@src(), "Bodies.tickProcessBodies (Dispatch)");
+    //     defer dispatch_trace.end();
+
+    //     while (dispatchIterator.next()) |_| : (counter += 1) {
+    //         if (counter == divider) {
+    //             const group = &dispatchGroups.items[current_group];
+
+    //             it_end = dispatchIterator.cursor;
+    //             defer it_begin = it_end;
+
+    //             group.self = self;
+    //             group.iterator = self.bodies.boundedIterator(it_begin, it_end);
+    //             group.delay = delay;
+    //             group.view = view;
+    //             group.meshes = meshes;
+    //             group.transforms = transforms;
+    //             group.worker_data = lifetime.PackagedTask.init(ctx_base, group, .work);
+
+    //             if (!ctx_base.workerGroup.tryPush(&group.worker_data, 1000)) unreachable;
+
+    //             current_group += 1;
+    //             counter = 0;
+    //         }
+    //     }
+
+    //     if (counter != 0) {
+    //         const group = &dispatchGroups.items[current_group];
+
+    //         it_end = dispatchIterator.cursor;
+    //         group.self = self;
+    //         group.iterator = self.bodies.boundedIterator(it_begin, it_end);
+    //         group.delay = delay;
+    //         group.view = view;
+    //         group.meshes = meshes;
+    //         group.transforms = transforms;
+    //         group.worker_data = lifetime.PackagedTask.init(ctx_base, group, .work);
+
+    //         if (!ctx_base.workerGroup.tryPush(&group.worker_data, 1000)) unreachable;
+    //     }
+    // }
 
     ctx_base.workerGroup.flush();
 }
