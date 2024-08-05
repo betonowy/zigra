@@ -48,6 +48,8 @@ pub fn runLoop(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     const t = tracy.trace(@src());
     defer t.end();
 
+    ctx_base.worker_group.current_index = 0;
+
     const ctx = ctx_base.parent(zigra.Context);
 
     switch (self.state_game) {
@@ -144,7 +146,7 @@ fn runLoopPostTicks(_: *@This(), ctx: *zigra.Context) !void {
     try run(ctx, .world, .render);
     try run(ctx, .nuklear, .render);
     try run(ctx, .sprite_man, .render);
-    try run(ctx, .vulkan, .process);
+    try run(ctx, .vulkan, .pushProcessParallel);
 }
 
 fn run(ctx: *zigra.Context, comptime system_tag: anytype, comptime function_tag: anytype) !void {

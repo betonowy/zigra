@@ -1177,6 +1177,9 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
     };
 
     {
+        const subtrace = tracy.traceNamed(@src(), "Sprite opaque");
+        defer subtrace.end();
+
         self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_sprite_opaque.handle);
 
         self.vkd.cmdBindDescriptorSets(
@@ -1222,6 +1225,9 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         );
     }
     {
+        const subtrace = tracy.traceNamed(@src(), "Line");
+        defer subtrace.end();
+
         self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_line.handle);
 
         self.vkd.cmdBindDescriptorSets(
@@ -1267,6 +1273,9 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         );
     }
     {
+        const subtrace = tracy.traceNamed(@src(), "Point");
+        defer subtrace.end();
+
         self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_point.handle);
 
         self.vkd.cmdBindDescriptorSets(
@@ -1312,6 +1321,9 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         );
     }
     {
+        const subtrace = tracy.traceNamed(@src(), "Landscape");
+        defer subtrace.end();
+
         self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_landscape.handle);
 
         self.vkd.cmdBindDescriptorSets(
@@ -1351,6 +1363,9 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         self.vkd.cmdDraw(frame.command_buffer, 4, frame.draw_landscape_range, 0, frame.draw_landscape_index);
     }
     {
+        const subtrace = tracy.traceNamed(@src(), "Triangles");
+        defer subtrace.end();
+
         self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_triangles.handle);
 
         self.vkd.cmdBindDescriptorSets(
@@ -1390,6 +1405,9 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         self.vkd.cmdDraw(frame.command_buffer, frame.draw_triangles_range, 1, frame.draw_triangles_index, 0);
     }
     {
+        const subtrace = tracy.traceNamed(@src(), "Text");
+        defer subtrace.end();
+
         self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_text.handle);
 
         self.vkd.cmdBindDescriptorSets(
@@ -1433,6 +1451,9 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
     self.transitionFrameImagesFinal(frame, swapchain_image_index);
     self.beginRenderingFinal(frame, swapchain_image_index);
     {
+        const subtrace = tracy.traceNamed(@src(), "Present");
+        defer subtrace.end();
+
         self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_present.handle);
 
         self.vkd.cmdBindDescriptorSets(
@@ -1462,6 +1483,9 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         self.vkd.cmdDraw(frame.command_buffer, 3, 1, 0, 0);
     }
     {
+        const subtrace = tracy.traceNamed(@src(), "GUI");
+        defer subtrace.end();
+
         self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_gui.handle);
 
         self.vkd.cmdBindDescriptorSets(
@@ -1760,118 +1784,156 @@ fn uploadScheduledData(self: *@This(), frame: *FrameData) !void {
 
     var current_index: u32 = 0;
 
-    for (
-        self.frames[self.frame_index].landscape.active_sets.constSlice(),
-        frame.draw_buffer.map[current_index .. current_index + self.frames[self.frame_index].landscape.active_sets.len],
-    ) |set, *cmd| {
-        cmd.landscape = .{
-            .depth = 0.9,
-            .descriptor = @intCast(set.tile.table_index),
-            .offset = set.tile.coord,
-            .size = .{ Landscape.image_size, Landscape.image_size },
-        };
-    }
-
-    frame.draw_landscape_index = current_index;
-    frame.draw_landscape_range = self.frames[self.frame_index].landscape.active_sets.len;
-    current_index += self.frames[self.frame_index].landscape.active_sets.len;
-
-    // Draw points
-    frame.draw_point_index = current_index;
-    frame.draw_point_range = @intCast(self.upload_line_data.items.len * 2);
     {
-        const begin = current_index;
+        const subtrace = tracy.traceNamed(@src(), "Landscape");
+        defer subtrace.end();
 
-        for (0..self.upload_line_data.items.len) |i| {
-            const dst_a = &frame.draw_buffer.map[begin + i * 2 + 0];
-            const dst_b = &frame.draw_buffer.map[begin + i * 2 + 1];
-
-            dst_a.point = .{
-                .point = .{
-                    self.upload_line_data.items[i].points[0][0],
-                    self.upload_line_data.items[i].points[0][1],
-                    self.upload_line_data.items[i].depth,
-                },
-                .color = self.upload_line_data.items[i].color,
-            };
-
-            dst_b.point = .{
-                .point = .{
-                    self.upload_line_data.items[i].points[1][0],
-                    self.upload_line_data.items[i].points[1][1],
-                    self.upload_line_data.items[i].depth,
-                },
-                .color = self.upload_line_data.items[i].color,
+        for (
+            self.frames[self.frame_index].landscape.active_sets.constSlice(),
+            frame.draw_buffer.map[current_index .. current_index + self.frames[self.frame_index].landscape.active_sets.len],
+        ) |set, *cmd| {
+            cmd.landscape = .{
+                .depth = 0.9,
+                .descriptor = @intCast(set.tile.table_index),
+                .offset = set.tile.coord,
+                .size = .{ Landscape.image_size, Landscape.image_size },
             };
         }
 
-        current_index += @intCast(self.upload_line_data.items.len * 2);
+        frame.draw_landscape_index = current_index;
+        frame.draw_landscape_range = self.frames[self.frame_index].landscape.active_sets.len;
+        current_index += self.frames[self.frame_index].landscape.active_sets.len;
+
+        subtrace.setValue(frame.draw_landscape_range);
+    }
+
+    {
+        const subtrace = tracy.traceNamed(@src(), "Points");
+        defer subtrace.end();
+
+        frame.draw_point_index = current_index;
+        frame.draw_point_range = @intCast(self.upload_line_data.items.len * 2);
+        {
+            const begin = current_index;
+
+            for (0..self.upload_line_data.items.len) |i| {
+                const dst_a = &frame.draw_buffer.map[begin + i * 2 + 0];
+                const dst_b = &frame.draw_buffer.map[begin + i * 2 + 1];
+
+                dst_a.point = .{
+                    .point = .{
+                        self.upload_line_data.items[i].points[0][0],
+                        self.upload_line_data.items[i].points[0][1],
+                        self.upload_line_data.items[i].depth,
+                    },
+                    .color = self.upload_line_data.items[i].color,
+                };
+
+                dst_b.point = .{
+                    .point = .{
+                        self.upload_line_data.items[i].points[1][0],
+                        self.upload_line_data.items[i].points[1][1],
+                        self.upload_line_data.items[i].depth,
+                    },
+                    .color = self.upload_line_data.items[i].color,
+                };
+            }
+
+            current_index += @intCast(self.upload_line_data.items.len * 2);
+        }
+
+        subtrace.setValue(frame.draw_point_range);
     }
 
     // Draw lines
-    frame.draw_line_index = current_index;
-    frame.draw_line_range = @intCast(self.upload_line_data.items.len);
     {
-        const begin = current_index;
-        const end = begin + self.upload_line_data.items.len;
+        const subtrace = tracy.traceNamed(@src(), "Lines");
+        defer subtrace.end();
 
-        for (self.upload_line_data.items, frame.draw_buffer.map[begin..end]) |src, *dst| dst.line = src;
+        frame.draw_line_index = current_index;
+        frame.draw_line_range = @intCast(self.upload_line_data.items.len);
+        {
+            const begin = current_index;
+            const end = begin + self.upload_line_data.items.len;
 
-        current_index += @intCast(self.upload_line_data.items.len);
+            for (self.upload_line_data.items, frame.draw_buffer.map[begin..end]) |src, *dst| dst.line = src;
+
+            current_index += @intCast(self.upload_line_data.items.len);
+        }
+
+        self.upload_line_data.clearRetainingCapacity();
+        subtrace.setValue(frame.draw_line_range);
     }
 
-    self.upload_line_data.clearRetainingCapacity();
-
-    // Draw Nk Rect Filled (actually just draw some triangles for now)
-    std.debug.assert(self.upload_triangle_data.items.len % 3 == 0);
-    frame.draw_triangles_index = current_index;
-    frame.draw_triangles_range = @intCast(self.upload_triangle_data.items.len);
+    // Draw Triangles
     {
-        const begin = current_index;
-        const end = begin + self.upload_triangle_data.items.len;
+        const subtrace = tracy.traceNamed(@src(), "Triangles");
+        defer subtrace.end();
 
-        for (self.upload_triangle_data.items, frame.draw_buffer.map[begin..end]) |src, *dst| dst.vertex = src;
+        std.debug.assert(self.upload_triangle_data.items.len % 3 == 0);
+        frame.draw_triangles_index = current_index;
+        frame.draw_triangles_range = @intCast(self.upload_triangle_data.items.len);
+        {
+            const begin = current_index;
+            const end = begin + self.upload_triangle_data.items.len;
 
-        current_index += @intCast(self.upload_triangle_data.items.len);
+            for (self.upload_triangle_data.items, frame.draw_buffer.map[begin..end]) |src, *dst| dst.vertex = src;
+
+            current_index += @intCast(self.upload_triangle_data.items.len);
+        }
+
+        self.upload_triangle_data.clearRetainingCapacity();
+        subtrace.setValue(frame.draw_triangles_range);
     }
-
-    self.upload_triangle_data.clearRetainingCapacity();
 
     // Draw text data
-    frame.draw_text_index = current_index;
-    frame.draw_text_range = @intCast(self.upload_text_data.items.len);
     {
-        const begin = current_index;
-        const end = begin + self.upload_text_data.items.len;
+        const subtrace = tracy.traceNamed(@src(), "Text");
+        defer subtrace.end();
 
-        for (self.upload_text_data.items, frame.draw_buffer.map[begin..end]) |src, *dst| dst.character = src;
+        frame.draw_text_index = current_index;
+        frame.draw_text_range = @intCast(self.upload_text_data.items.len);
+        {
+            const begin = current_index;
+            const end = begin + self.upload_text_data.items.len;
 
-        current_index += @intCast(self.upload_text_data.items.len);
+            for (self.upload_text_data.items, frame.draw_buffer.map[begin..end]) |src, *dst| dst.character = src;
+
+            current_index += @intCast(self.upload_text_data.items.len);
+        }
+
+        self.upload_text_data.clearRetainingCapacity();
+        subtrace.setValue(frame.draw_text_range);
     }
-
-    self.upload_text_data.clearRetainingCapacity();
 
     // Adjust and draw gui data
-    for (self.upload_gui_data.items[0..]) |*item| switch (item.*) {
-        .triangles => {
-            item.triangles.begin += current_index;
-            item.triangles.end += current_index;
-        },
-        else => {},
-    };
     {
-        const begin = current_index;
-        const end = begin + self.upload_gui_vertices.items.len;
+        const subtrace = tracy.traceNamed(@src(), "GUI Triangles");
+        defer subtrace.end();
 
-        for (self.upload_gui_vertices.items, frame.draw_buffer.map[begin..end]) |src, *dst| dst.vertex = src;
+        for (self.upload_gui_data.items[0..]) |*item| switch (item.*) {
+            .triangles => {
+                item.triangles.begin += current_index;
+                item.triangles.end += current_index;
+            },
+            else => {},
+        };
+        {
+            const begin = current_index;
+            const end = begin + self.upload_gui_vertices.items.len;
 
-        current_index += @intCast(self.upload_gui_vertices.items.len);
+            for (self.upload_gui_vertices.items, frame.draw_buffer.map[begin..end]) |src, *dst| dst.vertex = src;
+
+            current_index += @intCast(self.upload_gui_vertices.items.len);
+        }
+
+        // Does not deallocate buffer, will not be written until the next frame, so this is ok to do.
+        frame.draw_cmd_gui_slice = self.upload_gui_data.items;
+        self.upload_gui_data.clearRetainingCapacity();
+        self.upload_gui_vertices.clearRetainingCapacity();
+
+        subtrace.setValue(@intCast(frame.draw_cmd_gui_slice.len));
     }
-
-    // Does not deallocate buffer, will not be written until the next frame, so this is ok to do.
-    frame.draw_cmd_gui_slice = self.upload_gui_data.items;
-    self.upload_gui_data.clearRetainingCapacity();
-    self.upload_gui_vertices.clearRetainingCapacity();
 }
 
 fn floatToSnorm16(value: f32, comptime range: f32) i16 {

@@ -36,8 +36,8 @@ pub fn tickProcess(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!voi
     const ctx = ctx_base.parent(zigra.Context);
 
     if (self.active_bodies.items.len < 40000) {
-        try self.pushCrateBatch(ctx, 1000);
-        try self.pushChunkBatch(ctx, 1000);
+        try self.pushCrateBatch(ctx, 200);
+        try self.pushChunkBatch(ctx, 200);
     }
 
     try self.removeSleepingBodies(ctx);

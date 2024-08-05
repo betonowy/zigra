@@ -102,10 +102,10 @@ pub fn deinit(self: *@This(), backend: *Backend) void {
     }
 }
 
-pub fn recordUploadData(self: *@This(), backend: *Backend, cmd: vk.CommandBuffer, upload_sets: UploadSets) !void {
+pub fn recordUploadData(_: *@This(), backend: *Backend, cmd: vk.CommandBuffer, upload_sets: UploadSets) !void {
     const trace = tracy.traceNamed(@src(), "landscape.recordUploadData");
     defer trace.end();
-    _ = self; // autofix
+
     for (upload_sets.constSlice()) |set| {
         const dst: [*]u8 = @ptrCast(set.tile.upload_image.map.?);
         @memcpy(dst, set.data);
