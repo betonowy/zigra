@@ -79,6 +79,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
         .use_llvm = use_llvm,
+        .strip = optimize != .Debug and tracy != true,
     });
 
     exe.step.dependOn(&step_gen_spv.step);

@@ -140,7 +140,6 @@ fn runLoopPostTicks(_: *@This(), ctx: *zigra.Context) !void {
     const t = tracy.trace(@src());
     defer t.end();
 
-    try run(ctx, .transform, .calculateVisualPositions);
     try run(ctx, .vulkan, .waitForAvailableFrame);
     try run(ctx, .world, .render);
     try run(ctx, .nuklear, .render);

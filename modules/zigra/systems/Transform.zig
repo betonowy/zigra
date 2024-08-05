@@ -1,5 +1,6 @@
 const std = @import("std");
 const utils = @import("utils");
+const la = @import("la");
 
 const lifetime = @import("lifetime");
 const zigra = @import("../root.zig");
@@ -9,10 +10,14 @@ pub const Data = struct {
     vel: @Vector(2, f32) = .{ 0, 0 },
     rot: f32 = 0,
     spin: f32 = 0,
-    visual: struct {
-        pos: @Vector(2, f32) = .{ 0, 0 },
-        rot: f32 = 0,
-    } = .{},
+
+    pub fn visualPos(self: @This(), drift: f32) @Vector(2, f32) {
+        return self.pos + self.vel * la.splat(2, drift);
+    }
+
+    pub fn visualRot(self: @This(), drift: f32) f32 {
+        return self.rot + self.spin * drift;
+    }
 };
 
 data: utils.ExtIdMappedIdArray(Data),
@@ -23,17 +28,6 @@ pub fn init(allocator: std.mem.Allocator) !@This() {
 
 pub fn deinit(self: *@This()) void {
     self.data.deinit();
-}
-
-pub fn calculateVisualPositions(self: *@This(), ctx_base: *lifetime.ContextBase) !void {
-    const ctx = ctx_base.parent(zigra.Context);
-    const drift = ctx.systems.time.tickDrift();
-    var iterator = self.data.iterator();
-
-    while (iterator.next()) |t| {
-        t.visual.pos = t.pos + t.vel * @as(@Vector(2, f32), @splat(drift));
-        t.visual.rot = t.rot + t.spin * drift;
-    }
 }
 
 pub fn createId(self: *@This(), comp: Data, entity_id: u32) !u32 {

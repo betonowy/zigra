@@ -56,6 +56,10 @@ pub fn pushCmdLine(self: *@This(), data: types.LineData) !void {
     try self.impl.scheduleLine(data.points, data.color, data.depth, data.alpha_gradient);
 }
 
+pub fn pushCmdVertices(self: *@This(), vertices: []const types.VertexData) !void {
+    try self.impl.scheduleVertices(vertices);
+}
+
 pub fn pushCmdTriangle(self: *@This(), vertex: [3]types.VertexData) !void {
     for (vertex) |v| try self.impl.scheduleVertex(v);
 }

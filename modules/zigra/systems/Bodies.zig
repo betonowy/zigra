@@ -52,6 +52,8 @@ pub const Mesh = struct {
     friction_static: f16 = 0.3,
 };
 
+call_arena: std.heap.ArenaAllocator,
+
 meshes: utils.IdArray(Mesh),
 meshes_id_map: std.StringArrayHashMap(u32),
 
@@ -61,6 +63,7 @@ gravity: f32 = 100,
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
     return .{
+        .call_arena = std.heap.ArenaAllocator.init(allocator),
         .bodies = utils.ExtIdMappedIdArray(Body).init(allocator),
         .meshes = utils.IdArray(Mesh).init(allocator),
         .meshes_id_map = std.StringArrayHashMap(u32).init(allocator),
@@ -68,6 +71,7 @@ pub fn init(allocator: std.mem.Allocator) !@This() {
 }
 
 pub fn deinit(self: *@This()) void {
+    self.call_arena.deinit();
     self.meshes_id_map.deinit();
     self.bodies.deinit();
     self.meshes.deinit();
@@ -96,6 +100,8 @@ fn solidCmp(cell: systems.World.SandSim.Cell) f32 {
 }
 
 pub fn tickProcessBodies(self: *@This(), ctx_base: *lifetime.ContextBase) !void {
+    defer _ = self.call_arena.reset(.retain_capacity);
+
     const ctx = ctx_base.parent(zigra.Context);
 
     if (try self.bodies.arr.shrinkIfOversized(4)) {
@@ -108,7 +114,7 @@ pub fn tickProcessBodies(self: *@This(), ctx_base: *lifetime.ContextBase) !void 
     const transforms: []systems.Transform.Data = ctx.systems.transform.data.arr.data;
 
     if (self.bodies.arr.capacity < 512) {
-        const trace = tracy.traceNamed(@src(), "Bodies.tickProcessBodies (ST)");
+        const trace = tracy.traceNamed(@src(), "tickProcessBodies (ST)");
         defer trace.end();
 
         var iterator = self.bodies.iterator();
@@ -124,39 +130,58 @@ pub fn tickProcessBodies(self: *@This(), ctx_base: *lifetime.ContextBase) !void 
         return;
     }
 
-    const trace = tracy.traceNamed(@src(), "Bodies.tickProcessBodies (Master)");
-    defer trace.end();
-
     const Self = @This();
 
-    const DispatchGroup = struct {
-        self: *Self,
+    const ThreadCommon = struct {
+        index: std.atomic.Value(u32) align(std.atomic.cache_line) = .{ .raw = 0 },
+    };
+
+    const ThreadPrivate = struct {
+        self: *Self align(std.atomic.cache_line),
         delay: f32,
         view: systems.World.SandSim.LandscapeView,
         meshes: []Mesh,
         transforms: []systems.Transform.Data,
         worker_data: lifetime.PackagedTask,
-        index: u32,
+        common: *ThreadCommon,
         range: u32,
-        stride: u32,
 
         pub fn work(task: *@This(), base: *lifetime.ContextBase) !void {
-            const work_trace = tracy.traceNamed(@src(), "Bodies.tickProcessBodies (MT)");
+            const work_trace = tracy.traceNamed(@src(), "tickProcessBodies (MT)");
             defer work_trace.end();
 
             const worker_ctx = base.parent(zigra.Context);
-
             var processed_bodies: u64 = 0;
 
-            while (true) : (task.index += task.stride) {
-                var iterator = task.self.bodies.boundedIterator(task.index, @min(task.index + task.range, task.self.bodies.arr.capacity));
+            while (true) {
+                const index = task.common.index.fetchAdd(task.range, .acq_rel);
+
+                var iterator = task.self.bodies.boundedIterator(index, @min(
+                    index + task.range,
+                    task.self.bodies.arr.capacity,
+                ));
 
                 while (iterator.next()) |body| {
                     processed_bodies += 1;
 
                     switch (body.*) {
-                        .point => |*p| try task.self.processBodyPoint(&task.view, &task.transforms[p.id_transform], p, task.delay, worker_ctx),
-                        .rigid => |*r| try task.self.processBodyRigid(&task.view, &task.transforms[r.id_transform], r, &task.meshes[r.id_mesh], task.delay, worker_ctx),
+                        .point => |*point| try task.self.processBodyPoint(
+                            &task.view,
+                            &task.transforms[point.id_transform],
+                            point,
+                            task.delay,
+                            worker_ctx,
+                        ),
+
+                        .rigid => |*rigid| try task.self.processBodyRigid(
+                            &task.view,
+                            &task.transforms[rigid.id_transform],
+                            rigid,
+                            &task.meshes[rigid.id_mesh],
+                            task.delay,
+                            worker_ctx,
+                        ),
+
                         else => @panic("Unimplemented"),
                     }
                 }
@@ -169,88 +194,29 @@ pub fn tickProcessBodies(self: *@This(), ctx_base: *lifetime.ContextBase) !void 
         }
     };
 
-    var dispatchGroups = try std.ArrayList(DispatchGroup).initCapacity(
-        self.bodies.arr.allocator,
-        ctx.base.workerGroup.workers.items.len,
-    );
+    var dispatch_counter = ThreadCommon{};
 
-    defer dispatchGroups.deinit();
-    try dispatchGroups.resize(dispatchGroups.capacity);
+    const concurrency = ctx.base.worker_group.workers.items.len;
+    const dispatch_group = try self.call_arena.allocator().alloc(ThreadPrivate, concurrency + 1);
 
-    for (dispatchGroups.items[0..], 0..) |*group, i| {
+    for (dispatch_group, 0..) |*group, i| {
         group.self = self;
         group.delay = delay;
         group.view = view;
         group.meshes = meshes;
         group.transforms = transforms;
         group.worker_data = lifetime.PackagedTask.init(ctx_base, group, .work);
-        group.range = 256;
-        group.index = @as(u32, @intCast(i)) * group.range;
-        group.stride = @as(u32, @intCast(dispatchGroups.items.len)) * group.range;
+        group.common = &dispatch_counter;
+        group.range = 64;
 
-        if (!ctx_base.workerGroup.tryPush(&group.worker_data, 1000)) unreachable;
+        if (i == concurrency) {
+            try group.worker_data.call();
+        } else {
+            if (!ctx_base.worker_group.tryPush(&group.worker_data, 1000)) unreachable;
+        }
     }
 
-    // {
-    //     const counting_trace = tracy.traceNamed(@src(), "Bodies.tickProcessBodies (Counting)");
-
-    //     var dispatchIterator = self.bodies.arr.iterator();
-    //     var counter: u32 = 0;
-    //     while (dispatchIterator.next()) |_| counter += 1;
-
-    //     counting_trace.end();
-
-    //     const divider = @max(1 + counter / dispatchGroups.items.len, 64);
-    //     dispatchIterator.reset();
-    //     counter = 0;
-
-    //     var it_begin: u32 = 0;
-    //     var it_end: u32 = 0;
-
-    //     var current_group: u32 = 0;
-
-    //     const dispatch_trace = tracy.traceNamed(@src(), "Bodies.tickProcessBodies (Dispatch)");
-    //     defer dispatch_trace.end();
-
-    //     while (dispatchIterator.next()) |_| : (counter += 1) {
-    //         if (counter == divider) {
-    //             const group = &dispatchGroups.items[current_group];
-
-    //             it_end = dispatchIterator.cursor;
-    //             defer it_begin = it_end;
-
-    //             group.self = self;
-    //             group.iterator = self.bodies.boundedIterator(it_begin, it_end);
-    //             group.delay = delay;
-    //             group.view = view;
-    //             group.meshes = meshes;
-    //             group.transforms = transforms;
-    //             group.worker_data = lifetime.PackagedTask.init(ctx_base, group, .work);
-
-    //             if (!ctx_base.workerGroup.tryPush(&group.worker_data, 1000)) unreachable;
-
-    //             current_group += 1;
-    //             counter = 0;
-    //         }
-    //     }
-
-    //     if (counter != 0) {
-    //         const group = &dispatchGroups.items[current_group];
-
-    //         it_end = dispatchIterator.cursor;
-    //         group.self = self;
-    //         group.iterator = self.bodies.boundedIterator(it_begin, it_end);
-    //         group.delay = delay;
-    //         group.view = view;
-    //         group.meshes = meshes;
-    //         group.transforms = transforms;
-    //         group.worker_data = lifetime.PackagedTask.init(ctx_base, group, .work);
-
-    //         if (!ctx_base.workerGroup.tryPush(&group.worker_data, 1000)) unreachable;
-    //     }
-    // }
-
-    ctx_base.workerGroup.flush();
+    ctx_base.worker_group.flush();
 }
 
 fn processBodyPoint(
@@ -342,17 +308,9 @@ fn processBodyRigid(
     t_next.rot += t_next.spin * delay;
 
     var has_hit = false;
-    const reverse_point_traversal: bool = ctx.systems.time.tick_current & 2 == 0;
 
-    if (reverse_point_traversal) {
-        var reverse_iterator = std.mem.reverseIterator(mesh.points.constSlice());
-        while (reverse_iterator.next()) |p| {
-            has_hit = has_hit or try self.processBodyRigidPointCollision(view, t_curr, b_curr, &t_next, &b_next, mesh, p, delay, ctx);
-        }
-    } else {
-        for (mesh.points.constSlice()) |p| {
-            has_hit = has_hit or try self.processBodyRigidPointCollision(view, t_curr, b_curr, &t_next, &b_next, mesh, p, delay, ctx);
-        }
+    for (mesh.points.constSlice()) |p| {
+        has_hit = has_hit or try self.processBodyRigidPointCollision(view, t_curr, b_curr, &t_next, &b_next, mesh, p, delay, ctx);
     }
 
     if (!has_hit) return;

@@ -16,7 +16,7 @@ const spv = @import("spv");
 const stb = @cImport(@cInclude("stb/stb_image.h"));
 
 pub const frame_data_count: u8 = 2;
-pub const frame_max_draw_commands = 0x40000;
+pub const frame_max_draw_commands = 0x80000;
 pub const frame_target_width = 320;
 pub const frame_target_height = 200;
 pub const frame_format = vk.Format.r16g16b16a16_sfloat;
@@ -1728,6 +1728,10 @@ pub fn scheduleLine(self: *@This(), points: [2]@Vector(2, f32), color: @Vector(4
         .depth = depth,
         .alpha_gradient = alpha,
     });
+}
+
+pub fn scheduleVertices(self: *@This(), vertices: []const types.VertexData) !void {
+    try self.upload_triangle_data.appendSlice(self.allocator, vertices);
 }
 
 pub fn scheduleVertex(self: *@This(), vertex: types.VertexData) !void {

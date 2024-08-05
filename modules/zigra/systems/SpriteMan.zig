@@ -1,6 +1,8 @@
 const std = @import("std");
 const utils = @import("utils");
 const lifetime = @import("lifetime");
+const tracy = @import("tracy");
+
 const zigra = @import("../root.zig");
 const systems = @import("../systems.zig");
 const vk_types = @import("Vulkan/types.zig");
@@ -34,23 +36,26 @@ pub fn destroyByEntityId(self: *@This(), eid: u32) void {
 
 pub fn render(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     const ctx = ctx_base.parent(zigra.Context);
+    const time_drift = ctx.systems.time.tickDrift();
     const transforms = ctx.systems.transform.data.arr.data;
+
     var iterator = self.sprite_refs.iterator();
 
     while (iterator.next()) |sprite_ref| {
-        const transform: *systems.Transform.Data = &transforms[sprite_ref.id_transform];
+        const transform = &transforms[sprite_ref.id_transform];
         const depth = sprite_ref.depth;
-        const pos = transform.visual.pos;
-        const rot = transform.visual.rot;
-        try renderSprite(ctx, pos, -rot, depth, sprite_ref.id_vk_sprite);
+        const pos = transform.visualPos(time_drift);
+        const rot = transform.visualRot(time_drift);
+
+        try ctx.systems.vulkan.pushCmdVertices(&createSprite(ctx, pos, -rot, depth, sprite_ref.id_vk_sprite));
     }
 }
 
-fn renderSprite(ctx: *zigra.Context, pos: @Vector(2, f32), rot: f32, depth: f32, sprite_id: u32) !void {
+fn createSprite(ctx: *zigra.Context, pos: @Vector(2, f32), rot: f32, depth: f32, sprite_id: u32) [6]vk_types.VertexData {
+    const rect = ctx.systems.vulkan.impl.atlas.getRectById(sprite_id);
+
     const cos = @cos(rot);
     const sin = @sin(rot);
-
-    const rect = ctx.systems.vulkan.impl.atlas.getRectById(sprite_id);
 
     const w = @as(f32, @floatFromInt(rect.extent.width)) * 0.5;
     const h = @as(f32, @floatFromInt(rect.extent.height)) * 0.5;
@@ -63,41 +68,41 @@ fn renderSprite(ctx: *zigra.Context, pos: @Vector(2, f32), rot: f32, depth: f32,
     const p2 = -vx + vy + pos;
     const p3 = vx + vy + pos;
 
-    const vertices = [_]vk_types.VertexData{
-        .{
-            .point = .{ p0[0], p0[1], depth },
-            .color = .{ 1, 1, 1, 1 },
-            .uv = .{
-                @floatFromInt(rect.offset.x),
-                @floatFromInt(rect.offset.y),
-            },
-        },
-        .{
-            .point = .{ p1[0], p1[1], depth },
-            .color = .{ 1, 1, 1, 1 },
-            .uv = .{
-                @floatFromInt(rect.offset.x + @as(i32, @intCast(rect.extent.width))),
-                @floatFromInt(rect.offset.y),
-            },
-        },
-        .{
-            .point = .{ p2[0], p2[1], depth },
-            .color = .{ 1, 1, 1, 1 },
-            .uv = .{
-                @floatFromInt(rect.offset.x),
-                @floatFromInt(rect.offset.y + @as(i32, @intCast(rect.extent.height))),
-            },
-        },
-        .{
-            .point = .{ p3[0], p3[1], depth },
-            .color = .{ 1, 1, 1, 1 },
-            .uv = .{
-                @floatFromInt(rect.offset.x + @as(i32, @intCast(rect.extent.width))),
-                @floatFromInt(rect.offset.y + @as(i32, @intCast(rect.extent.height))),
-            },
+    const v0 = vk_types.VertexData{
+        .point = .{ p0[0], p0[1], depth },
+        .color = .{ 1, 1, 1, 1 },
+        .uv = .{
+            @floatFromInt(rect.offset.x),
+            @floatFromInt(rect.offset.y),
         },
     };
 
-    try ctx.systems.vulkan.pushCmdTriangle(.{ vertices[0], vertices[1], vertices[2] });
-    try ctx.systems.vulkan.pushCmdTriangle(.{ vertices[1], vertices[2], vertices[3] });
+    const v1 = vk_types.VertexData{
+        .point = .{ p1[0], p1[1], depth },
+        .color = .{ 1, 1, 1, 1 },
+        .uv = .{
+            @floatFromInt(rect.offset.x + @as(i32, @intCast(rect.extent.width))),
+            @floatFromInt(rect.offset.y),
+        },
+    };
+
+    const v2 = vk_types.VertexData{
+        .point = .{ p2[0], p2[1], depth },
+        .color = .{ 1, 1, 1, 1 },
+        .uv = .{
+            @floatFromInt(rect.offset.x),
+            @floatFromInt(rect.offset.y + @as(i32, @intCast(rect.extent.height))),
+        },
+    };
+
+    const v3 = vk_types.VertexData{
+        .point = .{ p3[0], p3[1], depth },
+        .color = .{ 1, 1, 1, 1 },
+        .uv = .{
+            @floatFromInt(rect.offset.x + @as(i32, @intCast(rect.extent.width))),
+            @floatFromInt(rect.offset.y + @as(i32, @intCast(rect.extent.height))),
+        },
+    };
+
+    return .{ v0, v1, v2, v1, v2, v3 };
 }

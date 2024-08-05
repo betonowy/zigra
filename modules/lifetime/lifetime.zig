@@ -5,19 +5,19 @@ const options = @import("options");
 
 pub const ContextBase = struct {
     allocator: std.mem.Allocator,
-    workerGroup: ThreadWorkerGroup,
+    worker_group: ThreadWorkerGroup,
 
     pub fn init(allocator: std.mem.Allocator) !@This() {
         const threads_available = try std.Thread.getCpuCount();
 
         return .{
             .allocator = allocator,
-            .workerGroup = try ThreadWorkerGroup.init(allocator, threads_available - 1),
+            .worker_group = try ThreadWorkerGroup.init(allocator, threads_available - 1),
         };
     }
 
     pub fn deinit(self: *@This()) void {
-        self.workerGroup.deinit();
+        self.worker_group.deinit();
     }
 
     pub fn parent(self: *@This(), T: type) *T {
@@ -400,7 +400,7 @@ pub const Unit = struct {
     pub fn run(self: @This()) !void {
         switch (self.policy) {
             .main_thread => try self.task.call(),
-            .thread_pool => if (!self.task.ctx_ptr.workerGroup.tryPush(&self.task, 10 * 1000)) {
+            .thread_pool => if (!self.task.ctx_ptr.worker_group.tryPush(&self.task, 10 * 1000)) {
                 if (options.profiling) {
                     std.log.err("Unit timed out pushing to worker group: {s}", .{self.task.name});
                 }
