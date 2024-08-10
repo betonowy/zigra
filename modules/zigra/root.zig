@@ -16,6 +16,7 @@ pub const Modules = struct {
     entities: systems.Entities,
     transform: systems.Transform,
     bodies: systems.Bodies,
+    net: systems.Net,
 };
 
 pub const Context = lifetime.Context(Modules);

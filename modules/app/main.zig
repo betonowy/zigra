@@ -12,7 +12,7 @@ pub fn main() !void {
     var ctx = try zigra.Context.init(gpa.allocator());
     defer ctx.deinit();
 
-    std.log.info("Context size in bytes: {}", .{@sizeOf(@TypeOf(ctx))});
+    std.log.scoped(.main).info("Context size in bytes: {}", .{@sizeOf(@TypeOf(ctx))});
 
     try ctx.systems.sequencer.runInit(&ctx.base);
     while (!ctx.systems.window.quit_requested) try ctx.systems.sequencer.runLoop(&ctx.base);

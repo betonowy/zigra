@@ -23,6 +23,7 @@ pub fn runInit(_: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
 
     const ctx = ctx_base.parent(zigra.Context);
 
+    try ctx.systems.net.systemInit(ctx_base);
     try ctx.systems.window.systemInit(ctx_base);
     try ctx.systems.vulkan.systemInit(ctx_base);
     try ctx.systems.nuklear.systemInit(ctx_base);
@@ -41,6 +42,7 @@ pub fn runDeinit(_: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     try ctx.systems.nuklear.systemDeinit(ctx_base);
     try ctx.systems.vulkan.systemDeinit(ctx_base);
     try ctx.systems.window.systemDeinit(ctx_base);
+    try ctx.systems.net.systemDeinit(ctx_base);
 }
 
 pub fn runLoop(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
@@ -131,11 +133,13 @@ fn runLoopTick(_: *@This(), ctx: *zigra.Context) !void {
     const t = tracy.trace(@src());
     defer t.end();
 
+    try run(ctx, .net, .tickBegin);
     try run(ctx, .world, .tickProcessSandSimCells);
     try run(ctx, .world, .tickProcessSandSimParticles);
     try run(ctx, .playground, .tickProcess);
     try run(ctx, .bodies, .tickProcessBodies);
     try run(ctx, .time, .finishTick);
+    try run(ctx, .net, .tickEnd);
 }
 
 fn runLoopPostTicks(_: *@This(), ctx: *zigra.Context) !void {

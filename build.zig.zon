@@ -19,6 +19,10 @@
             .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.11.0.tar.gz",
             .hash = "1220ec41abde94730af701ba9da16ba3f10bb7d0b62a0b7fdebe10b0aad515e302a6",
         },
+        .zpl_enet = .{
+            .url = "https://github.com/zpl-c/enet/archive/dfe906c400a2d68c61f7b5f40f51f7566503a6f6.tar.gz",
+            .hash = "12204747026d010e1498a2d2a63fdf5c1d0d27a0bf8427a543e32889f025d1283acf",
+        },
     },
     .paths = .{
         "build.zig",

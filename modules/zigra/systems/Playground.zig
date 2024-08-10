@@ -12,6 +12,7 @@ begin_cam: @Vector(2, i32) = undefined,
 active_bodies: std.ArrayList(u32),
 
 rand: std.Random.DefaultPrng,
+id_net: u32 = undefined,
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
     return .{
@@ -21,9 +22,11 @@ pub fn init(allocator: std.mem.Allocator) !@This() {
     };
 }
 
-pub fn systemInit(_: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
+pub fn systemInit(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     const ctx = ctx_base.parent(zigra.Context);
     try ctx.systems.world.sand_sim.loadFromPngFile(.{ .coord = .{ -256, -256 }, .size = .{ 512, 512 } }, "land/TEST_LEVEL_WATERFALL_BIGGAP.png");
+
+    self.id_net = try ctx.systems.net.registerSystemHandler(systems.Net.Handler.init(self, .netRecv));
 }
 
 pub fn systemDeinit(_: *@This(), _: *lifetime.ContextBase) anyerror!void {}
@@ -35,9 +38,9 @@ pub fn deinit(self: *@This()) void {
 pub fn tickProcess(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     const ctx = ctx_base.parent(zigra.Context);
 
-    if (self.active_bodies.items.len < 40000) {
-        try self.pushCrateBatch(ctx, 200);
-        try self.pushChunkBatch(ctx, 200);
+    if (self.active_bodies.items.len < 10) {
+        try self.pushCrateBatch(ctx, 10);
+        try self.pushChunkBatch(ctx, 10);
     }
 
     try self.removeSleepingBodies(ctx);
@@ -109,4 +112,11 @@ fn removeSleepingBodies(self: *@This(), ctx: *zigra.Context) !void {
 
     var iterator = std.mem.reverseIterator(to_remove.items);
     while (iterator.next()) |i| _ = self.active_bodies.swapRemove(i);
+}
+
+pub fn netRecv(self: *@This(), ctx_base: *lifetime.ContextBase, data: []const u8) !void {
+    _ = self; // autofix
+    _ = data; // autofix
+    const ctx = ctx_base.parent(zigra.Context);
+    _ = ctx; // autofix
 }

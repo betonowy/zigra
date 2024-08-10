@@ -47,6 +47,11 @@ pub fn build(b: *std.Build) !void {
     const mod_nuklear = thirdparty.nuklear.module(b);
     const mod_lz4 = thirdparty.lz4.module(b);
 
+    const mod_enet = b.createModule(.{ .root_source_file = b.path("modules/enet/root.zig"), .link_libc = true });
+    mod_enet.addCSourceFile(.{ .file = b.path("modules/enet/enet.c"), .flags = &.{"-fno-sanitize=undefined"} });
+    mod_enet.addIncludePath(b.dependency("zpl_enet", .{}).path("include"));
+    mod_enet.addImport("lz4", mod_lz4);
+
     const mod_la = b.createModule(.{ .root_source_file = b.path("modules/la/root.zig") });
     const mod_utils = b.createModule(.{ .root_source_file = b.path("modules/utils/root.zig") });
     mod_utils.addImport("la", mod_la);
@@ -72,6 +77,7 @@ pub fn build(b: *std.Build) !void {
     mod_zigra.addImport("spv", mod_spv);
     mod_zigra.addImport("la", mod_la);
     mod_zigra.addImport("tracy", mod_tracy);
+    mod_zigra.addImport("enet", mod_enet);
 
     const exe = b.addExecutable(.{
         .name = "zigra",
@@ -108,4 +114,5 @@ pub fn build(b: *std.Build) !void {
     tests.addTest(test_ctx, "modules-utils", "modules/utils/root.zig", mod_utils);
     tests.addTest(test_ctx, "modules-zigra", "modules/zigra/root.zig", mod_zigra);
     tests.addTest(test_ctx, "thirdparty-lz4", "thirdparty/lz4/lz4.zig", mod_lz4);
+    tests.addTest(test_ctx, "modules-enet", "modules/enet/root.zig", mod_enet);
 }

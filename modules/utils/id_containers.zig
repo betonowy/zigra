@@ -73,6 +73,11 @@ pub fn IdArray(T: type) type {
         }
 
         pub fn at(self: *const @This(), id: u32) *T {
+            const div = id / @bitSizeOf(KeyMask);
+            const mod = id % @bitSizeOf(KeyMask);
+
+            std.debug.assert((self.keys[div] & (@as(KeyMask, 1) << @intCast(mod))) != 0);
+
             return &self.getDataSlice()[id];
         }
 

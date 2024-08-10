@@ -223,7 +223,7 @@ const ThreadWorker = struct {
     const Queue = std.fifo.LinearFifo(*PackagedTask, .{ .Static = queue_size_max });
     const queue_size_max = 16;
 
-    pub fn init(allocator: std.mem.Allocator) !@This() {
+    pub fn init(allocator: std.mem.Allocator, id: usize) !@This() {
         var data = try allocator.create(Data);
 
         data.allocator = allocator;
@@ -232,7 +232,18 @@ const ThreadWorker = struct {
         data.queue_mtx = .{};
         data.queue_cnd = .{};
         data.unfinished_tasks.raw = 0;
+
         data.thread = try std.Thread.spawn(.{}, workerFunc, .{data});
+        errdefer {
+            data.exiting = true;
+            data.queue_cnd.broadcast();
+            data.thread.join();
+            data.queue.deinit();
+            data.allocator.destroy(data);
+        }
+
+        var name_buf: [64]u8 = undefined;
+        try data.thread.setName(try std.fmt.bufPrint(&name_buf, "ThreadWorker:{}", .{id}));
 
         return .{ .data = data };
     }
@@ -327,7 +338,7 @@ const ThreadWorkerGroup = struct {
         var workers = try std.ArrayList(ThreadWorker).initCapacity(allocator, thread_count);
 
         errdefer for (workers.items[0..]) |*worker| worker.deinit();
-        for (0..thread_count) |_| workers.appendAssumeCapacity(try ThreadWorker.init(allocator));
+        for (0..thread_count) |i| workers.appendAssumeCapacity(try ThreadWorker.init(allocator, i));
 
         return .{ .workers = workers };
     }

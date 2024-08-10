@@ -33,7 +33,7 @@ pub fn init(allocator: std.mem.Allocator) !@This() {
     if (!glfw.init(.{})) std.log.err("GLFW failed to initialize!: {s}", .{glfw.getErrorString() orelse ""});
 
     const window = glfw.Window.create(Consts.init_window_w, Consts.init_window_h, "Vulkan window", null, null, .{
-        .resizable = true,
+        .resizable = false,
         .client_api = .no_api,
     }) orelse {
         std.log.err("failed to create GLFW window: {?s}", .{glfw.getErrorString()});
