@@ -11,6 +11,7 @@ pub fn module(b: *std.Build) *std.Build.Module {
     mod.addCSourceFiles(.{
         .root = b.path("thirdparty/lz4/lz4/lib"),
         .files = &.{ "lz4.c", "lz4hc.c" },
+        .flags = &.{"-fno-sanitize=undefined"},
     });
 
     return mod;

@@ -15,7 +15,13 @@ pub const HcLevel = enum(i32) {
 
 pub const Variant = union(enum) { lc, hc: HcLevel };
 
+pub fn compressBound(len: usize) usize {
+    return @intCast(c.LZ4_compressBound(@intCast(len)));
+}
+
 pub fn compress(allocator: std.mem.Allocator, src: []const u8, variant: Variant) !std.ArrayListUnmanaged(u8) {
+    if (src.len == 0) return .{};
+
     const max_possible_size: usize = @intCast(c.LZ4_compressBound(@intCast(src.len)));
 
     var array = std.ArrayListUnmanaged(u8).fromOwnedSlice(try allocator.alloc(u8, max_possible_size));
@@ -45,6 +51,8 @@ fn compressHc(src: []const u8, dst: []u8, level: HcLevel) i32 {
 
 /// Asserts that dst has the exact size of data about to be decompressed.
 pub fn decompress(src: []const u8, dst: []u8) !void {
+    if (src.len == 0) return;
+
     if (c.LZ4_decompress_safe(src.ptr, dst.ptr, @intCast(src.len), @intCast(dst.len)) == @as(c_int, @intCast(dst.len))) return;
     return error.InvalidStreamOrExpectedSize;
 }

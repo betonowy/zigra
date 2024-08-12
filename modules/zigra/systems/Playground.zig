@@ -12,7 +12,7 @@ begin_cam: @Vector(2, i32) = undefined,
 active_bodies: std.ArrayList(u32),
 
 rand: std.Random.DefaultPrng,
-id_net: u32 = undefined,
+id_channel: u32 = undefined,
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
     return .{
@@ -32,7 +32,7 @@ pub fn systemInit(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void
         );
     }
 
-    self.id_net = try ctx.systems.net.registerSystemHandler(systems.Net.Handler.init(self, .netRecv));
+    self.id_channel = try ctx.systems.net.registerChannel(systems.Net.Channel.init(self));
 }
 
 pub fn systemDeinit(_: *@This(), _: *lifetime.ContextBase) anyerror!void {}

@@ -63,7 +63,7 @@ test "cell_types:are_unique" {
 
 pub const CellMatrix align(@alignOf(@Vector(16, u8))) = [tile_size][tile_size]Cell;
 
-pub const Tile = struct {
+pub const Tile = extern struct {
     matrix: CellMatrix,
     coord: @Vector(2, i32),
     touch_count: u32,
@@ -256,7 +256,7 @@ const TreeNode = struct {
     }
 };
 
-const CellParticle = struct {
+pub const CellParticle = extern struct {
     pos: @Vector(2, f32),
     vel: @Vector(2, f32),
     cell: Cell,

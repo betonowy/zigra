@@ -28,11 +28,16 @@ fn globalRcDeinit() void {
 //     .destroy = null,
 // };
 
-pub const EventHandlerExample = struct {
-    pub fn connect(_: *HostServer, _: *const c.ENetEvent) void {}
-    pub fn disconnect(_: *HostServer, _: *const c.ENetEvent) void {}
-    pub fn disconnectTimeout(_: *HostServer, _: *const c.ENetEvent) void {}
-    pub fn receive(_: *HostServer, _: *const c.ENetEvent) void {}
+pub const PacketOptions = struct {
+    reliable: bool = false,
+    unsequenced: bool = false,
+
+    pub fn toEnetFlags(self: @This()) u32 {
+        var flag: u32 = 0;
+        if (self.reliable) flag |= c.ENET_PACKET_FLAG_RELIABLE;
+        if (self.unsequenced) flag |= c.ENET_PACKET_FLAG_UNSEQUENCED;
+        return flag;
+    }
 };
 
 pub const Peer = c.ENetPeer;
@@ -86,7 +91,13 @@ pub const HostServer = struct {
 
     pub fn sendPacket(_: *@This(), peer: *c.ENetPeer, data: []const u8, channel: u8) !void {
         const packet = c.enet_packet_create(data.ptr, data.len, 0) orelse return error.PacketCreate;
+        errdefer c.enet_packet_destroy(packet);
         if (c.enet_peer_send(peer, channel, packet) == -1) return error.PeerSend;
+    }
+
+    pub fn broadcastPacket(self: *@This(), data: []const u8, channel: u8, options: PacketOptions) !void {
+        const packet = c.enet_packet_create(data.ptr, data.len, options.toEnetFlags()) orelse return error.PacketCreate;
+        c.enet_host_broadcast(self.enet_host, channel, packet);
     }
 
     pub fn peers(self: *@This()) []c.ENetPeer {
@@ -154,8 +165,8 @@ pub const HostClient = struct {
         c.enet_peer_disconnect(self.enet_peer, 0);
     }
 
-    pub fn sendPacket(self: *@This(), data: []const u8, channel: u8) !void {
-        const packet = c.enet_packet_create(data.ptr, data.len, 0) orelse return error.PacketCreate;
+    pub fn sendPacket(self: *@This(), data: []const u8, channel: u8, options: PacketOptions) !void {
+        const packet = c.enet_packet_create(data.ptr, data.len, options.toEnetFlags()) orelse return error.PacketCreate;
         if (c.enet_peer_send(self.enet_peer, channel, packet) == -1) return error.PeerSend;
     }
 
