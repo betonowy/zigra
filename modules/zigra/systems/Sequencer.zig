@@ -23,12 +23,12 @@ pub fn runInit(_: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
 
     const ctx = ctx_base.parent(zigra.Context);
 
-    try ctx.systems.net.systemInit(ctx_base);
-    try ctx.systems.window.systemInit(ctx_base);
-    try ctx.systems.vulkan.systemInit(ctx_base);
-    try ctx.systems.nuklear.systemInit(ctx_base);
-    try ctx.systems.world.systemInit(ctx_base);
-    try ctx.systems.playground.systemInit(ctx_base);
+    try run(ctx, .net, .systemInit);
+    try run(ctx, .window, .systemInit);
+    try run(ctx, .world, .systemInit);
+    try run(ctx, .vulkan, .systemInit);
+    try run(ctx, .nuklear, .systemInit);
+    try run(ctx, .playground, .systemInit);
 }
 
 pub fn runDeinit(_: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
@@ -37,12 +37,12 @@ pub fn runDeinit(_: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
 
     const ctx = ctx_base.parent(zigra.Context);
 
-    try ctx.systems.playground.systemDeinit(ctx_base);
-    try ctx.systems.world.systemDeinit(ctx_base);
-    try ctx.systems.nuklear.systemDeinit(ctx_base);
-    try ctx.systems.vulkan.systemDeinit(ctx_base);
-    try ctx.systems.window.systemDeinit(ctx_base);
-    try ctx.systems.net.systemDeinit(ctx_base);
+    try run(ctx, .playground, .systemDeinit);
+    try run(ctx, .nuklear, .systemDeinit);
+    try run(ctx, .vulkan, .systemDeinit);
+    try run(ctx, .world, .systemDeinit);
+    try run(ctx, .window, .systemDeinit);
+    try run(ctx, .net, .systemDeinit);
 }
 
 pub fn runLoop(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {

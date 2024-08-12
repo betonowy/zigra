@@ -358,6 +358,7 @@ fn getVkInstanceDispatchFlags() vk.InstanceCommandFlags {
         .getPhysicalDeviceSurfaceFormatsKHR = true,
         .getPhysicalDeviceSurfacePresentModesKHR = true,
         .getPhysicalDeviceFormatProperties = true,
+        .getPhysicalDeviceProperties2 = true,
     };
 
     if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {

@@ -5,6 +5,7 @@ const types = @import("Vulkan/types.zig");
 
 const lifetime = @import("lifetime");
 const zigra = @import("../root.zig");
+const tracy = @import("tracy");
 
 pub const vk = @import("vk");
 pub const WindowCallbacks = types.WindowCallbacks;
@@ -38,9 +39,8 @@ pub fn systemInit(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void
     self.busy_semaphore.post();
 }
 
-pub fn systemDeinit(self: *@This(), ctx: *lifetime.ContextBase) anyerror!void {
+pub fn systemDeinit(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
     self.busy_semaphore.wait();
-    ctx.worker_group.flush();
     self.impl.deinit();
 }
 

@@ -15,6 +15,8 @@ const spv = @import("spv");
 
 const stb = @cImport(@cInclude("stb/stb_image.h"));
 
+const log = std.log.scoped(.Vulkan_backend);
+
 pub const frame_data_count: u8 = 2;
 pub const frame_max_draw_commands = 0x80000;
 pub const frame_target_width = 320;
@@ -119,6 +121,12 @@ pub fn init(
     errdefer self.vki.destroySurfaceKHR(self.instance, self.surface, null);
 
     self.physical_device = try initialization.pickPhysicalDevice(self.vki, self.instance, self.surface, allocator);
+    {
+        var p: vk.PhysicalDeviceProperties2 = .{ .properties = undefined };
+        self.vki.getPhysicalDeviceProperties2(self.physical_device, &p);
+        log.info("Selected: {s}, vendor ID: 0x{x}", .{ p.properties.device_name, p.properties.vendor_id });
+    }
+
     self.queue_families = try initialization.findQueueFamilies(self.vki, self.physical_device, self.surface, allocator);
     self.device = try initialization.createLogicalDevice(self.vki, self.physical_device, self.queue_families);
     self.vkd = try types.DeviceDispatch.load(self.device, self.vki.dispatch.vkGetDeviceProcAddr);
@@ -174,13 +182,15 @@ pub fn init(
 }
 
 pub fn deinit(self: *@This()) void {
+    self.vkd.deviceWaitIdle(self.device) catch unreachable;
+
+    tracy.message("deviceWaitIdle release");
+
     self.upload_gui_data.deinit(self.allocator);
     self.upload_gui_vertices.deinit(self.allocator);
     self.upload_text_data.deinit(self.allocator);
     self.upload_triangle_data.deinit(self.allocator);
     self.upload_line_data.deinit(self.allocator);
-
-    self.vkd.deviceWaitIdle(self.device) catch unreachable;
 
     self.atlas.deinit(self);
     self.destroyFrameData();

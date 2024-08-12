@@ -63,34 +63,18 @@ pub const HostServer = struct {
         while (c.enet_host_service(self.enet_host, &event, timeout) > 0) {
             switch (event.type) {
                 c.ENET_EVENT_TYPE_CONNECT => {
-                    // const id = @divExact((self.enet_host.peers - event.peer), @sizeOf(c.ENetPeer));
-                    const id = 0;
-                    std.debug.assert(self.enet_host.peerCount > id);
-                    try handler.connect(@as(u32, @intCast(id)), event.peer, self);
+                    try handler.connect(event.peer.*.connectID, event.peer, self);
                 },
-
                 c.ENET_EVENT_TYPE_RECEIVE => {
                     defer c.enet_packet_destroy(event.packet);
-                    // const id = @divExact((self.enet_host.peers - event.peer), @sizeOf(c.ENetPeer));
-                    const id = 0;
-                    std.debug.assert(self.enet_host.peerCount > id);
-                    try handler.receive(@as(u32, @intCast(id)), event.peer, self, event.packet.*.data[0..event.packet.*.dataLength], event.channelID);
+                    try handler.receive(event.peer.*.connectID, event.peer, self, event.packet.*.data[0..event.packet.*.dataLength], event.channelID);
                 },
-
                 c.ENET_EVENT_TYPE_DISCONNECT => {
-                    // const id = @divExact((self.enet_host.peers - event.peer), @sizeOf(c.ENetPeer));
-                    const id = 0;
-                    std.debug.assert(self.enet_host.peerCount > id);
-                    try handler.disconnect(@as(u32, @intCast(id)), event.peer, self);
+                    try handler.disconnect(event.peer.*.connectID, event.peer, self);
                 },
-
                 c.ENET_EVENT_TYPE_DISCONNECT_TIMEOUT => {
-                    // const id = @divExact((self.enet_host.peers - event.peer), @sizeOf(c.ENetPeer));
-                    const id = 0;
-                    std.debug.assert(self.enet_host.peerCount > id);
-                    try handler.disconnectTimeout(@as(u32, @intCast(id)), event.peer, self);
+                    try handler.disconnectTimeout(event.peer.*.connectID, event.peer, self);
                 },
-
                 else => {},
             }
         }
@@ -145,34 +129,18 @@ pub const HostClient = struct {
         while (c.enet_host_service(self.enet_host, &event, timeout) > 0) {
             switch (event.type) {
                 c.ENET_EVENT_TYPE_CONNECT => {
-                    // const id = @divExact((self.enet_host.peers - event.peer), @sizeOf(c.ENetPeer));
-                    const id = 0;
-                    std.debug.assert(self.enet_host.peerCount > id);
-                    try handler.connect(@as(u32, @intCast(id)), event.peer, self);
+                    try handler.connect(event.peer.*.connectID, event.peer, self);
                 },
-
                 c.ENET_EVENT_TYPE_RECEIVE => {
                     defer c.enet_packet_destroy(event.packet);
-                    // const id = @divExact((self.enet_host.peers - event.peer), @sizeOf(c.ENetPeer));
-                    const id = 0;
-                    std.debug.assert(self.enet_host.peerCount > id);
-                    try handler.receive(@as(u32, @intCast(id)), event.peer, self, event.packet.*.data[0..event.packet.*.dataLength], event.channelID);
+                    try handler.receive(event.peer.*.connectID, event.peer, self, event.packet.*.data[0..event.packet.*.dataLength], event.channelID);
                 },
-
                 c.ENET_EVENT_TYPE_DISCONNECT => {
-                    // const id = @divExact((self.enet_host.peers - event.peer), @sizeOf(c.ENetPeer));
-                    const id = 0;
-                    std.debug.assert(self.enet_host.peerCount > id);
-                    try handler.disconnect(@as(u32, @intCast(id)), event.peer, self);
+                    try handler.disconnect(event.peer.*.connectID, event.peer, self);
                 },
-
                 c.ENET_EVENT_TYPE_DISCONNECT_TIMEOUT => {
-                    // const id = @divExact((self.enet_host.peers - event.peer), @sizeOf(c.ENetPeer));
-                    const id = 0;
-                    std.debug.assert(self.enet_host.peerCount > id);
-                    try handler.disconnectTimeout(@as(u32, @intCast(id)), event.peer, self);
+                    try handler.disconnectTimeout(event.peer.*.connectID, event.peer, self);
                 },
-
                 else => {},
             }
         }

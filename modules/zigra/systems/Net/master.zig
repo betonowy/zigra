@@ -46,7 +46,7 @@ fn onConnect(
     var buf = std.BoundedArray(u8, 16){};
     const writer = buf.writer();
 
-    log.info("Slave connected: {}", .{id_peer});
+    log.info("Slave connected: {}", .{peer.connectID});
 
     try writer.writeByte(@intFromEnum(common.PacketType.connection_data));
     try writer.writeStructEndian(common.ConnectionData{ .id_peer = id_peer }, .little);

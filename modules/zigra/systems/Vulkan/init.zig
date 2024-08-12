@@ -3,6 +3,8 @@ const types = @import("types.zig");
 const std = @import("std");
 const builtin = @import("builtin");
 
+const log = std.log.scoped(.Vulkan_init);
+
 fn vulkanDebugCallback(
     _: vk.DebugUtilsMessageSeverityFlagsEXT,
     _: vk.DebugUtilsMessageTypeFlagsEXT,
@@ -132,11 +134,18 @@ pub fn pickPhysicalDevice(
 
     if (try vki.enumeratePhysicalDevices(vk_instance, &device_count, devices.ptr) != .success) unreachable;
 
-    for (devices) |device| {
-        if (try isDeviceSuitable(vki, device, vk_surface, arena_allocator)) return device;
-    }
+    for (devices) |device| printPhysicalDevice(vki, device);
+    for (devices) |device| if (try isDeviceSuitable(vki, device, vk_surface, arena_allocator)) return device;
+
+    log.err("No suitable Vulkan capable devices found", .{});
 
     return error.InitializationFailed;
+}
+
+fn printPhysicalDevice(vki: types.InstanceDispatch, vk_physical_device: vk.PhysicalDevice) void {
+    var p: vk.PhysicalDeviceProperties2 = .{ .properties = undefined };
+    vki.getPhysicalDeviceProperties2(vk_physical_device, &p);
+    log.info("Available: {s}, vendor ID: 0x{x}", .{ p.properties.device_name, p.properties.vendor_id });
 }
 
 fn isDeviceSuitable(
@@ -145,6 +154,19 @@ fn isDeviceSuitable(
     vk_surface: vk.SurfaceKHR,
     allocator: std.mem.Allocator,
 ) !bool {
+    if (builtin.sanitize_thread and builtin.target.os.tag == .linux) {
+        const nvidia_vendor_id = 0x10de;
+
+        var p: vk.PhysicalDeviceProperties2 = .{ .properties = undefined };
+        vki.getPhysicalDeviceProperties2(vk_physical_device, &p);
+
+        if (p.properties.vendor_id == nvidia_vendor_id) {
+            log.warn("Ignoring nvidia drivers on linux system when thread sanitizer is enabled.", .{});
+            log.warn("Nvidia closed source driver would otherwise crash with TSan.", .{});
+            return false;
+        }
+    }
+
     _ = findQueueFamilies(vki, vk_physical_device, vk_surface, allocator) catch return false;
 
     if (!try checkExtensionSupport(vki, vk_physical_device, allocator)) return false;

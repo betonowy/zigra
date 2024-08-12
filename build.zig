@@ -17,6 +17,7 @@ pub fn build(b: *std.Build) !void {
     const lock_tick = b.option(bool, "lock-tick", "Locks 1 tick per frame. (default: false)");
     const lock_fps = b.option(f32, "lock-fps", "Limits FPS to this limit. (default: null)");
     const test_filter = b.option([]const u8, "test-filter", "Run/install only [name] test. (default: runs/installs all tests)");
+    const thread_sanitizer = b.option(bool, "tsan", "Enable thread sanitizer");
 
     const options = b.addOptions();
     options.addOption(bool, "profiling", profiling orelse false);
@@ -85,7 +86,8 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
         .use_llvm = use_llvm,
-        .strip = optimize != .Debug and tracy != true,
+        .strip = optimize != .Debug and tracy != true and thread_sanitizer != true,
+        .sanitize_thread = thread_sanitizer orelse false,
     });
 
     exe.step.dependOn(&step_gen_spv.step);
@@ -94,6 +96,13 @@ pub fn build(b: *std.Build) !void {
     b.installArtifact(exe);
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
+
+    if (thread_sanitizer == true) {
+        run_cmd.setEnvironmentVariable("TSAN_OPTIONS", try std.mem.concat(b.allocator, u8, &.{
+            "suppressions=",
+            b.pathJoin(&.{ b.build_root.path.?, "build/tsan.supp" }),
+        }));
+    }
 
     if (b.args) |args| run_cmd.addArgs(args);
 

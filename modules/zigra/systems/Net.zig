@@ -84,6 +84,13 @@ pub fn tickEnd(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
 
 pub fn deinit(_: *@This()) void {}
 
+pub fn isMaster(self: @This()) bool {
+    return switch (self.variant) {
+        .master => true,
+        .slave => false,
+    };
+}
+
 pub const Handler = struct {
     system: *anyopaque,
     function_ptr: *const fn (*anyopaque, *lifetime.ContextBase, []const u8) anyerror!void,
@@ -128,5 +135,5 @@ pub fn netRecv(self: *@This(), _: *lifetime.ContextBase, data: []const u8) !void
         },
     }
 
-    if (stream.pos != data.len) log.info("{} bytes unread from packet", .{data.len - stream.pos});
+    if (stream.pos != data.len) log.info("{} bytes unread from net packet", .{data.len - stream.pos});
 }

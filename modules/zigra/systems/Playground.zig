@@ -24,7 +24,13 @@ pub fn init(allocator: std.mem.Allocator) !@This() {
 
 pub fn systemInit(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     const ctx = ctx_base.parent(zigra.Context);
-    try ctx.systems.world.sand_sim.loadFromPngFile(.{ .coord = .{ -256, -256 }, .size = .{ 512, 512 } }, "land/TEST_LEVEL_WATERFALL_BIGGAP.png");
+
+    if (ctx.systems.net.isMaster()) {
+        try ctx.systems.world.sand_sim.loadFromPngFile(
+            .{ .coord = .{ -256, -256 }, .size = .{ 512, 512 } },
+            "land/TEST_LEVEL_WATERFALL_BIGGAP.png",
+        );
+    }
 
     self.id_net = try ctx.systems.net.registerSystemHandler(systems.Net.Handler.init(self, .netRecv));
 }
@@ -38,9 +44,9 @@ pub fn deinit(self: *@This()) void {
 pub fn tickProcess(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     const ctx = ctx_base.parent(zigra.Context);
 
-    if (self.active_bodies.items.len < 10) {
-        try self.pushCrateBatch(ctx, 10);
-        try self.pushChunkBatch(ctx, 10);
+    if (self.active_bodies.items.len < 2) {
+        try self.pushCrateBatch(ctx, 1);
+        try self.pushChunkBatch(ctx, 1);
     }
 
     try self.removeSleepingBodies(ctx);
