@@ -12,8 +12,9 @@ const nk_max_mem = 1 * 1024 * 1024;
 const nk_mem_alignment = 16;
 
 allocator: std.mem.Allocator,
-nk_mem: ?[]u8 = null,
+nk_mem: []u8 = undefined,
 nk: nk.Context = undefined,
+is_active: bool = false,
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
     return .{ .allocator = allocator };
@@ -33,7 +34,7 @@ pub fn systemInit(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
         .width = &Font.textWidth,
     };
 
-    try nk.initFixed(&self.nk, self.nk_mem.?, &user_font);
+    try nk.initFixed(&self.nk, self.nk_mem, &user_font);
 }
 
 pub fn deinit(self: *@This()) void {
@@ -42,7 +43,7 @@ pub fn deinit(self: *@This()) void {
 
 pub fn systemDeinit(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
     nk.deinit(&self.nk);
-    if (self.nk_mem) |mem| self.allocator.free(mem);
+    self.allocator.free(self.nk_mem);
 }
 
 pub fn inputProcess(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
@@ -50,7 +51,9 @@ pub fn inputProcess(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!vo
     nk_glfw.processInput(ctx.systems.window.window, &self.nk);
 }
 
-pub fn process(_: *@This(), _: *lifetime.ContextBase) anyerror!void {}
+pub fn postProcess(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
+    self.is_active = nk.hasFocus(&self.nk);
+}
 
 pub fn render(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     const ctx = ctx_base.parent(zigra.Context);

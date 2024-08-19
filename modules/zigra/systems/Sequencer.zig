@@ -125,8 +125,8 @@ fn runLoopPreTicks(_: *@This(), ctx: *zigra.Context) !void {
     try run(ctx, .time, .checkpoint);
     try run(ctx, .window, .process);
     try run(ctx, .nuklear, .inputProcess);
-    try run(ctx, .nuklear, .process);
     if (options.debug_ui) try run(ctx, .debug_ui, .processUi);
+    try run(ctx, .nuklear, .postProcess);
 }
 
 fn runLoopTick(_: *@This(), ctx: *zigra.Context) !void {

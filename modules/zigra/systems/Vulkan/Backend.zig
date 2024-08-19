@@ -1538,7 +1538,7 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
                     var s = s_in;
 
                     inline for (0..2) |i| if (s.offset[i] < 0) {
-                        s.extent[i] -= @intCast(-s.offset[i]);
+                        s.extent[i] -|= @intCast(-s.offset[i]);
                         s.offset[i] = 0;
                     };
 

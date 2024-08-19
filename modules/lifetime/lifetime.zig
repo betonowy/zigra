@@ -8,7 +8,7 @@ pub const ContextBase = struct {
     worker_group: ThreadWorkerGroup,
 
     pub fn init(allocator: std.mem.Allocator) !@This() {
-        const threads_available = try std.Thread.getCpuCount();
+        const threads_available = try std.Thread.getCpuCount() - 1;
         // const threads_available = 1;
 
         return .{
@@ -232,6 +232,8 @@ const ThreadWorker = struct {
         data.queue = Queue.init();
         data.queue_mtx = .{};
         data.queue_cnd = .{};
+        data.wait_mtx = .{};
+        data.wait_cnd = .{};
         data.unfinished_tasks.raw = 0;
 
         data.thread = try std.Thread.spawn(.{}, workerFunc, .{data});

@@ -243,3 +243,11 @@ pub fn inputMotion(ctx: *Context, x: i32, y: i32) void {
 pub fn inputButton(ctx: *Context, x: i32, y: i32, button: u32, down: bool) void {
     c.nk_input_button(ctx, @intCast(button), @intCast(x), @intCast(y), if (down) c.nk_true else c.nk_false);
 }
+
+pub fn inputScroll(ctx: *Context, x: f32, y: f32) void {
+    c.nk_input_scroll(ctx, .{ .x = x, .y = y });
+}
+
+pub fn hasFocus(ctx: *Context) bool {
+    return c.nk_item_is_any_active(ctx) == c.nk_true;
+}

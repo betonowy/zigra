@@ -54,9 +54,11 @@ pub fn init(allocator: std.mem.Allocator) !@This() {
 
 pub fn systemInit(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
     self.window.setUserPointer(&self.cbs_ctx_glfw);
-    self.window.setFramebufferSizeCallback(glfwCbFramebufferSize);
     self.window.setCursorPosCallback(glfwCbCursorPos);
     self.window.setMouseButtonCallback(glfwCbMouse);
+    self.window.setCharCallback(glfwCbChar);
+    self.window.setKeyCallback(glfwCbKey);
+    self.window.setScrollCallback(glfwCbScroll);
 }
 
 pub fn systemDeinit(_: *@This(), _: *lifetime.ContextBase) anyerror!void {}
@@ -67,36 +69,26 @@ pub fn deinit(self: *@This()) void {
     self.* = undefined;
 }
 
-const GlfwCbCtx = struct {
-    framebuffer_resized: bool = false,
+pub const GlfwCbCtx = struct {
     cursor_pos: @Vector(2, i32) = std.mem.zeroes(@Vector(2, i32)),
+
     lbm: bool = false,
     lbm_grab_pos: @Vector(2, i32) = std.mem.zeroes(@Vector(2, i32)),
     lbm_dirty: bool = false,
 
+    x_scroll: f32 = 0,
+    y_scroll: f32 = 0,
+
     const Self = @This();
-
-    fn reset(self: *Self) void {
-        self.framebuffer_resized = false;
-    }
-
-    fn wasUpdated(self: *Self) bool {
-        return self.framebuffer_resized;
-    }
 };
 
-fn glfwCbFramebufferSize(window: glfw.Window, _: u32, _: u32) void {
-    var ctx_ptr = window.getUserPointer(GlfwCbCtx) orelse @panic("Must return a valid pointer");
-    ctx_ptr.framebuffer_resized = true;
-}
-
 fn glfwCbCursorPos(window: glfw.Window, xpos: f64, ypos: f64) void {
-    var ctx_ptr = window.getUserPointer(GlfwCbCtx) orelse @panic("Must return a valid pointer");
+    var ctx_ptr = window.getUserPointer(GlfwCbCtx) orelse unreachable;
     ctx_ptr.cursor_pos = .{ @intFromFloat(xpos), @intFromFloat(ypos) };
 }
 
 fn glfwCbMouse(window: glfw.Window, button: glfw.MouseButton, action: glfw.Action, _: glfw.Mods) void {
-    var ctx_ptr = window.getUserPointer(GlfwCbCtx) orelse @panic("Must return a valid pointer");
+    var ctx_ptr = window.getUserPointer(GlfwCbCtx) orelse unreachable;
     switch (button) {
         .left => {
             ctx_ptr.lbm_dirty = true;
@@ -111,6 +103,26 @@ fn glfwCbMouse(window: glfw.Window, button: glfw.MouseButton, action: glfw.Actio
         },
         else => {},
     }
+}
+
+fn glfwCbChar(window: glfw.Window, codepoint: u21) void {
+    const ctx_ptr = window.getUserPointer(GlfwCbCtx) orelse unreachable;
+    _ = ctx_ptr; // autofix
+    std.debug.print("codepoint: {}\n", .{codepoint});
+}
+
+fn glfwCbKey(window: glfw.Window, key: glfw.Key, scancode: i32, action: glfw.Action, mods: glfw.Mods) void {
+    std.debug.print(
+        "Key: {s}, scancode: {}, action: {s}, mods: {}\n",
+        .{ @tagName(key), scancode, @tagName(action), mods },
+    );
+    _ = window; // autofix
+}
+
+fn glfwCbScroll(window: glfw.Window, xoffset: f64, yoffset: f64) void {
+    var ctx_ptr = window.getUserPointer(GlfwCbCtx) orelse unreachable;
+    ctx_ptr.x_scroll += @floatCast(xoffset);
+    ctx_ptr.y_scroll += @floatCast(yoffset);
 }
 
 fn glfwCbError(error_code: glfw.ErrorCode, description: [:0]const u8) void {
