@@ -140,6 +140,8 @@ fn netRecvSyncTiles(
 
         for (particles[0..]) |*entry| self.sand_sim.particles.appendAssumeCapacity(entry.particle);
     }
+
+    self.sand_sim.iteration = header.iteration;
 }
 
 pub fn netSyncAll(self: *@This(), ctx_base: *lifetime.ContextBase) !void {
@@ -199,6 +201,7 @@ pub fn netSyncAll(self: *@This(), ctx_base: *lifetime.ContextBase) !void {
     try output_writer.writeAll(std.mem.asBytes(&world_net.PacketType.sync_all));
 
     try output_writer.writeStructEndian(world_net.SyncTilesHeader{
+        .iteration = self.sand_sim.iteration,
         .bound_min = for_each_ctx.bound_min,
         .bound_max = for_each_ctx.bound_max,
         .tile_entry_count = tile_count,

@@ -5,6 +5,7 @@ pub const PacketType = enum(u8) {
 };
 
 pub const SyncTilesHeader = extern struct {
+    iteration: u64,
     bound_min: @Vector(2, i32),
     bound_max: @Vector(2, i32),
     tile_entry_count: u32,
