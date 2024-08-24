@@ -56,3 +56,7 @@ pub fn asConstArray(ptr: anytype) *const [1]std.meta.Child(@TypeOf(ptr)) {
 pub fn asArray(ptr: anytype) *[1]std.meta.Child(@TypeOf(ptr)) {
     return ptr;
 }
+
+pub fn ReturnType(comptime Fn: anytype) type {
+    return @typeInfo(@TypeOf(Fn)).Fn.return_type.?;
+}

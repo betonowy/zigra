@@ -1,7 +1,6 @@
 const std = @import("std");
 
 pub const SandSim = @import("World/SandSim.zig");
-pub const Marching = @import("World/Marching.zig");
 const world_net = @import("World/net.zig");
 
 const lifetime = @import("lifetime");

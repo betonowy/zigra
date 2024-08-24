@@ -5,6 +5,9 @@ const sand_sim_defs = @import("sand_sim_definitions.zig");
 pub const Cell = sand_sim_defs.Cell;
 pub const cell_types = sand_sim_defs.cell_types;
 
+const marching = @import("marching.zig");
+const utils = @import("utils");
+
 pub const tile_size = 128;
 pub const tile_size_v2 = @Vector(2, i32){ tile_size, tile_size };
 
@@ -561,6 +564,15 @@ pub const LandscapeView = struct {
         }
 
         return top.child.tile.?;
+    }
+
+    pub fn intersect(
+        self: *@This(),
+        start: @Vector(2, f32),
+        target: @Vector(2, f32),
+        cmp_fn: marching.CellCompareFn,
+    ) !?marching.Result {
+        return marching.intersect(self, start, target, cmp_fn);
     }
 };
 

@@ -140,7 +140,7 @@ test "trivial_case_full" {
     );
 }
 
-const epsilon = 1e-5;
+const test_epsilon = 1e-5;
 
 test "one_cell_ul_miss" {
     const k = @Vector(4, f32){ 1, 0, 0, 0 };
@@ -158,10 +158,10 @@ test "one_cell_ul_miss" {
     const g = gradient(k, pos);
     const n = normal(k, pos).?;
 
-    try std.testing.expectApproxEqAbs(0.8, g[0], epsilon);
-    try std.testing.expectApproxEqAbs(0.1, g[1], epsilon);
-    try std.testing.expectApproxEqAbs(0.99228, n[0], epsilon);
-    try std.testing.expectApproxEqAbs(0.12403, n[1], epsilon);
+    try std.testing.expectApproxEqAbs(0.8, g[0], test_epsilon);
+    try std.testing.expectApproxEqAbs(0.1, g[1], test_epsilon);
+    try std.testing.expectApproxEqAbs(0.99228, n[0], test_epsilon);
+    try std.testing.expectApproxEqAbs(0.12403, n[1], test_epsilon);
 }
 
 test "one_cell_ul_hits_in_bounds" {
@@ -173,14 +173,14 @@ test "one_cell_ul_hits_in_bounds" {
     try std.testing.expect(!isInside(k, pos));
 
     const result = intersection(k, pos, dir);
-    try std.testing.expectApproxEqAbs(0.53017, result.hit[0], epsilon);
-    try std.testing.expectApproxEqAbs(0.29052, result.hit[1], epsilon);
+    try std.testing.expectApproxEqAbs(0.53017, result.hit[0], test_epsilon);
+    try std.testing.expectApproxEqAbs(0.29052, result.hit[1], test_epsilon);
 
     const g = gradient(k, result.hit);
     const n = normal(k, result.hit).?;
 
-    try std.testing.expectApproxEqAbs(0.70948, g[0], epsilon);
-    try std.testing.expectApproxEqAbs(0.46983, g[1], epsilon);
-    try std.testing.expectApproxEqAbs(0.83376, n[0], epsilon);
-    try std.testing.expectApproxEqAbs(0.55213, n[1], epsilon);
+    try std.testing.expectApproxEqAbs(0.70948, g[0], test_epsilon);
+    try std.testing.expectApproxEqAbs(0.46983, g[1], test_epsilon);
+    try std.testing.expectApproxEqAbs(0.83376, n[0], test_epsilon);
+    try std.testing.expectApproxEqAbs(0.55213, n[1], test_epsilon);
 }

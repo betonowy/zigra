@@ -3,14 +3,14 @@ const SandSim = @import("SandSim.zig");
 const utils = @import("utils");
 const la = @import("la");
 
-const Result = struct {
+pub const Result = struct {
     pos: @Vector(2, f32),
     nor: ?@Vector(2, f32),
     dir: @Vector(2, f32),
     no_intersection: bool = false,
 };
 
-const CellCompareFn = fn (cell: SandSim.Cell) f32;
+pub const CellCompareFn = fn (cell: SandSim.Cell) f32;
 
 pub fn intersect(view: *SandSim.LandscapeView, start: @Vector(2, f32), target: @Vector(2, f32), cmp_fn: CellCompareFn) !?Result {
     var intersection_pos_opt: ?@Vector(2, f32) = null;
@@ -67,6 +67,14 @@ fn noIntersection(pos: @Vector(2, f32), dir: @Vector(2, f32), kbi: @Vector(4, f3
     };
 }
 
+fn getKernel(view: *SandSim.LandscapeView, pos: @Vector(2, f32), cmp_fn: CellCompareFn) !@Vector(4, f32) {
+    return KCoords.init(pos).values(view, cmp_fn);
+}
+
+fn getKernelI(view: *SandSim.LandscapeView, pos: @Vector(2, i32), cmp_fn: CellCompareFn) !@Vector(4, f32) {
+    return (KCoords{ .minor = pos, .major = pos + @Vector(2, i32){ 1, 1 } }).values(view, cmp_fn);
+}
+
 const KPos = enum(usize) { ul = 0, ur = 1, bl = 2, br = 3 };
 
 const KCoords = struct {
@@ -88,31 +96,15 @@ const KCoords = struct {
             .br => .{ self.major[0], self.major[1] },
         };
     }
+
+    pub fn values(self: @This(), view: *SandSim.LandscapeView, cmp_fn: CellCompareFn) !@Vector(4, f32) {
+        var kernel: @Vector(4, f32) = undefined;
+
+        inline for (@intFromEnum(KPos.ul)..@intFromEnum(KPos.br) + 1) |i| {
+            const cell = try view.get(self.get(@enumFromInt(i)));
+            kernel[i] = cmp_fn(cell);
+        }
+
+        return kernel;
+    }
 };
-
-fn getKernel(view: *SandSim.LandscapeView, pos: @Vector(2, f32), cmp_fn: CellCompareFn) !@Vector(4, f32) {
-    const coords = KCoords.init(pos);
-    var kernel: @Vector(4, f32) = undefined;
-
-    inline for (@intFromEnum(KPos.ul)..@intFromEnum(KPos.br) + 1) |i| {
-        const cell = try view.get(coords.get(@enumFromInt(i)));
-        kernel[i] = cmp_fn(cell);
-    }
-
-    return kernel;
-}
-
-fn getKernelI(view: *SandSim.LandscapeView, pos: @Vector(2, i32), cmp_fn: CellCompareFn) !@Vector(4, f32) {
-    const coords = KCoords{
-        .minor = pos,
-        .major = pos + @Vector(2, i32){ 1, 1 },
-    };
-    var kernel: @Vector(4, f32) = undefined;
-
-    inline for (@intFromEnum(KPos.ul)..@intFromEnum(KPos.br) + 1) |i| {
-        const cell = try view.get(coords.get(@enumFromInt(i)));
-        kernel[i] = cmp_fn(cell);
-    }
-
-    return kernel;
-}

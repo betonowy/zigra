@@ -168,21 +168,15 @@ pub fn tickProcessBodies(self: *@This(), ctx_base: *lifetime.ContextBase) !void 
             }
 
             var buf: [64]u8 = undefined;
-            work_trace.addText(std.fmt.bufPrint(&buf,
-                \\Processed bodies {}
-                \\Keys: {}
-            , .{
-                processed_bodies,
-                task.self.bodies.arr.keys.len,
-            }) catch unreachable);
+            work_trace.addText(std.fmt.bufPrint(&buf, "Processed bodies {}", .{processed_bodies}) catch unreachable);
         }
     };
 
-    const task_count = v: {
+    const task_count = brk: {
         const max_tasks = ctx.base.thread_pool.threads.len;
         const key_count = self.bodies.arr.keys.len;
         if (key_count == 0) return;
-        break :v @min(max_tasks, @max(key_count / 2, 1));
+        break :brk @min(max_tasks, @max(key_count / 2, 1));
     };
 
     const dispatch_ctx = try self.call_arena.allocator().allocWithOptions(TaskCtx, task_count, std.atomic.cache_line, null);
@@ -230,7 +224,7 @@ fn processBodyPoint(
         b_curr.* = b_next;
     }
 
-    const msq_result = try systems.World.Marching.intersect(view, t_curr.pos, t_next.pos, solidCmp) orelse return;
+    const msq_result = try view.intersect(t_curr.pos, t_next.pos, solidCmp) orelse return;
 
     const hit_pos = msq_result.pos;
     const hit_nor = msq_result.nor orelse {
@@ -341,13 +335,7 @@ fn processBodyRigidPointCollision(
 
     const vel_curr_init = vel_rel_curr_init + t_curr.vel;
     const vel_next_init = vel_rel_next_init + t_next.vel;
-
-    const msq_result = try systems.World.Marching.intersect(
-        view,
-        pos_curr_init,
-        pos_next_init_adjusted,
-        solidCmp,
-    ) orelse return false;
+    const msq_result = try view.intersect(pos_curr_init, pos_next_init_adjusted, solidCmp) orelse return false;
 
     const hit_pos = msq_result.pos;
     const hit_dir = msq_result.dir;
@@ -380,28 +368,23 @@ fn processBodyRigidPointCollision(
         if (scale_ratio > 1 or la.dot(hit_nor, vel_next_init) > 0) return false;
     }
 
-    const offset_curr_init_2 = la.rotate2d(point, t_curr.rot);
-    const offset_next_init_2 = la.rotate2d(point, t_next.rot);
-    const vel_rel_next_init_2 = la.perp2d(offset_next_init_2) * la.splat(2, t_next.spin);
-    const vel_next_init_2 = vel_rel_next_init_2 + t_next.vel;
+    const mag_rebound_normal = brk: {
+        const offset_3d = la.zeroExtend(3, offset_curr_init);
+        const normal_3d = la.zeroExtend(3, hit_nor);
+        const dot_nor = -@abs(la.dot(hit_nor, vel_next_init));
 
-    const offset_3d = la.zeroExtend(3, offset_curr_init_2);
-    const normal_3d = la.zeroExtend(3, hit_nor);
-    const dot_nor = -@abs(la.dot(hit_nor, vel_next_init_2));
+        const cross_1 = la.cross(offset_3d, normal_3d) / la.splat(3, mesh.moi);
+        const cross_2 = la.cross(cross_1, offset_3d);
+        const cross_2d = la.truncate(2, cross_2);
 
-    const cross_1 = la.cross(offset_3d, normal_3d) / la.splat(3, mesh.moi);
-    const cross_2 = la.cross(cross_1, offset_3d);
-    const cross_2d = la.truncate(2, cross_2);
+        const mag_rebound_normal =
+            -(1 + mesh.bounciness) * dot_nor /
+            (1 / mesh.mass + la.dot(hit_nor, cross_2d));
 
-    const mag_rebound_normal =
-        -(1 + mesh.bounciness) * dot_nor /
-        (1 / mesh.mass + la.dot(hit_nor, cross_2d));
+        const impulse_rebound = la.splat(2, mag_rebound_normal) * hit_nor;
 
-    const impulse_rebound = la.splat(2, mag_rebound_normal) * hit_nor;
-
-    {
         const offset_impulse_cross = la.cross(
-            la.zeroExtend(3, offset_curr_init_2),
+            la.zeroExtend(3, offset_curr_init),
             la.zeroExtend(3, impulse_rebound),
         );
 
@@ -410,24 +393,24 @@ fn processBodyRigidPointCollision(
 
         t_next.vel = t_curr.vel + vel_delta;
         t_next.spin = t_curr.spin + spin_delta;
-    }
 
-    const offset_curr_init_3 = la.rotate2d(point, t_curr.rot);
-    const offset_next_init_3 = la.rotate2d(point, t_next.rot);
-    const vel_rel_next_init_3 = la.perp2d(offset_next_init_3) * la.splat(2, t_next.spin);
-    const vel_next_init_3 = vel_rel_next_init_3 + t_next.vel;
-
-    const offset_perp = la.perp2d(offset_curr_init_3);
-    const vel_tangent = vel_next_init_3 - la.splat(2, la.dot(vel_next_init_3, hit_nor)) * hit_nor;
+        break :brk mag_rebound_normal;
+    };
 
     const impulse_friction = brk: {
+        const vel_rel_next_post_rebound = la.perp2d(offset_next_init) * la.splat(2, t_next.spin);
+        const vel_next_post_rebound = vel_rel_next_post_rebound + t_next.vel;
+
+        const offset_perp = la.perp2d(offset_curr_init);
+        const vel_tangent = vel_next_post_rebound - la.splat(2, la.dot(vel_next_post_rebound, hit_nor)) * hit_nor;
+
         if (la.sqrLength(vel_tangent) < 1e-8) break :brk @Vector(2, f32){ 0, 0 };
 
         const tangent = la.normalize(vel_tangent);
 
         const offset_perp_dot_t = la.dot(offset_perp, tangent);
         const denominator = 1 / mesh.mass + (offset_perp_dot_t * offset_perp_dot_t) * 1 / mesh.moi;
-        const jt = -la.dot(vel_next_init_3, tangent) / denominator;
+        const jt = -la.dot(vel_next_post_rebound, tangent) / denominator;
 
         if (@abs(jt) <= mag_rebound_normal * mesh.friction_static) {
             break :brk la.splat(2, jt) * tangent;
@@ -438,7 +421,7 @@ fn processBodyRigidPointCollision(
 
     {
         const offset_impulse_cross = la.cross(
-            la.zeroExtend(3, offset_curr_init_3),
+            la.zeroExtend(3, offset_curr_init),
             la.zeroExtend(3, impulse_friction),
         );
 
