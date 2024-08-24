@@ -986,7 +986,7 @@ test "Minimal lifetime" {
     try self.ensureArea(.{ .coord = .{ -128, -128 }, .size = .{ 256, 256 } });
     try std.testing.expectEqual(4, self.countTiles());
 
-    std.debug.print("\n{any}\n", .{self.tree.size()});
+    try std.testing.expectEqual(.{ 65536, 65536 }, self.tree.size());
 
     try std.testing.expectEqual(4, self.tileCountForArea(.{ .coord = .{ -128, -128 }, .size = .{ 256, 256 } }));
     try std.testing.expectEqual(9, self.tileCountForArea(.{ .coord = .{ -127, -127 }, .size = .{ 256, 256 } }));

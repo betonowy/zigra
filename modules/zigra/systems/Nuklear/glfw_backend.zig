@@ -5,7 +5,12 @@ const vk_types = @import("../Vulkan/types.zig");
 const std = @import("std");
 const glfw = @import("glfw");
 
-pub fn processInput(window: glfw.Window, ctx: *nk.Context) void {
+pub const KeyEvent = struct {
+    key: glfw.Key,
+    action: glfw.Action,
+};
+
+pub fn processInput(window: glfw.Window, ctx: *nk.Context, chars: []const u8, keys: []const KeyEvent) void {
     nk.inputBegin(ctx);
     defer nk.inputEnd(ctx);
 
@@ -16,6 +21,12 @@ pub fn processInput(window: glfw.Window, ctx: *nk.Context) void {
     nk.inputMotion(ctx, @intFromFloat(cursor_pos.xpos), @intFromFloat(cursor_pos.ypos));
     nk.inputButton(ctx, @intFromFloat(cursor_pos.xpos), @intFromFloat(cursor_pos.ypos), nk.button_left, lmb != .release);
     nk.inputButton(ctx, @intFromFloat(cursor_pos.xpos), @intFromFloat(cursor_pos.ypos), nk.button_right, rmb != .release);
+    nk.inputChars(ctx, chars);
+
+    for (keys) |key| switch (key.key) {
+        else => {},
+        .backspace => nk.inputKey(ctx, nk.KEY_BACKSPACE, key.action != .release),
+    };
 
     if (!nk.hasFocus(ctx)) return;
 

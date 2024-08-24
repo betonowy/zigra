@@ -9,15 +9,14 @@ const nk = @import("nuklear");
 
 allocator: std.mem.Allocator,
 view_arena: std.heap.ArenaAllocator,
-view_call_profiling_data: []CtxHashMap.Entry = &.{},
 view_system_call_profiling_data: []SysCtxHashMap.Entry = &.{},
-
-profiling_ctx_map: CtxHashMap,
 profiling_system_ctx_map: SysCtxHashMap,
 
 state: WindowState = .General,
 pref_chart_height: i32 = 50,
 pref_chart_type: ChartType = .Scanning,
+
+text_field: std.BoundedArray(u8, 64) = .{},
 
 const chart_base_color = nk.Color{ .r = 0x60, .g = 0x00, .b = 0x00, .a = 0xff };
 const chart_active_color = nk.Color{ .r = 0xa0, .g = 0x40, .b = 0x40, .a = 0xff };
@@ -27,13 +26,12 @@ const ChartType = enum {
     Scanning,
 };
 
-const CtxHashMap = std.StringHashMap(CallProfilingCtx);
 const SysCtxHashMap = std.StringHashMap(CallProfilingCtx);
 
 pub const WindowState = enum {
     Disabled,
     General,
-    Systems,
+    Profiling,
     Preferences,
 };
 
@@ -105,24 +103,18 @@ pub const ProfilingType = enum {
 };
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
+    var arr = std.BoundedArray(u8, 64){};
+    try arr.appendSlice("items: []const T");
+
     return .{
         .allocator = allocator,
         .view_arena = std.heap.ArenaAllocator.init(allocator),
-        .profiling_ctx_map = CtxHashMap.init(allocator),
         .profiling_system_ctx_map = SysCtxHashMap.init(allocator),
+        .text_field = arr,
     };
 }
 
 pub fn deinit(self: *@This()) void {
-    {
-        var map = self.profiling_ctx_map.keyIterator();
-        while (map.next()) |entry| self.allocator.free(entry.*);
-    }
-    {
-        // var map = self.profiling_system_ctx_map.keyIterator();
-        // while (map.next()) |entry| self.allocator.free(entry.*);
-    }
-    self.profiling_ctx_map.deinit();
     self.profiling_system_ctx_map.deinit();
     self.view_arena.deinit();
     self.* = undefined;
@@ -148,13 +140,6 @@ pub fn processProfilingData(self: *@This(), _: *lifetime.ContextBase) anyerror!v
 
     if (!self.view_arena.reset(.retain_capacity)) return error.ArenaResetFailed;
 
-    self.view_call_profiling_data = try self.view_arena.allocator().alloc(CtxHashMap.Entry, self.profiling_ctx_map.count());
-    {
-        var counter: usize = 0;
-        var map = self.profiling_ctx_map.iterator();
-        while (map.next()) |entry| : (counter += 1) self.view_call_profiling_data[counter] = entry;
-    }
-
     self.view_system_call_profiling_data = try self.view_arena.allocator().alloc(SysCtxHashMap.Entry, self.profiling_system_ctx_map.count());
     {
         var counter: usize = 0;
@@ -163,17 +148,12 @@ pub fn processProfilingData(self: *@This(), _: *lifetime.ContextBase) anyerror!v
     }
 
     const sort = struct {
-        pub fn ltCtxHashMap(_: void, lhs: CtxHashMap.Entry, rhs: CtxHashMap.Entry) bool {
-            return lhs.value_ptr.time_updated < rhs.value_ptr.time_updated;
-        }
-
         pub fn ltSysCtxHashMap(_: void, lhs: SysCtxHashMap.Entry, rhs: SysCtxHashMap.Entry) bool {
             return lhs.value_ptr.time_updated < rhs.value_ptr.time_updated;
         }
     };
 
-    std.sort.pdq(CtxHashMap.Entry, self.view_call_profiling_data, {}, sort.ltCtxHashMap);
-    std.sort.pdq(CtxHashMap.Entry, self.view_system_call_profiling_data, {}, sort.ltSysCtxHashMap);
+    std.sort.pdq(SysCtxHashMap.Entry, self.view_system_call_profiling_data, {}, sort.ltSysCtxHashMap);
 }
 
 pub fn processUi(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
@@ -190,7 +170,7 @@ pub fn processUi(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void 
     )) {
         nk.layoutRowStatic(nk_ctx, 20, 100, 3);
         if (self.processUi_tabButton(nk_ctx, "General", self.state == .General)) self.state = .General;
-        if (self.processUi_tabButton(nk_ctx, "Systems", self.state == .Systems)) self.state = .Systems;
+        if (options.profiling and self.processUi_tabButton(nk_ctx, "Systems", self.state == .Profiling)) self.state = .Profiling;
         if (self.processUi_tabButton(nk_ctx, "Preferences", self.state == .Preferences)) self.state = .Preferences;
 
         nk.layoutRowDynamic(nk_ctx, 1, 1);
@@ -198,7 +178,7 @@ pub fn processUi(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void 
 
         switch (self.state) {
             .General => try self.processUi_General(ctx),
-            .Systems => try self.processUi_Systems(ctx),
+            .Profiling => try self.processUi_Profiling(ctx),
             .Preferences => try self.processUi_Preferences(ctx),
             .Disabled => {},
         }
@@ -208,8 +188,7 @@ pub fn processUi(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void 
     nk.end(nk_ctx);
 }
 
-fn processUi_tabButton(self: *@This(), nk_ctx: *nk.Context, title: [*:0]const u8, selected: bool) bool {
-    _ = self; // autofix
+fn processUi_tabButton(_: *@This(), nk_ctx: *nk.Context, title: [*:0]const u8, selected: bool) bool {
     const normal = nk.Color{ .r = 0x20, .g = 0x60, .b = 0x10, .a = 0xff };
     const hover = nk.Color{ .r = 0x20, .g = 0x40, .b = 0x10, .a = 0xff };
     const active = nk.Color{ .r = 0x20, .g = 0x20, .b = 0x10, .a = 0xff };
@@ -239,21 +218,11 @@ fn processUi_General(self: *@This(), ctx: *zigra.Context) !void {
         nk.label(nk_ctx, try std.fmt.bufPrintZ(buf[0..], "FPS (now): {d:.1}", .{perf.fps_now}), nk.text_left);
     }
 
-    if (nk.treeBeginHashed(nk_ctx, .node, "Loop details", @src(), 0, .maximized)) brk: {
-        defer nk.treePop(nk_ctx);
-
-        if (!options.profiling) {
-            nk.labelColored(nk_ctx, "Build without profiling support", nk.text_left, .{ .r = 0xff, .b = 0x80, .g = 0x80, .a = 0xff });
-            break :brk;
-        }
-
-        for (self.view_call_profiling_data[0..], 0..) |data, i| {
-            try self.processUi_statsEntry(nk_ctx, data.key_ptr.*, data.value_ptr, i, @src());
-        }
-    }
+    nk.layoutRowDynamic(nk_ctx, 20, 1);
+    nk.textField(nk_ctx, &self.text_field.buffer, &self.text_field.len);
 }
 
-fn processUi_Systems(self: *@This(), ctx: *zigra.Context) !void {
+fn processUi_Profiling(self: *@This(), ctx: *zigra.Context) !void {
     const nk_ctx = &ctx.systems.nuklear.nk;
 
     for (self.view_system_call_profiling_data[0..], 0..) |data, i| {

@@ -104,7 +104,7 @@ pub fn IdArray(T: type) type {
                 self.allocator.free(self.buffer);
                 self.last_insert_index = 0;
                 self.capacity = 0;
-                return false;
+                return true;
             }
 
             if (self.keys.len * @bitSizeOf(KeyMask) / target_size < ratio) return false;

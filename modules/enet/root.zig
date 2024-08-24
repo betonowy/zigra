@@ -191,28 +191,34 @@ test "Cool" {
                 }
 
                 pub fn connect(self: *@This(), id_peer: u32, peer: *Peer, host: *HostServer) !void {
-                    std.debug.print("S {d:.3}ms: event connect {}\n", .{ self.tp(), id_peer });
+                    _ = self; // autofix
+                    _ = id_peer; // autofix
+                    // std.debug.print("S {d:.3}ms: event connect {}\n", .{ self.tp(), id_peer });
                     try host.sendPacket(peer, "Hello you connected!", 0);
-                    std.debug.print("C mtu: {}\n", .{host.packetMtu()});
+                    // std.debug.print("C mtu: {}\n", .{host.packetMtu()});
                 }
 
                 pub fn disconnect(self: *@This(), id_peer: u32, _: *Peer, _: *HostServer) !void {
-                    std.debug.print("S {d:.3}ms: event disconnect {}\n", .{ self.tp(), id_peer });
+                    _ = id_peer; // autofix
+                    // std.debug.print("S {d:.3}ms: event disconnect {}\n", .{ self.tp(), id_peer });
                     self.should_disconnect = true;
                 }
 
                 pub fn disconnectTimeout(self: *@This(), id_peer: u32, _: *Peer, _: *HostServer) !void {
-                    std.debug.print("S {d:.3}ms: event disconnect timeout {}\n", .{ self.tp(), id_peer });
+                    _ = id_peer; // autofix
+                    // std.debug.print("S {d:.3}ms: event disconnect timeout {}\n", .{ self.tp(), id_peer });
                     self.should_disconnect = true;
                 }
 
                 pub fn receive(self: *@This(), id_peer: u32, _: *Peer, host: *HostServer, data: []const u8, channel: u32) !void {
-                    std.debug.print("S {d:.3}ms: event receive: c: {}, d: {s}, {}\n", .{
-                        self.tp(),
-                        channel,
-                        data,
-                        id_peer,
-                    });
+                    _ = id_peer; // autofix
+                    _ = data; // autofix
+                    // std.debug.print("S {d:.3}ms: event receive: c: {}, d: {s}, {}\n", .{
+                    //     self.tp(),
+                    //     channel,
+                    //     data,
+                    //     id_peer,
+                    // });
 
                     switch (channel) {
                         1 => {
@@ -230,12 +236,12 @@ test "Cool" {
 
             var handler = Handler{ .timer = try std.time.Timer.start() };
 
-            std.debug.print("S {d:.3}ms: Hosting service\n", .{handler.tp()});
+            // std.debug.print("S {d:.3}ms: Hosting service\n", .{handler.tp()});
             while (handler.should_disconnect != true) {
                 try server.service(&handler);
                 if (handler.timer.read() > std.time.ns_per_ms * 5000) break;
             }
-            std.debug.print("S {d:.3}ms: Hosting stopping\n", .{handler.tp()});
+            // std.debug.print("S {d:.3}ms: Hosting stopping\n", .{handler.tp()});
         }
     };
 
@@ -253,33 +259,40 @@ test "Cool" {
                 }
 
                 pub fn connect(self: *@This(), id_peer: u32, _: *Peer, host: *HostClient) !void {
-                    std.debug.print("C {d:.3}ms: event connect, {}\n", .{ self.tp(), id_peer });
-                    std.debug.print("C mtu: {}\n", .{host.packetMtu()});
+                    _ = self; // autofix
+                    _ = id_peer; // autofix
+                    _ = host; // autofix
+                    // std.debug.print("C {d:.3}ms: event connect, {}\n", .{ self.tp(), id_peer });
+                    // std.debug.print("C mtu: {}\n", .{host.packetMtu()});
                 }
 
                 pub fn disconnect(self: *@This(), id_peer: u32, _: *Peer, _: *HostClient) !void {
-                    std.debug.print("C {d:.3}ms: event disconnect {}\n", .{ self.tp(), id_peer });
+                    _ = id_peer; // autofix
+                    // std.debug.print("C {d:.3}ms: event disconnect {}\n", .{ self.tp(), id_peer });
                     self.should_disconnect = true;
                 }
 
                 pub fn disconnectTimeout(self: *@This(), id_peer: u32, _: *Peer, _: *HostClient) !void {
-                    std.debug.print("C {d:.3}ms: event disconnect timeout {}\n", .{ self.tp(), id_peer });
+                    _ = id_peer; // autofix
+                    // std.debug.print("C {d:.3}ms: event disconnect timeout {}\n", .{ self.tp(), id_peer });
                     self.should_disconnect = true;
                 }
 
                 pub fn receive(self: *@This(), id_peer: u32, _: *Peer, host: *HostClient, data: []const u8, channel: u32) !void {
-                    std.debug.print("C {d:.3}ms: event receive: c: {}, d: {s}, {}\n", .{
-                        self.tp(),
-                        channel,
-                        data,
-                        id_peer,
-                    });
+                    _ = id_peer; // autofix
+                    _ = data; // autofix
+                    // std.debug.print("C {d:.3}ms: event receive: c: {}, d: {s}, {}\n", .{
+                    //     self.tp(),
+                    //     channel,
+                    //     data,
+                    //     id_peer,
+                    // });
 
                     c.enet_peer_ping(host.enet_peer);
 
                     switch (channel) {
-                        0 => try host.sendPacket("Hello I'm client", 1),
-                        1 => try host.sendPacket("Something something else", 1),
+                        0 => try host.sendPacket("Hello I'm client", 1, .{}),
+                        1 => try host.sendPacket("Something something else", 1, .{}),
                         else => {
                             self.should_disconnect = true;
                         },
@@ -289,17 +302,17 @@ test "Cool" {
 
             var handler = Handler{ .timer = try std.time.Timer.start() };
 
-            std.debug.print("C {d:.3}ms: Connecting to service\n", .{handler.tp()});
+            // std.debug.print("C {d:.3}ms: Connecting to service\n", .{handler.tp()});
             while (handler.should_disconnect != true) {
                 try client.service(&handler);
                 if (handler.timer.read() > std.time.ns_per_ms * 5000) break;
             }
-            std.debug.print("C {d:.3}ms: Leaving\n", .{handler.tp()});
+            // std.debug.print("C {d:.3}ms: Leaving\n", .{handler.tp()});
 
-            std.debug.print("C round trip: {}\n", .{client.enet_peer.roundTripTime});
+            // std.debug.print("C round trip: {}\n", .{client.enet_peer.roundTripTime});
 
             client.disconnect();
-            try client.serviceTimeout(&handler, 1000);
+            try client.serviceTimeout(&handler, 1);
         }
     };
 

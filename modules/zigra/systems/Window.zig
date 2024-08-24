@@ -3,19 +3,31 @@ const builtin = @import("builtin");
 const glfw = @import("glfw");
 
 const lifetime = @import("lifetime");
+const utils = @import("utils");
 const Vulkan = @import("Vulkan.zig");
 
-const Consts = struct {
+const consts = struct {
     const init_window_w = 640;
     const init_window_h = 480;
 };
+
+pub const CbKey = fn (*anyopaque, glfw.Key, glfw.Action) anyerror!void;
+pub const CbKeyChild = utils.cb.LinkedChild(CbKey);
+const CbKeyParent = utils.cb.LinkedParent(CbKey);
+
+pub const CbChar = fn (*anyopaque, u8) anyerror!void;
+pub const CbCharChild = utils.cb.LinkedChild(CbChar);
+const CbCharParent = utils.cb.LinkedParent(CbChar);
 
 var s_initialized = false;
 
 allocator: std.mem.Allocator,
 window: glfw.Window,
 
+cb_key_root: CbKeyParent = .{},
+cb_char_root: CbCharParent = .{},
 cbs_ctx_glfw: GlfwCbCtx = .{},
+
 cbs_vulkan: Vulkan.WindowCallbacks = .{
     .p_create_window_surface = &vkCbCreateWindowSurface,
     .p_get_framebuffer_size = &vkCbGetFramebufferSize,
@@ -32,7 +44,7 @@ pub fn init(allocator: std.mem.Allocator) !@This() {
 
     if (!glfw.init(.{})) std.log.err("GLFW failed to initialize!: {s}", .{glfw.getErrorString() orelse ""});
 
-    const window = glfw.Window.create(Consts.init_window_w, Consts.init_window_h, "Vulkan window", null, null, .{
+    const window = glfw.Window.create(consts.init_window_w, consts.init_window_h, "Vulkan window", null, null, .{
         .resizable = false,
         .client_api = .no_api,
     }) orelse {
@@ -41,7 +53,7 @@ pub fn init(allocator: std.mem.Allocator) !@This() {
     };
 
     window.setSizeLimits(
-        .{ .width = Consts.init_window_w, .height = Consts.init_window_h },
+        .{ .width = consts.init_window_w, .height = consts.init_window_h },
         .{ .width = null, .height = null },
     );
 
@@ -107,16 +119,17 @@ fn glfwCbMouse(window: glfw.Window, button: glfw.MouseButton, action: glfw.Actio
 
 fn glfwCbChar(window: glfw.Window, codepoint: u21) void {
     const ctx_ptr = window.getUserPointer(GlfwCbCtx) orelse unreachable;
-    _ = ctx_ptr; // autofix
-    std.debug.print("codepoint: {}\n", .{codepoint});
+    const self: *@This() = @fieldParentPtr("cbs_ctx_glfw", ctx_ptr);
+    self.cb_char_root.callAll(.{@as(u8, @intCast(codepoint))}) catch @panic("Can't return an error");
+    // std.debug.print("codepoint: {}\n", .{codepoint});
 }
 
 fn glfwCbKey(window: glfw.Window, key: glfw.Key, scancode: i32, action: glfw.Action, mods: glfw.Mods) void {
-    std.debug.print(
-        "Key: {s}, scancode: {}, action: {s}, mods: {}\n",
-        .{ @tagName(key), scancode, @tagName(action), mods },
-    );
-    _ = window; // autofix
+    _ = scancode; // autofix
+    _ = mods; // autofix
+    const ctx_ptr = window.getUserPointer(GlfwCbCtx) orelse unreachable;
+    const self: *@This() = @fieldParentPtr("cbs_ctx_glfw", ctx_ptr);
+    self.cb_key_root.callAll(.{ key, action }) catch @panic("Can't return an error");
 }
 
 fn glfwCbScroll(window: glfw.Window, xoffset: f64, yoffset: f64) void {

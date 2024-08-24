@@ -109,44 +109,22 @@ pub fn tickProcessBodies(self: *@This(), ctx_base: *lifetime.ContextBase) !void 
     }
 
     const delay = ctx.systems.time.tickDelay();
-    var view = ctx.systems.world.sand_sim.getView();
+    const view = ctx.systems.world.sand_sim.getView();
     const meshes: []Mesh = self.meshes.data;
     const transforms: []systems.Transform.Data = ctx.systems.transform.data.arr.data;
 
-    if (self.bodies.arr.capacity < 512) {
-        const trace = tracy.traceNamed(@src(), "tickProcessBodies (ST)");
-        defer trace.end();
-
-        var iterator = self.bodies.iterator();
-
-        while (iterator.next()) |body| {
-            switch (body.*) {
-                .point => |*p| try self.processBodyPoint(&view, &transforms[p.id_transform], p, delay, ctx),
-                .rigid => |*r| try self.processBodyRigid(&view, &transforms[r.id_transform], r, &meshes[r.id_mesh], delay, ctx),
-                else => @panic("Unimplemented"),
-            }
-        }
-
-        return;
-    }
-
     const Self = @This();
 
-    const ThreadCommon = struct {
-        index: std.atomic.Value(u32) align(std.atomic.cache_line) = .{ .raw = 0 },
-    };
-
-    const ThreadPrivate = struct {
-        self: *Self align(std.atomic.cache_line),
+    const TaskCtx = struct {
+        self: *Self,
         delay: f32,
         view: systems.World.SandSim.LandscapeView,
         meshes: []Mesh,
         transforms: []systems.Transform.Data,
-        worker_data: lifetime.PackagedTask,
-        common: *ThreadCommon,
+        index: *std.atomic.Value(u32),
         range: u32,
 
-        pub fn work(task: *@This(), base: *lifetime.ContextBase) !void {
+        pub fn work(task: *@This(), base: *lifetime.ContextBase) void {
             const work_trace = tracy.traceNamed(@src(), "tickProcessBodies (MT)");
             defer work_trace.end();
 
@@ -154,7 +132,7 @@ pub fn tickProcessBodies(self: *@This(), ctx_base: *lifetime.ContextBase) !void 
             var processed_bodies: u64 = 0;
 
             while (true) {
-                const index = task.common.index.fetchAdd(task.range, .acq_rel);
+                const index = task.index.fetchAdd(task.range, .acq_rel);
 
                 var iterator = task.self.bodies.boundedIterator(index, @min(
                     index + task.range,
@@ -165,22 +143,22 @@ pub fn tickProcessBodies(self: *@This(), ctx_base: *lifetime.ContextBase) !void 
                     processed_bodies += 1;
 
                     switch (body.*) {
-                        .point => |*point| try task.self.processBodyPoint(
+                        .point => |*point| utils.panicOnError(task.self.processBodyPoint(
                             &task.view,
                             &task.transforms[point.id_transform],
                             point,
                             task.delay,
                             worker_ctx,
-                        ),
+                        )),
 
-                        .rigid => |*rigid| try task.self.processBodyRigid(
+                        .rigid => |*rigid| utils.panicOnError(task.self.processBodyRigid(
                             &task.view,
                             &task.transforms[rigid.id_transform],
                             rigid,
                             &task.meshes[rigid.id_mesh],
                             task.delay,
                             worker_ctx,
-                        ),
+                        )),
 
                         else => @panic("Unimplemented"),
                     }
@@ -190,33 +168,44 @@ pub fn tickProcessBodies(self: *@This(), ctx_base: *lifetime.ContextBase) !void 
             }
 
             var buf: [64]u8 = undefined;
-            work_trace.addText(try std.fmt.bufPrint(&buf, "Processed bodies: {}", .{processed_bodies}));
+            work_trace.addText(std.fmt.bufPrint(&buf,
+                \\Processed bodies {}
+                \\Keys: {}
+            , .{
+                processed_bodies,
+                task.self.bodies.arr.keys.len,
+            }) catch unreachable);
         }
     };
 
-    var dispatch_counter = ThreadCommon{};
+    const task_count = v: {
+        const max_tasks = ctx.base.thread_pool.threads.len;
+        const key_count = self.bodies.arr.keys.len;
+        if (key_count == 0) return;
+        break :v @min(max_tasks, @max(key_count / 2, 1));
+    };
 
-    const concurrency = ctx.base.worker_group.workers.items.len;
-    const dispatch_group = try self.call_arena.allocator().alloc(ThreadPrivate, concurrency + 1);
+    const dispatch_ctx = try self.call_arena.allocator().allocWithOptions(TaskCtx, task_count, std.atomic.cache_line, null);
+    var dispatch_index = std.atomic.Value(u32).init(0);
 
-    for (dispatch_group, 0..) |*group, i| {
-        group.self = self;
-        group.delay = delay;
-        group.view = view;
-        group.meshes = meshes;
-        group.transforms = transforms;
-        group.worker_data = lifetime.PackagedTask.init(ctx_base, group, .work);
-        group.common = &dispatch_counter;
-        group.range = 64;
+    for (dispatch_ctx) |*group| group.* = .{
+        .self = self,
+        .delay = delay,
+        .view = view,
+        .meshes = meshes,
+        .transforms = transforms,
+        .index = &dispatch_index,
+        .range = 64,
+    };
 
-        if (i == concurrency) {
-            try group.worker_data.call();
-        } else {
-            if (!ctx_base.worker_group.tryPush(&group.worker_data, 1000)) unreachable;
-        }
+    if (task_count == 1) {
+        dispatch_ctx[0].work(ctx_base);
+        return;
     }
 
-    ctx_base.worker_group.flush();
+    var wg = std.Thread.WaitGroup{};
+    for (dispatch_ctx) |*group| ctx_base.thread_pool.spawnWg(&wg, TaskCtx.work, .{ group, ctx_base });
+    ctx_base.thread_pool.waitAndWork(&wg);
 }
 
 fn processBodyPoint(

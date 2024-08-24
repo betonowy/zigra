@@ -2,19 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const poly = @import("poly.zig");
 
-const la = if (!builtin.is_test) @import("la") else struct {
-    pub fn sqrLength(a: anytype) f32 {
-        return @reduce(.Add, a * a);
-    }
-
-    pub fn length(a: anytype) f32 {
-        return @sqrt(sqrLength(a));
-    }
-
-    pub fn normalize(a: anytype) @TypeOf(a) {
-        return a / @as(@TypeOf(a), @splat(length(a)));
-    }
-};
+const la = @import("la");
 
 const edge_threshold = 1.0 / 3.0;
 const edge_hit_threshold = edge_threshold + 0;

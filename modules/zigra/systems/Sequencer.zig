@@ -5,8 +5,10 @@ const options = @import("options");
 
 const zigra = @import("../root.zig");
 
-pub const StateGame = union(enum) {
+pub const State = union(enum) {
     GameNormal: void,
+    Black: void,
+    CloudTransition: void,
 };
 
 pub const StateTimer = union(enum) {
@@ -14,7 +16,8 @@ pub const StateTimer = union(enum) {
     Limited: void,
 };
 
-state_game: StateGame = .GameNormal,
+state: State = .GameNormal,
+state_next: State = .GameNormal,
 state_timer: StateTimer = .Limited,
 
 pub fn runInit(_: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
@@ -23,12 +26,12 @@ pub fn runInit(_: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
 
     const ctx = ctx_base.parent(zigra.Context);
 
-    try run(ctx, .net, .systemInit);
-    try run(ctx, .window, .systemInit);
-    try run(ctx, .world, .systemInit);
-    try run(ctx, .vulkan, .systemInit);
-    try run(ctx, .nuklear, .systemInit);
-    try run(ctx, .playground, .systemInit);
+    try runLean(ctx, .net, .systemInit);
+    try runLean(ctx, .window, .systemInit);
+    try runLean(ctx, .world, .systemInit);
+    try runLean(ctx, .vulkan, .systemInit);
+    try runLean(ctx, .nuklear, .systemInit);
+    try runLean(ctx, .playground, .systemInit);
 }
 
 pub fn runDeinit(_: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
@@ -37,12 +40,12 @@ pub fn runDeinit(_: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
 
     const ctx = ctx_base.parent(zigra.Context);
 
-    try run(ctx, .playground, .systemDeinit);
-    try run(ctx, .nuklear, .systemDeinit);
-    try run(ctx, .vulkan, .systemDeinit);
-    try run(ctx, .world, .systemDeinit);
-    try run(ctx, .window, .systemDeinit);
-    try run(ctx, .net, .systemDeinit);
+    try runLean(ctx, .playground, .systemDeinit);
+    try runLean(ctx, .nuklear, .systemDeinit);
+    try runLean(ctx, .vulkan, .systemDeinit);
+    try runLean(ctx, .world, .systemDeinit);
+    try runLean(ctx, .window, .systemDeinit);
+    try runLean(ctx, .net, .systemDeinit);
 }
 
 pub fn runLoop(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
@@ -50,71 +53,15 @@ pub fn runLoop(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     const t = tracy.trace(@src());
     defer t.end();
 
-    ctx_base.worker_group.current_index = 0;
-
     const ctx = ctx_base.parent(zigra.Context);
 
-    switch (self.state_game) {
-        .GameNormal => try self.runLoop_GameNormal(ctx),
-    }
+    try runLoopPreTicks(self, ctx);
+    for (0..ctx.systems.time.ticks_this_checkpoint) |_| try runLoopTick(self, ctx);
+    try runLoopPostTicks(self, ctx);
+    try run(ctx, .time, .ensureMinimumCheckpointTime);
 
     if (options.profiling and options.debug_ui) {
         try run(ctx, .debug_ui, .processProfilingData);
-    }
-}
-
-fn runLoop_GameNormal(self: *@This(), ctx: *zigra.Context) !void {
-    const t = tracy.trace(@src());
-    defer t.end();
-
-    {
-        var timer = try std.time.Timer.start();
-
-        try runLoopPreTicks(self, ctx);
-
-        if (options.debug_ui) try ctx.systems.debug_ui.pushOtherProfilingData(.{
-            .call_name = "Pre ticks",
-            .duration_ns = timer.read(),
-            .timestamp = 1,
-        });
-    }
-    {
-        var timer = try std.time.Timer.start();
-
-        for (0..ctx.systems.time.ticks_this_checkpoint) |_| try runLoopTick(self, ctx);
-
-        if (options.debug_ui) try ctx.systems.debug_ui.pushOtherProfilingData(.{
-            .call_name = "Tick loop",
-            .duration_ns = timer.read(),
-            .timestamp = 2,
-        });
-    }
-    {
-        var timer = try std.time.Timer.start();
-
-        try runLoopPostTicks(self, ctx);
-
-        if (options.debug_ui) try ctx.systems.debug_ui.pushOtherProfilingData(.{
-            .call_name = "Post ticks",
-            .duration_ns = timer.read(),
-            .timestamp = 3,
-        });
-    }
-    {
-        switch (self.state_timer) {
-            .Limited => {
-                var timer = try std.time.Timer.start();
-
-                try run(ctx, .time, .ensureMinimumCheckpointTime);
-
-                if (options.debug_ui) try ctx.systems.debug_ui.pushOtherProfilingData(.{
-                    .call_name = "Checkpoint wait",
-                    .duration_ns = timer.read(),
-                    .timestamp = 4,
-                });
-            },
-            else => {},
-        }
     }
 }
 
@@ -154,10 +101,23 @@ fn runLoopPostTicks(_: *@This(), ctx: *zigra.Context) !void {
 }
 
 fn run(ctx: *zigra.Context, comptime system_tag: anytype, comptime function_tag: anytype) !void {
+    return runEx(ctx, system_tag, function_tag, .profiling);
+}
+
+fn runLean(ctx: *zigra.Context, comptime system_tag: anytype, comptime function_tag: anytype) !void {
+    return runEx(ctx, system_tag, function_tag, .lean);
+}
+
+fn runEx(
+    ctx: *zigra.Context,
+    comptime system_tag: anytype,
+    comptime function_tag: anytype,
+    comptime flavor: enum { lean, profiling },
+) !void {
     const system_ptr = &@field(ctx.systems, @tagName(system_tag));
     const routine_name = @tagName(system_tag) ++ "." ++ @tagName(function_tag);
 
-    if (options.profiling and options.debug_ui) {
+    if (options.profiling and options.debug_ui and flavor == .profiling) {
         var timer = try std.time.Timer.start();
         {
             const t = tracy.traceNamed(@src(), routine_name);

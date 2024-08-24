@@ -54,6 +54,36 @@ pub const button_left = c.NK_BUTTON_LEFT;
 pub const button_right = c.NK_BUTTON_RIGHT;
 pub const button_middle = c.NK_BUTTON_MIDDLE;
 
+pub const KEY_SHIFT: c_int = 1;
+pub const KEY_CTRL: c_int = 2;
+pub const KEY_DEL: c_int = 3;
+pub const KEY_ENTER: c_int = 4;
+pub const KEY_TAB: c_int = 5;
+pub const KEY_BACKSPACE: c_int = 6;
+pub const KEY_COPY: c_int = 7;
+pub const KEY_CUT: c_int = 8;
+pub const KEY_PASTE: c_int = 9;
+pub const KEY_UP: c_int = 10;
+pub const KEY_DOWN: c_int = 11;
+pub const KEY_LEFT: c_int = 12;
+pub const KEY_RIGHT: c_int = 13;
+pub const KEY_TEXT_INSERT_MODE: c_int = 14;
+pub const KEY_TEXT_REPLACE_MODE: c_int = 15;
+pub const KEY_TEXT_RESET_MODE: c_int = 16;
+pub const KEY_TEXT_LINE_START: c_int = 17;
+pub const KEY_TEXT_LINE_END: c_int = 18;
+pub const KEY_TEXT_START: c_int = 19;
+pub const KEY_TEXT_END: c_int = 20;
+pub const KEY_TEXT_UNDO: c_int = 21;
+pub const KEY_TEXT_REDO: c_int = 22;
+pub const KEY_TEXT_SELECT_ALL: c_int = 23;
+pub const KEY_TEXT_WORD_LEFT: c_int = 24;
+pub const KEY_TEXT_WORD_RIGHT: c_int = 25;
+pub const KEY_SCROLL_START: c_int = 26;
+pub const KEY_SCROLL_END: c_int = 27;
+pub const KEY_SCROLL_DOWN: c_int = 28;
+pub const KEY_SCROLL_UP: c_int = 29;
+
 pub const WindowFlag = enum(u32) {
     closeable = c.NK_WINDOW_CLOSABLE,
     scalable = c.NK_WINDOW_SCALABLE,
@@ -87,7 +117,7 @@ pub const TextWidthCb = c.nk_text_width_f;
 pub const GlyphQueryCb = c.nk_query_font_glyph_f;
 
 pub fn initFixed(ctx: *Context, mem: []u8, user_font: ?*const UserFont) !void {
-    if (c.nk_init_fixed(ctx, mem.ptr, mem.len, user_font) == c.nk_false) return error.NkInitFailed;
+    if (!c.nk_init_fixed(ctx, mem.ptr, mem.len, user_font)) return error.NkInitFailed;
 }
 
 pub fn deinit(ctx: *Context) void {
@@ -105,7 +135,7 @@ pub fn flagConcat(comptime flags: anytype) @TypeOf(flags[0]) {
 }
 
 pub fn begin(ctx: *Context, title: [*:0]const u8, bounds: Rect, comptime flags: []const WindowFlag) bool {
-    return c.nk_begin(ctx, title, bounds, @intFromEnum(flagConcat(flags))) == c.nk_true;
+    return c.nk_begin(ctx, title, bounds, @intFromEnum(flagConcat(flags)));
 }
 
 pub fn end(ctx: *Context) void {
@@ -121,11 +151,11 @@ pub fn layoutRowDynamic(ctx: *Context, height: f32, cols: i32) void {
 }
 
 pub fn buttonLabel(ctx: *Context, title: [*:0]const u8) bool {
-    return c.nk_button_label(ctx, title) == c.nk_true;
+    return c.nk_button_label(ctx, title);
 }
 
 pub fn rule(ctx: *Context, color: Color) void {
-    c.nk_rule_horizontal(ctx, color, c.nk_false);
+    c.nk_rule_horizontal(ctx, color, false);
 }
 
 pub fn buttonLabelColored(
@@ -135,13 +165,13 @@ pub fn buttonLabelColored(
     color_hover: c.nk_color,
     color_active: c.nk_color,
 ) bool {
-    if (c.nk_style_push_style_item(ctx, &ctx.style.button.normal, c.nk_style_item_color(color_normal)) == c.nk_false) unreachable;
-    if (c.nk_style_push_style_item(ctx, &ctx.style.button.hover, c.nk_style_item_color(color_hover)) == c.nk_false) unreachable;
-    if (c.nk_style_push_style_item(ctx, &ctx.style.button.active, c.nk_style_item_color(color_active)) == c.nk_false) unreachable;
+    if (!c.nk_style_push_style_item(ctx, &ctx.style.button.normal, c.nk_style_item_color(color_normal))) unreachable;
+    if (!c.nk_style_push_style_item(ctx, &ctx.style.button.hover, c.nk_style_item_color(color_hover))) unreachable;
+    if (!c.nk_style_push_style_item(ctx, &ctx.style.button.active, c.nk_style_item_color(color_active))) unreachable;
 
-    defer for (0..3) |_| if (c.nk_style_pop_style_item(ctx) == c.nk_false) unreachable;
+    defer for (0..3) |_| if (!c.nk_style_pop_style_item(ctx)) unreachable;
 
-    return c.nk_button_label(ctx, title) == c.nk_true;
+    return c.nk_button_label(ctx, title);
 }
 
 pub fn label(ctx: *Context, title: [*:0]const u8, flags: c.nk_flags) void {
@@ -150,6 +180,12 @@ pub fn label(ctx: *Context, title: [*:0]const u8, flags: c.nk_flags) void {
 
 pub fn labelColored(ctx: *Context, title: [*:0]const u8, flags: c.nk_flags, color: c.nk_color) void {
     c.nk_label_colored(ctx, title, flags, color);
+}
+
+pub fn textField(ctx: *Context, buffer: []u8, plen: anytype) void {
+    var len: c_int = @intCast(plen.*);
+    defer plen.* = @intCast(len);
+    _ = c.nk_edit_string(ctx, c.NK_EDIT_BOX | c.NK_EDIT_AUTO_SELECT, buffer.ptr, &len, @intCast(buffer.len), null);
 }
 
 pub fn treeBeginHashed(
@@ -175,7 +211,7 @@ pub fn treeBeginHashed(
         hash.ptr,
         hash.len,
         id,
-    ) == c.nk_true;
+    );
 }
 
 pub fn treePop(ctx: *Context) void {
@@ -183,11 +219,11 @@ pub fn treePop(ctx: *Context) void {
 }
 
 pub fn chartBegin(ctx: *Context, chart_type: ChartType, count: i32, min: f32, max: f32) bool {
-    return c.nk_chart_begin(ctx, @intFromEnum(chart_type), @intCast(count), min, max) == c.nk_true;
+    return c.nk_chart_begin(ctx, @intFromEnum(chart_type), @intCast(count), min, max);
 }
 
 pub fn chartBeginColored(ctx: *Context, chart_type: ChartType, base: Color, active: Color, count: i32, min: f32, max: f32) bool {
-    return c.nk_chart_begin_colored(ctx, @intFromEnum(chart_type), base, active, @intCast(count), min, max) == c.nk_true;
+    return c.nk_chart_begin_colored(ctx, @intFromEnum(chart_type), base, active, @intCast(count), min, max);
 }
 
 pub fn chartEnd(ctx: *Context) void {
@@ -203,13 +239,11 @@ pub fn propertyI32(ctx: *Context, name: [*:0]const u8, min: i32, val: *i32, max:
 }
 
 pub fn sliderI32(ctx: *Context, min: i32, val: *i32, max: i32, step: i32) bool {
-    return c.nk_slider_int(ctx, @intCast(min), @ptrCast(val), @intCast(max), @intCast(step)) == c.nk_true;
+    return c.nk_slider_int(ctx, @intCast(min), @ptrCast(val), @intCast(max), @intCast(step));
 }
 
 pub fn radioLabel(ctx: *Context, name: [*:0]const u8, active: *bool) void {
-    var active_nk = if (active.*) c.nk_true else c.nk_false;
-    _ = c.nk_radio_label(ctx, name, &active_nk);
-    active.* = active_nk == c.nk_true;
+    _ = c.nk_radio_label(ctx, name, active);
 }
 
 pub fn clear(ctx: *Context) void {
@@ -241,13 +275,21 @@ pub fn inputMotion(ctx: *Context, x: i32, y: i32) void {
 }
 
 pub fn inputButton(ctx: *Context, x: i32, y: i32, button: u32, down: bool) void {
-    c.nk_input_button(ctx, @intCast(button), @intCast(x), @intCast(y), if (down) c.nk_true else c.nk_false);
+    c.nk_input_button(ctx, @intCast(button), @intCast(x), @intCast(y), down);
 }
 
 pub fn inputScroll(ctx: *Context, x: f32, y: f32) void {
     c.nk_input_scroll(ctx, .{ .x = x, .y = y });
 }
 
+pub fn inputChars(ctx: *Context, chars: []const u8) void {
+    for (chars) |char| c.nk_input_char(ctx, char);
+}
+
+pub fn inputKey(ctx: *Context, key: i32, state: bool) void {
+    c.nk_input_key(ctx, @intCast(key), state);
+}
+
 pub fn hasFocus(ctx: *Context) bool {
-    return c.nk_item_is_any_active(ctx) == c.nk_true;
+    return c.nk_item_is_any_active(ctx);
 }

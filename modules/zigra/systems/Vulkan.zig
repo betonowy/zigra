@@ -4,8 +4,9 @@ const Backend = @import("Vulkan/Backend.zig");
 const types = @import("Vulkan/types.zig");
 
 const lifetime = @import("lifetime");
-const zigra = @import("../root.zig");
 const tracy = @import("tracy");
+const utils = @import("utils");
+const zigra = @import("../root.zig");
 
 pub const vk = @import("vk");
 pub const WindowCallbacks = types.WindowCallbacks;
@@ -13,16 +14,13 @@ pub const WindowCallbacks = types.WindowCallbacks;
 allocator: std.mem.Allocator,
 impl: Backend,
 
-busy_semaphore: std.Thread.Semaphore,
-
-processing_task: lifetime.PackagedTask,
+wg_process: std.Thread.WaitGroup,
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
     return .{
         .allocator = allocator,
         .impl = undefined,
-        .busy_semaphore = std.Thread.Semaphore{},
-        .processing_task = undefined,
+        .wg_process = std.Thread.WaitGroup{},
     };
 }
 
@@ -34,13 +32,11 @@ pub fn systemInit(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void
         @as(vk.PfnGetInstanceProcAddr, @ptrCast(ctx.systems.window.pfnGetInstanceProcAddress())),
         &ctx.systems.window.cbs_vulkan,
     );
-
-    self.processing_task = lifetime.PackagedTask.init(ctx_base, self, .process);
-    self.busy_semaphore.post();
 }
 
 pub fn systemDeinit(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
-    self.busy_semaphore.wait();
+    self.wg_process.wait();
+    self.wg_process.reset();
     self.impl.deinit();
 }
 
@@ -49,17 +45,17 @@ pub fn deinit(self: *@This()) void {
 }
 
 pub fn waitForAvailableFrame(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
-    self.busy_semaphore.wait();
+    self.wg_process.wait();
+    self.wg_process.reset();
     try self.impl.waitForFreeFrame();
 }
 
 pub fn pushProcessParallel(self: *@This(), ctx: *lifetime.ContextBase) anyerror!void {
-    if (!ctx.worker_group.tryPush(&self.processing_task, 1000)) return error.PushTimeout;
+    ctx.thread_pool.spawnWg(&self.wg_process, process, .{ self, ctx });
 }
 
-pub fn process(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
-    try self.impl.process();
-    self.busy_semaphore.post();
+pub fn process(self: *@This(), _: *lifetime.ContextBase) void {
+    utils.panicOnError(self.impl.process());
 }
 
 pub fn setCameraPosition(self: *@This(), pos: @Vector(2, i32)) void {
