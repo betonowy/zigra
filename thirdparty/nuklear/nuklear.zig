@@ -282,8 +282,8 @@ pub fn inputScroll(ctx: *Context, x: f32, y: f32) void {
     c.nk_input_scroll(ctx, .{ .x = x, .y = y });
 }
 
-pub fn inputChars(ctx: *Context, chars: []const u8) void {
-    for (chars) |char| c.nk_input_char(ctx, char);
+pub fn inputChars(ctx: *Context, chars: []const u21) void {
+    for (chars) |char| c.nk_input_unicode(ctx, char);
 }
 
 pub fn inputKey(ctx: *Context, key: i32, state: bool) void {

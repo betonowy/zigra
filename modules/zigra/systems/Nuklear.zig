@@ -22,7 +22,7 @@ window_char_cb: systems.Window.CbCharChild = .{ .cb = &windowCharCb },
 window_key_cb: systems.Window.CbKeyChild = .{ .cb = &windowKeyCb },
 
 key_buffer: std.BoundedArray(nk_glfw.KeyEvent, 16) = .{},
-char_buffer: std.BoundedArray(u8, 16) = .{},
+char_buffer: std.BoundedArray(u21, 16) = .{},
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
     return .{ .allocator = allocator };
@@ -77,7 +77,7 @@ pub fn render(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     nk.clear(&self.nk);
 }
 
-fn windowCharCb(cb: *anyopaque, char: u8) !void {
+fn windowCharCb(cb: *anyopaque, char: u21) !void {
     const self: *@This() = @fieldParentPtr("window_char_cb", @as(*systems.Window.CbCharChild, @alignCast(@ptrCast(cb))));
     try self.char_buffer.append(char);
 }

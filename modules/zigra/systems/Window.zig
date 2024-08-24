@@ -15,7 +15,7 @@ pub const CbKey = fn (*anyopaque, glfw.Key, glfw.Action) anyerror!void;
 pub const CbKeyChild = utils.cb.LinkedChild(CbKey);
 const CbKeyParent = utils.cb.LinkedParent(CbKey);
 
-pub const CbChar = fn (*anyopaque, u8) anyerror!void;
+pub const CbChar = fn (*anyopaque, u21) anyerror!void;
 pub const CbCharChild = utils.cb.LinkedChild(CbChar);
 const CbCharParent = utils.cb.LinkedParent(CbChar);
 
@@ -120,13 +120,10 @@ fn glfwCbMouse(window: glfw.Window, button: glfw.MouseButton, action: glfw.Actio
 fn glfwCbChar(window: glfw.Window, codepoint: u21) void {
     const ctx_ptr = window.getUserPointer(GlfwCbCtx) orelse unreachable;
     const self: *@This() = @fieldParentPtr("cbs_ctx_glfw", ctx_ptr);
-    self.cb_char_root.callAll(.{@as(u8, @intCast(codepoint))}) catch @panic("Can't return an error");
-    // std.debug.print("codepoint: {}\n", .{codepoint});
+    self.cb_char_root.callAll(.{@as(u21, codepoint)}) catch @panic("Can't return an error");
 }
 
-fn glfwCbKey(window: glfw.Window, key: glfw.Key, scancode: i32, action: glfw.Action, mods: glfw.Mods) void {
-    _ = scancode; // autofix
-    _ = mods; // autofix
+fn glfwCbKey(window: glfw.Window, key: glfw.Key, _: i32, action: glfw.Action, _: glfw.Mods) void {
     const ctx_ptr = window.getUserPointer(GlfwCbCtx) orelse unreachable;
     const self: *@This() = @fieldParentPtr("cbs_ctx_glfw", ctx_ptr);
     self.cb_key_root.callAll(.{ key, action }) catch @panic("Can't return an error");

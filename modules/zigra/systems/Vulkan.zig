@@ -55,7 +55,7 @@ pub fn pushProcessParallel(self: *@This(), ctx: *lifetime.ContextBase) anyerror!
 }
 
 pub fn process(self: *@This(), _: *lifetime.ContextBase) void {
-    utils.panicOnError(self.impl.process());
+    self.impl.process() catch |e| utils.tried.panic(e, @errorReturnTrace());
 }
 
 pub fn setCameraPosition(self: *@This(), pos: @Vector(2, i32)) void {
@@ -114,4 +114,6 @@ pub fn pushCmdLandscapeTileUpdate(self: *@This(), dst: *Backend.Landscape.Tile, 
 }
 
 /// TODO If called, ensures landscape is drawn this frame.
-pub fn shouldDrawLandscape(_: *@This()) void {}
+pub fn shouldDrawLandscape(_: *@This()) void {
+    // Always drawn anyway for now
+}

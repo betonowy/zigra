@@ -9,10 +9,8 @@ pub const KBI = @import("KBI.zig");
 pub const integrators = @import("integrators.zig");
 pub const meta = @import("meta.zig");
 pub const cb = @import("cb.zig");
-
-pub fn panicOnError(retVal: anytype) @typeInfo(@TypeOf(retVal)).ErrorUnion.payload {
-    return retVal catch @panic("Panic on error");
-}
+pub const tried = @import("tried.zig");
+pub const dtors = @import("dtors.zig");
 
 test {
     comptime std.testing.refAllDecls(id_containers);
@@ -20,4 +18,5 @@ test {
     comptime std.testing.refAllDecls(KBI);
     comptime std.testing.refAllDecls(meta);
     comptime std.testing.refAllDecls(cb);
+    comptime std.testing.refAllDecls(dtors);
 }

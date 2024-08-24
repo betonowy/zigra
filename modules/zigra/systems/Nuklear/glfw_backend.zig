@@ -10,7 +10,7 @@ pub const KeyEvent = struct {
     action: glfw.Action,
 };
 
-pub fn processInput(window: glfw.Window, ctx: *nk.Context, chars: []const u8, keys: []const KeyEvent) void {
+pub fn processInput(window: glfw.Window, ctx: *nk.Context, chars: []const u21, keys: []const KeyEvent) void {
     nk.inputBegin(ctx);
     defer nk.inputEnd(ctx);
 
