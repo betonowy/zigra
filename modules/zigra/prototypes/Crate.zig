@@ -3,7 +3,7 @@ const std = @import("std");
 const zigra = @import("../root.zig");
 const systems = @import("../systems.zig");
 
-fn deinit(_: systems.Entities.Entity, ctx: *zigra.Context, id: u32) void {
+fn deinit(_: *systems.Entities.Entity, ctx: *zigra.Context, id: u32) void {
     ctx.systems.sprite_man.destroyByEntityId(id);
     ctx.systems.transform.destroyByEntityId(id);
     ctx.systems.bodies.destroyByEntityId(id);

@@ -8,6 +8,7 @@ const initialization = @import("init.zig");
 const builder = @import("builder.zig");
 const utils = @import("utils");
 const push_commands = @import("push_commands.zig");
+const VkAllocator = @import("VkAllocator.zig");
 pub const Atlas = @import("Atlas.zig");
 pub const Landscape = @import("Landscape.zig");
 pub const SandSim = @import("../World/SandSim.zig");
@@ -18,7 +19,7 @@ const stb = @cImport(@cInclude("stb/stb_image.h"));
 const log = std.log.scoped(.Vulkan_backend);
 
 pub const frame_data_count: u8 = 2;
-pub const frame_max_draw_commands = 0x80000;
+pub const frame_max_draw_commands = 0x10000;
 pub const frame_target_width = 320;
 pub const frame_target_height = 200;
 pub const frame_format = vk.Format.r16g16b16a16_sfloat;
@@ -29,6 +30,7 @@ pub const font_height = 8;
 pub const font_width = 8;
 
 allocator: std.mem.Allocator,
+vka: VkAllocator,
 
 vkb: types.BaseDispatch,
 vki: types.InstanceDispatch,
@@ -105,9 +107,11 @@ pub fn init(
     var self: @This() = undefined;
 
     self.allocator = allocator;
-    self.vkb = try types.BaseDispatch.load(get_proc_addr);
+    self.vka = try VkAllocator.init(allocator);
+    errdefer self.vka.deinit();
 
-    self.instance = try initialization.createVulkanInstance(self.vkb, self.allocator, window_callbacks);
+    self.vkb = try types.BaseDispatch.load(get_proc_addr);
+    self.instance = try initialization.createVulkanInstance(self.vkb, self.allocator, window_callbacks, self.vka);
     self.vki = try types.InstanceDispatch.load(self.instance, get_proc_addr);
     errdefer self.vki.destroyInstance(self.instance, null);
 
@@ -206,7 +210,8 @@ pub fn deinit(self: *@This()) void {
         if (self.debug_messenger) |handle| self.vki.destroyDebugUtilsMessengerEXT(self.instance, handle, null);
     }
 
-    self.vki.destroyInstance(self.instance, null);
+    self.vki.destroyInstance(self.instance, &self.vka.cbs);
+    self.vka.deinit();
 }
 
 pub fn currentFrameData(self: *@This()) *FrameData {
@@ -224,6 +229,9 @@ pub fn waitForFreeFrame(self: *@This()) !void {
 }
 
 pub fn process(self: *@This()) !void {
+    const trace = tracy.trace(@src());
+    defer trace.end();
+
     try self.vkd.resetCommandBuffer(self.frames[self.frame_index].command_buffer, .{});
     try self.vkd.beginCommandBuffer(self.frames[self.frame_index].command_buffer, &.{ .flags = .{ .one_time_submit_bit = true } });
 
@@ -247,8 +255,8 @@ pub fn process(self: *@This()) !void {
         next_image.image_index,
     );
 
-    const trace = tracy.traceNamed(@src(), "finalize");
-    defer trace.end();
+    const trace_finalize = tracy.traceNamed(@src(), "finalize");
+    defer trace_finalize.end();
 
     try self.vkd.endCommandBuffer(self.frames[self.frame_index].command_buffer);
 
@@ -261,7 +269,7 @@ pub fn process(self: *@This()) !void {
     std.debug.assert(wait_semaphores.len == wait_dst_stage_mask.len);
 
     const submit_info = vk.SubmitInfo{
-        .wait_semaphore_count = wait_semaphores.len,
+        .wait_semaphore_count = @intCast(wait_semaphores.len),
         .p_wait_semaphores = wait_semaphores.constSlice().ptr,
         .p_wait_dst_stage_mask = wait_dst_stage_mask.constSlice().ptr,
         .command_buffer_count = 1,
@@ -1811,8 +1819,8 @@ fn uploadScheduledData(self: *@This(), frame: *FrameData) !void {
         }
 
         frame.draw_landscape_index = current_index;
-        frame.draw_landscape_range = self.frames[self.frame_index].landscape.active_sets.len;
-        current_index += self.frames[self.frame_index].landscape.active_sets.len;
+        frame.draw_landscape_range = @intCast(self.frames[self.frame_index].landscape.active_sets.len);
+        current_index += @intCast(self.frames[self.frame_index].landscape.active_sets.len);
 
         subtrace.setValue(frame.draw_landscape_range);
     }

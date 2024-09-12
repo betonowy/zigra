@@ -8,8 +8,8 @@
             .hash = "1220cdcde5cb8c8e323ebfbdcbde734ac5638bacaa5e6affabd4fbfd74fecf6eace4",
         },
         .vulkan_zig = .{
-            .url = "https://github.com/Snektron/vulkan-zig/archive/9f6e6177b1fdb3ed22231d9216a24480e84cfa5e.tar.gz",
-            .hash = "1220f2961df224f7d35dee774b26194b8b937cc252fa8e4023407776c58521d53e38",
+            .url = "https://github.com/Snektron/vulkan-zig/archive/18f38ef2b7ae394734bd8b28d43f120f2b9567c1.tar.gz",
+            .hash = "1220530d62adb3f7ab87bacde31c302955a5803db52e302a0c7f8e107ca03f7aeca5",
         },
         .vulkan_headers = .{
             .url = "https://github.com/KhronosGroup/Vulkan-Headers/archive/595c8d4794410a4e64b98dc58d27c0310d7ea2fd.tar.gz",
@@ -23,6 +23,7 @@
             .url = "https://github.com/zpl-c/enet/archive/dfe906c400a2d68c61f7b5f40f51f7566503a6f6.tar.gz",
             .hash = "12204747026d010e1498a2d2a63fdf5c1d0d27a0bf8427a543e32889f025d1283acf",
         },
+        .zaudio = .{ .path = "thirdparty/zig-gamedev/libs/zaudio" },
     },
     .paths = .{
         "build.zig",

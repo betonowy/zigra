@@ -17,44 +17,34 @@ const Node = struct {
     }
 };
 
-// pub fn linked(params: []const type) type {
-//     const ChildCb = u32;
-
-//     var cbParams: [params.len + 1]std.builtin.Type.Fn.Param = undefined;
-
-//     cbParams[0] = .{
-//         .is_generic = false,
-//         .is_noalias = false,
-//         .type = ChildCb,
-//     };
-
-//     for (cbParams[1..], params[0..]) |*dst, src| {
-//         dst.is_generic = false;
-//         dst.is_noalias = false;
-//         dst.type = src;
-//     }
-
-//     return struct {
-//         pub const Cb = ChildCb;
-//         pub const Child = u32;
-//         pub const Parent = u32;
-//     };
-// }
-
 pub fn LinkedChild(FnType: type) type {
     return struct {
         node: Node = .{},
         cb: *const FnType,
+
+        pub fn link(self: *@This(), other: *LinkedParent(FnType)) void {
+            self.node.link(&other.node);
+        }
+
+        pub fn unlink(self: *@This()) void {
+            self.node.unlink();
+        }
     };
 }
 
 pub fn LinkedParent(FnType: type) type {
     const Child = LinkedChild(FnType);
 
+    const ReturnType = comptime switch (@typeInfo(@typeInfo(FnType).Fn.return_type.?)) {
+        .ErrorUnion => anyerror!void,
+        .Void => void,
+        else => unreachable,
+    };
+
     return struct {
         node: Node = .{},
 
-        pub fn callAll(self: *@This(), args: anytype) !void {
+        pub fn callAll(self: *@This(), args: anytype) ReturnType {
             var current = self.node.next;
 
             while (current) |c| : (current = c.next) {

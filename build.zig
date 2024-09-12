@@ -43,19 +43,27 @@ pub fn build(b: *std.Build) !void {
         .target = target,
     });
 
+    const mod_la = b.createModule(.{ .root_source_file = b.path("modules/la/root.zig") });
+    const mod_utils = b.createModule(.{ .root_source_file = b.path("modules/utils/root.zig") });
+    mod_utils.addImport("la", mod_la);
+
     const mod_options = options.createModule();
-    const mod_stb = thirdparty.stb.module(b);
+    const mod_stb = thirdparty.stb.module(b, mod_utils);
     const mod_nuklear = thirdparty.nuklear.module(b);
     const mod_lz4 = thirdparty.lz4.module(b);
 
-    const mod_enet = b.createModule(.{ .root_source_file = b.path("modules/enet/root.zig"), .link_libc = true });
+    const mod_enet = b.createModule(.{ .root_source_file = b.path("modules/enet/root.zig"), .link_libc = false });
     mod_enet.addCSourceFile(.{ .file = b.path("modules/enet/enet.c"), .flags = &.{"-fno-sanitize=undefined"} });
     mod_enet.addIncludePath(b.dependency("zpl_enet", .{}).path("include"));
     mod_enet.addImport("lz4", mod_lz4);
 
-    const mod_la = b.createModule(.{ .root_source_file = b.path("modules/la/root.zig") });
-    const mod_utils = b.createModule(.{ .root_source_file = b.path("modules/utils/root.zig") });
-    mod_utils.addImport("la", mod_la);
+    const dep_zaudio = b.dependency("zaudio", .{
+        .optimize = optimize,
+        .target = target,
+    });
+
+    const mod_zaudio = dep_zaudio.module("root");
+    mod_zaudio.linkLibrary(dep_zaudio.artifact("miniaudio"));
 
     const mod_lifetime = b.createModule(.{ .root_source_file = b.path("modules/lifetime/lifetime.zig") });
     mod_lifetime.addImport("tracy", mod_tracy);
@@ -79,6 +87,7 @@ pub fn build(b: *std.Build) !void {
     mod_zigra.addImport("la", mod_la);
     mod_zigra.addImport("tracy", mod_tracy);
     mod_zigra.addImport("enet", mod_enet);
+    mod_zigra.addImport("zaudio", mod_zaudio);
 
     const exe = b.addExecutable(.{
         .name = "zigra",
@@ -118,10 +127,10 @@ pub fn build(b: *std.Build) !void {
         .test_only = test_filter,
     };
 
-    tests.addTest(test_ctx, "modules-la", "modules/la/root.zig", mod_la);
-    tests.addTest(test_ctx, "modules-lifetime", "modules/lifetime/lifetime.zig", mod_lifetime);
-    tests.addTest(test_ctx, "modules-utils", "modules/utils/root.zig", mod_utils);
-    tests.addTest(test_ctx, "modules-zigra", "modules/zigra/root.zig", mod_zigra);
-    tests.addTest(test_ctx, "thirdparty-lz4", "thirdparty/lz4/lz4.zig", mod_lz4);
-    tests.addTest(test_ctx, "modules-enet", "modules/enet/root.zig", mod_enet);
+    tests.addTest(test_ctx, "modules-la", "modules/la/root.zig", mod_la, .{ .use_llvm = use_llvm });
+    tests.addTest(test_ctx, "modules-lifetime", "modules/lifetime/lifetime.zig", mod_lifetime, .{ .use_llvm = use_llvm });
+    tests.addTest(test_ctx, "modules-utils", "modules/utils/root.zig", mod_utils, .{ .tsan = thread_sanitizer, .use_llvm = use_llvm });
+    tests.addTest(test_ctx, "modules-zigra", "modules/zigra/root.zig", mod_zigra, .{ .use_llvm = use_llvm });
+    tests.addTest(test_ctx, "thirdparty-lz4", "thirdparty/lz4/lz4.zig", mod_lz4, .{ .use_llvm = use_llvm });
+    tests.addTest(test_ctx, "modules-enet", "modules/enet/root.zig", mod_enet, .{ .use_llvm = use_llvm });
 }

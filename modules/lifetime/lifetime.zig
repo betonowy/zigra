@@ -15,6 +15,9 @@ pub const ContextBase = struct {
 
         try tp.init(.{ .allocator = allocator, .n_jobs = optimal_thread_count });
 
+        var scratch_buf: [64]u8 = undefined;
+        for (tp.threads, 0..) |thread, i| try thread.setName(try std.fmt.bufPrint(&scratch_buf, "thread_pool[{}]", .{i}));
+
         return .{
             .allocator = allocator,
             .thread_pool = tp,

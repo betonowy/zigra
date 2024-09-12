@@ -26,6 +26,8 @@ pub fn runInit(_: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
 
     const ctx = ctx_base.parent(zigra.Context);
 
+    try runLean(ctx, .camera, .systemInit);
+    try runLean(ctx, .audio, .systemInit);
     try runLean(ctx, .net, .systemInit);
     try runLean(ctx, .window, .systemInit);
     try runLean(ctx, .world, .systemInit);
@@ -46,6 +48,7 @@ pub fn runDeinit(_: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     try runLean(ctx, .world, .systemDeinit);
     try runLean(ctx, .window, .systemDeinit);
     try runLean(ctx, .net, .systemDeinit);
+    try runLean(ctx, .audio, .systemDeinit);
 }
 
 pub fn runLoop(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
@@ -87,6 +90,7 @@ fn runLoopTick(_: *@This(), ctx: *zigra.Context) !void {
     try run(ctx, .bodies, .tickProcessBodies);
     try run(ctx, .time, .finishTick);
     try run(ctx, .net, .tickEnd);
+    try run(ctx, .camera, .tick);
 }
 
 fn runLoopPostTicks(_: *@This(), ctx: *zigra.Context) !void {
@@ -94,6 +98,8 @@ fn runLoopPostTicks(_: *@This(), ctx: *zigra.Context) !void {
     defer t.end();
 
     try run(ctx, .vulkan, .waitForAvailableFrame);
+    try run(ctx, .camera, .update);
+    try run(ctx, .background, .render);
     try run(ctx, .world, .render);
     try run(ctx, .nuklear, .render);
     try run(ctx, .sprite_man, .render);

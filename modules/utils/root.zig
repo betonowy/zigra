@@ -11,6 +11,9 @@ pub const meta = @import("meta.zig");
 pub const cb = @import("cb.zig");
 pub const tried = @import("tried.zig");
 pub const dtors = @import("dtors.zig");
+pub const mt = @import("mt.zig");
+pub const mio = @import("mio.zig");
+pub const CLikeAllocator = @import("CLikeAllocator.zig");
 
 test {
     comptime std.testing.refAllDecls(id_containers);
@@ -19,4 +22,6 @@ test {
     comptime std.testing.refAllDecls(meta);
     comptime std.testing.refAllDecls(cb);
     comptime std.testing.refAllDecls(dtors);
+    comptime std.testing.refAllDecls(mt);
+    comptime std.testing.refAllDecls(CLikeAllocator);
 }

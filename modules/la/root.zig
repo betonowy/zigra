@@ -228,3 +228,28 @@ test "truncate" {
     const v4 = @Vector(4, f32){ 1, 2, 3, 4 };
     try std.testing.expectEqual(v2, truncate(2, v4));
 }
+
+pub fn normalizedRotation(rot: f32) f32 {
+    return fract((rot + std.math.pi) / (std.math.pi * 2)) * 2 * std.math.pi - std.math.pi;
+}
+
+test "normalizedRotation" {
+    try std.testing.expectApproxEqAbs(-std.math.pi, normalizedRotation(3 * std.math.pi), 1e-5);
+    try std.testing.expectApproxEqAbs(1, normalizedRotation(2 * std.math.pi + 1), 1e-5);
+    try std.testing.expectApproxEqAbs(-std.math.pi, normalizedRotation(std.math.pi), 1e-5);
+    try std.testing.expectApproxEqAbs(1, normalizedRotation(1), 1e-5);
+    try std.testing.expectApproxEqAbs(0, normalizedRotation(0), 1e-5);
+    try std.testing.expectApproxEqAbs(-1, normalizedRotation(-1), 1e-5);
+    try std.testing.expectApproxEqAbs(-std.math.pi, normalizedRotation(-std.math.pi), 1e-5);
+    try std.testing.expectApproxEqAbs(-1, normalizedRotation(-2 * std.math.pi - 1), 1e-5);
+    try std.testing.expectApproxEqAbs(-std.math.pi, normalizedRotation(-3 * std.math.pi), 1e-5);
+}
+
+pub fn srgbColor(T: type, r: T, g: T, b: T, a: T) @Vector(4, T) {
+    return @floatCast(@Vector(4, f32){
+        std.math.pow(f32, r, 2.2),
+        std.math.pow(f32, g, 2.2),
+        std.math.pow(f32, b, 2.2),
+        std.math.pow(f32, a, 2.2),
+    });
+}

@@ -64,7 +64,8 @@ pub const PointData = extern struct {
 };
 
 pub const BackgroundData = extern struct {
-    offset: @Vector(2, f32),
+    offset: @Vector(2, i16),
+    ratio: @Vector(2, f16),
     uv_ul: @Vector(2, u16),
     uv_sz: @Vector(2, u16),
     color_top: @Vector(4, u8),

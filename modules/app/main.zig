@@ -16,5 +16,6 @@ pub fn main() !void {
 
     try ctx.systems.sequencer.runInit(&ctx.base);
     while (!ctx.systems.window.quit_requested) try ctx.systems.sequencer.runLoop(&ctx.base);
+    // try ctx.systems.sequencer.runLoop(&ctx.base);
     try ctx.systems.sequencer.runDeinit(&ctx.base);
 }

@@ -3,6 +3,7 @@ const std = @import("std");
 const systems = @import("../systems.zig");
 const lifetime = @import("lifetime");
 const zigra = @import("../root.zig");
+const la = @import("la");
 
 const prototypes = @import("../prototypes.zig");
 
@@ -33,6 +34,49 @@ pub fn systemInit(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void
     }
 
     self.id_channel = try ctx.systems.net.registerChannel(systems.Net.Channel.init(self));
+
+    const id_sound = ctx.systems.audio.streams_slut.get("music/t01.ogg") orelse unreachable;
+    try ctx.systems.audio.mixer.playMusic(id_sound);
+
+    _ = try ctx.systems.background.createId(.{
+        .id_vk_sprite = ctx.systems.vulkan.impl.atlas.getRectIdByPath("images/mountains/full_00.png"),
+        .top_gradient = la.srgbColor(f16, 1.0 / 255.0, 17.0 / 255.0, 38.0 / 255.0, 1),
+        .bottom_gradient = la.srgbColor(f16, 170.0 / 255.0, 174.0 / 255.0, 203.0 / 255.0, 1),
+        .camera_influence = .{ 0.2, 0.2 },
+        .offset = .{ 0, 80 },
+        .depth = 1,
+    });
+
+    _ = try ctx.systems.background.createId(.{
+        .id_vk_sprite = ctx.systems.vulkan.impl.atlas.getRectIdByPath("images/mountains/cut_01.png"),
+        .bottom_gradient = la.srgbColor(f16, 123.0 / 255.0, 126.0 / 255.0, 154.0 / 255.0, 1),
+        .camera_influence = .{ 0.3, 0.3 },
+        .depth = 1,
+    });
+
+    _ = try ctx.systems.background.createId(.{
+        .id_vk_sprite = ctx.systems.vulkan.impl.atlas.getRectIdByPath("images/mountains/cut_02.png"),
+        .bottom_gradient = la.srgbColor(f16, 91.0 / 255.0, 95.0 / 255.0, 121.0 / 255.0, 1),
+        .camera_influence = .{ 0.35, 0.35 },
+        .offset = .{ 0, 60 },
+        .depth = 1,
+    });
+
+    _ = try ctx.systems.background.createId(.{
+        .id_vk_sprite = ctx.systems.vulkan.impl.atlas.getRectIdByPath("images/mountains/cut_03.png"),
+        .bottom_gradient = la.srgbColor(f16, 64.0 / 255.0, 68.0 / 255.0, 92.0 / 255.0, 1),
+        .camera_influence = .{ 0.4, 0.4 },
+        .offset = .{ 0, 80 },
+        .depth = 1,
+    });
+
+    _ = try ctx.systems.background.createId(.{
+        .id_vk_sprite = ctx.systems.vulkan.impl.atlas.getRectIdByPath("images/mountains/cut_04.png"),
+        .bottom_gradient = la.srgbColor(f16, 32.0 / 255.0, 30.0 / 255.0, 52.0 / 255.0, 1),
+        .camera_influence = .{ 0.45, 0.45 },
+        .offset = .{ 0, 100 },
+        .depth = 1,
+    });
 }
 
 pub fn systemDeinit(_: *@This(), _: *lifetime.ContextBase) anyerror!void {}
@@ -50,13 +94,31 @@ pub fn tickProcess(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!voi
     }
 
     try self.removeSleepingBodies(ctx);
+
+    switch (ctx.systems.camera.target) {
+        .entity => {},
+        else => {
+            if (self.active_bodies.items.len == 0) return;
+
+            const id = self.active_bodies.items[0];
+            const body = ctx.systems.bodies.bodies.getById(id);
+
+            const id_entity = switch (body.*) {
+                .point => |p| p.id_entity,
+                .rigid => |r| r.id_entity,
+                .character => unreachable,
+            };
+
+            ctx.systems.camera.setTarget(.{ .id_entity = .{ .id = id_entity, .ctx = ctx } });
+        },
+    }
 }
 
 fn pushCrateBatch(self: *@This(), ctx: *zigra.Context, count: usize) !void {
     for (0..count) |_| {
         const random_vel_chunk: @Vector(2, f32) = .{
-            self.rand.random().floatNorm(f32) * 40,
-            (self.rand.random().floatNorm(f32) + 1) * -40,
+            self.rand.random().floatNorm(f32) * 80,
+            (self.rand.random().floatNorm(f32) + 1) * -80,
         };
 
         const entity_id = try prototypes.Crate.default(ctx, .{ 0, 0 }, random_vel_chunk);
@@ -69,8 +131,8 @@ fn pushCrateBatch(self: *@This(), ctx: *zigra.Context, count: usize) !void {
 fn pushChunkBatch(self: *@This(), ctx: *zigra.Context, count: usize) !void {
     for (0..count) |_| {
         const random_vel_chunk: @Vector(2, f32) = .{
-            self.rand.random().floatNorm(f32) * 40,
-            (self.rand.random().floatNorm(f32) + 1) * -40,
+            self.rand.random().floatNorm(f32) * 80,
+            (self.rand.random().floatNorm(f32) + 1) * -80,
         };
 
         const entity_id = try prototypes.Chunk.default(ctx, .{ 0, 0 }, random_vel_chunk);

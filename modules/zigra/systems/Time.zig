@@ -40,7 +40,11 @@ perf_internal: struct {
     index_extent: usize = 0,
 } = .{},
 
-cfg_minimum_checkpoint_delay_ns: u64 = if (options.lock_fps) |fps| 1000.0 / fps * std.time.ns_per_ms else 1 * std.time.ns_per_ms,
+cfg_minimum_checkpoint_delay_ns: u64 =
+    if (options.lock_fps) |fps|
+        @intFromFloat(1000.0 / fps * std.time.ns_per_ms)
+    else
+        1 * std.time.ns_per_ms,
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
     return .{

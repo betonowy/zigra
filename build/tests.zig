@@ -8,7 +8,7 @@ pub fn addParentInstallStep(b: *std.Build) *std.Build.Step {
     return b.step("test-install", "Install all tests");
 }
 
-pub const Ctx = struct {
+pub const Ctx = struct { //
     b: *std.Build,
     step_run: *std.Build.Step,
     step_install: *std.Build.Step,
@@ -22,6 +22,7 @@ pub fn addTest(
     name: []const u8,
     file: []const u8,
     dep_source: *std.Build.Module,
+    opts: struct { tsan: ?bool = null, use_llvm: ?bool = null },
 ) void {
     if (ctx.test_only) |match| if (!std.mem.eql(u8, match, name)) return;
 
@@ -30,6 +31,8 @@ pub fn addTest(
         .root_source_file = ctx.b.path(file),
         .optimize = ctx.optimize,
         .target = ctx.target,
+        .sanitize_thread = opts.tsan orelse false,
+        .use_llvm = opts.use_llvm orelse true,
     });
 
     if (dep_source.link_libc) |flag| if (flag) exe.linkLibC();

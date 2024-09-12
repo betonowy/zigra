@@ -22,6 +22,8 @@ pub fn module(
 
     mod.addImport("options", tracy_options.createModule());
 
+    if (!options.enable_tracy) return mod;
+
     const dep_tracy = b.dependency("tracy", .{});
     mod.addIncludePath(dep_tracy.path("public"));
 
@@ -30,8 +32,10 @@ pub fn module(
     else
         &[_][]const u8{ "-DTRACY_ENABLE=1", "-fno-sanitize=undefined" };
 
-    mod.addCSourceFile(.{ .file = dep_tracy.path("public/TracyClient.cpp"), .flags = tracy_c_flags });
-
+    mod.addCSourceFile(.{
+        .file = dep_tracy.path("public/TracyClient.cpp"),
+        .flags = tracy_c_flags,
+    });
     if (options.target.result.os.tag == .windows) {
         mod.linkSystemLibrary("dbghelp", .{});
         mod.linkSystemLibrary("ws2_32", .{});

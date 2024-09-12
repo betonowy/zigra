@@ -9,6 +9,9 @@ pub const Entities = @import("systems/Entities.zig");
 pub const Transform = @import("systems/Transform.zig");
 pub const Bodies = @import("systems/Bodies.zig");
 pub const Net = @import("systems/Net.zig");
+pub const Audio = @import("systems/Audio.zig");
+pub const Camera = @import("systems/Camera.zig");
+pub const Background = @import("systems/Background.zig");
 
 pub const Sequencer = @import("systems/Sequencer.zig");
 pub const Playground = @import("systems/Playground.zig");

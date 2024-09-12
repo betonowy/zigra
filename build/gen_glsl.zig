@@ -14,7 +14,7 @@ fn make(build_step: *std.Build.Step, make_options: std.Build.Step.MakeOptions) a
     defer build_step.result_duration_ns = timer.read();
 
     const b = build_step.owner;
-    var node = make_options.progress_node.start("Generating glsl code from zig types", 0);
+    var node = make_options.progress_node.start("Generating glsl code from zig types", 3);
     defer make_options.progress_node.end();
 
     var arena = std.heap.ArenaAllocator.init(b.allocator);
@@ -23,8 +23,13 @@ fn make(build_step: *std.Build.Step, make_options: std.Build.Step.MakeOptions) a
     build_step.result_cached = true;
 
     if (try genPushConstant(b, types.BasicPushConstant, &arena, &node)) build_step.result_cached = false;
+    node.completeOne();
+
     if (try genPushConstant(b, types.TextPushConstant, &arena, &node)) build_step.result_cached = false;
+    node.completeOne();
+
     if (try genLandscapeCells(b, &arena, &node)) build_step.result_cached = false;
+    node.completeOne();
 }
 
 const GlslField = struct {

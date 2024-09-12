@@ -281,6 +281,7 @@ fn processBodyRigid(
     var b_next = b_curr.*;
 
     defer {
+        t_next.rot = la.normalizedRotation(t_next.rot);
         t_curr.* = t_next;
         b_curr.* = b_next;
     }

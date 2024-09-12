@@ -17,6 +17,9 @@ pub const Modules = struct {
     transform: systems.Transform,
     bodies: systems.Bodies,
     net: systems.Net,
+    audio: systems.Audio,
+    camera: systems.Camera,
+    background: systems.Background,
 };
 
 pub const Context = lifetime.Context(Modules);

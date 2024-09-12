@@ -2,6 +2,7 @@ const vk = @import("vk");
 const types = @import("types.zig");
 const std = @import("std");
 const builtin = @import("builtin");
+const VkAllocator = @import("VkAllocator.zig");
 
 const log = std.log.scoped(.Vulkan_init);
 
@@ -48,6 +49,7 @@ pub fn createVulkanInstance(
     vkb: types.BaseDispatch,
     allocator: std.mem.Allocator,
     window_callbacks: *const types.WindowCallbacks,
+    vk_allocator: VkAllocator,
 ) !vk.Instance {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
@@ -111,7 +113,7 @@ pub fn createVulkanInstance(
         },
         .enabled_layer_count = @intCast(expected_debug_layers.len),
         .pp_enabled_layer_names = &expected_debug_layers,
-    }, null);
+    }, &vk_allocator.cbs);
 }
 
 pub fn pickPhysicalDevice(

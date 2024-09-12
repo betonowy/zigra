@@ -5,13 +5,18 @@ const zigra = @import("../root.zig");
 
 pub const Entity = struct {
     deinit_fn: *const EntityDeinitFn,
+    on_deinit_loop: utils.cb.LinkedParent(EntityOnDeinitLoopFn) = .{},
 
-    pub fn deinit(self: @This(), ctx: *zigra.Context, id: u32) void {
+    pub fn deinit(self: *@This(), ctx: *zigra.Context, id: u32) void {
+        self.on_deinit_loop.callAll(.{ self, ctx, id });
         self.deinit_fn(self, ctx, id);
     }
 };
 
-const EntityDeinitFn = fn (self: Entity, ctx: *zigra.Context, id: u32) void;
+const EntityDeinitFn = fn (self: *Entity, ctx: *zigra.Context, id: u32) void;
+const EntityOnDeinitLoopFn = fn (self: *anyopaque, entity: *Entity, ctx: *zigra.Context, id: u32) void;
+
+pub const DeinitLoopNode = utils.cb.LinkedChild(EntityOnDeinitLoopFn);
 
 store: utils.IdArray(Entity),
 
