@@ -87,6 +87,7 @@ pub fn update(self: *@This(), ctx_base: *lifetime.ContextBase) !void {
     const transform = self.getCameraTransform(ctx);
     const pos = transform.visualPos(ctx.systems.time.tickDrift());
     ctx.systems.vulkan.setCameraPosition(@intFromFloat(pos));
+    ctx.systems.audio.mixer.setListenerPos(pos) catch log.warn("Failed to push setListenerPos", .{});
 }
 
 pub fn getCameraTransform(self: *@This(), ctx: *zigra.Context) *systems.Transform.Data {

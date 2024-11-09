@@ -31,9 +31,11 @@ process_samples_scratch_buf: std.ArrayList(@Vector(2, f32)),
 // handle it on its own pace without blocking.
 pub const Request = union(enum) {
     play_music: struct { id_sound: u32 },
-    play_sound: struct { id_sound: u32 },
+    play_sound: PlaySound,
     set_listener_pos: struct { pos: @Vector(2, f32) },
     set_listener_range: struct { range: f32 },
+
+    const PlaySound = struct { id_sound: u32, pos: ?@Vector(2, f32) = null, volume: f32 = 1.0 };
 };
 
 // Like requests, mixer posts events that
@@ -69,8 +71,8 @@ pub fn playMusic(self: *@This(), id_sound: u32) !void {
     try self.requests.push(.{ .play_music = .{ .id_sound = id_sound } });
 }
 
-pub fn playSound(self: *@This(), id_sound: u32) !void {
-    try self.requests.push(.{ .play_sound = .{ .id_sound = id_sound } });
+pub fn playSound(self: *@This(), play_sound: Request.PlaySound) !void {
+    try self.requests.push(.{ .play_sound = play_sound });
 }
 
 pub fn setListenerPos(self: *@This(), pos: @Vector(2, f32)) !void {
@@ -110,7 +112,7 @@ fn handlePendingRequests(self: *@This()) !void {
                 continue;
             };
 
-            channel.* = Channel.init(stream.reader(), .{});
+            channel.* = Channel.init(stream.reader(), .{ .volume = r.volume, .pos = r.pos });
         },
         .set_listener_pos => |r| self.listener_pos = r.pos,
         .set_listener_range => |r| self.listener_range = r.range,
@@ -128,7 +130,7 @@ fn processSamples(self: *@This(), samples: []@Vector(2, f32)) void {
     const scratch_samples = self.process_samples_scratch_buf.items;
 
     if (self.music) |*music| brk: {
-        music.mixSamples(.replace, samples, scratch_samples, .{ 0, 0 }, self.listener_range);
+        music.mixSamples(.replace, samples, scratch_samples, .{ 0, 0 }, 1 / self.listener_range);
         if (!music.isFinished()) break :brk;
 
         // TODO think about what id here is useful
@@ -141,7 +143,7 @@ fn processSamples(self: *@This(), samples: []@Vector(2, f32)) void {
     }
 
     for (&self.channels) |*opt| if (opt.*) |*c| {
-        c.mixSamples(.add, samples, scratch_samples, self.listener_pos, self.listener_range);
+        c.mixSamples(.add, samples, scratch_samples, self.listener_pos, 1 / self.listener_range);
         if (!c.isFinished()) continue;
         c.deinit();
         opt.* = null;

@@ -57,9 +57,9 @@ pub fn default(ctx: *zigra.Context, pos: @Vector(2, f32), vel: @Vector(2, f32)) 
     return id_entity;
 }
 
-fn rigidBodyCollisionCb(ctx: *zigra.Context, _: *systems.Bodies.Rigid, _: @Vector(2, f32), speed: @Vector(2, f32)) anyerror!void {
+fn rigidBodyCollisionCb(ctx: *zigra.Context, _: *systems.Bodies.Rigid, pos: @Vector(2, f32), speed: @Vector(2, f32)) anyerror!void {
     const energy_threshold = 500;
-    // const energy_max_volume = 500;
+    const energy_max_volume = 5000;
 
     const static = struct {
         var next_entry: u32 = 0;
@@ -68,7 +68,7 @@ fn rigidBodyCollisionCb(ctx: *zigra.Context, _: *systems.Bodies.Rigid, _: @Vecto
     const energy = la.sqrLength(speed);
     if (energy < energy_threshold) return;
 
-    // const volume = la.clamp((energy - energy_threshold) / (energy_max_volume - energy_threshold), 0, 1);
+    const volume = la.clamp((energy - energy_threshold) / (energy_max_volume - energy_threshold), 0, 1);
 
     const sfx_ids = [_]u32{
         ctx.systems.audio.streams_slut.get("audio/wood/wood_hit_01.ogg") orelse return error.ResNotFound,
@@ -79,5 +79,5 @@ fn rigidBodyCollisionCb(ctx: *zigra.Context, _: *systems.Bodies.Rigid, _: @Vecto
 
     defer static.next_entry = if (static.next_entry + 1 == sfx_ids.len) 0 else static.next_entry + 1;
 
-    try ctx.systems.audio.mixer.playSound(sfx_ids[static.next_entry]);
+    try ctx.systems.audio.mixer.playSound(.{ .id_sound = sfx_ids[static.next_entry], .pos = pos, .volume = volume });
 }
