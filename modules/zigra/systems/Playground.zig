@@ -88,7 +88,7 @@ pub fn deinit(self: *@This()) void {
 pub fn tickProcess(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     const ctx = ctx_base.parent(zigra.Context);
 
-    if (self.active_bodies.items.len <= 10) {
+    if (self.active_bodies.items.len <= 2) {
         try self.pushCrateBatch(ctx, 1);
         try self.pushChunkBatch(ctx, 1);
     }

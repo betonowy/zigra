@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const la = @import("la");
 const zigra = @import("../root.zig");
 const systems = @import("../systems.zig");
 
@@ -12,7 +13,6 @@ fn deinit(_: *systems.Entities.Entity, ctx: *zigra.Context, id: u32) void {
 pub fn default(ctx: *zigra.Context, pos: @Vector(2, f32), vel: @Vector(2, f32)) !u32 {
     const id_entity = try ctx.systems.entities.create(&deinit);
     const id_vk_sprite = ctx.systems.vulkan.impl.atlas.getRectIdByPath("images/crate_16.png") orelse unreachable;
-    // const id_transform = try ctx.systems.transform.createId(.{ .pos = pos, .vel = vel, .rot = std.math.pi / 4.0 }, id_entity);
     const id_transform = try ctx.systems.transform.createId(.{ .pos = pos, .vel = vel }, id_entity);
 
     const id_mesh = try ctx.systems.bodies.getMeshIdForPath("res/rbm/crate.json");
@@ -51,7 +51,33 @@ pub fn default(ctx: *zigra.Context, pos: @Vector(2, f32), vel: @Vector(2, f32)) 
         .id_entity = id_entity,
         .id_mesh = id_mesh,
         .id_transform = id_transform,
+        .cb_table = .{ .terrain_collision = &rigidBodyCollisionCb },
     } }, id_entity);
 
     return id_entity;
+}
+
+fn rigidBodyCollisionCb(ctx: *zigra.Context, _: *systems.Bodies.Rigid, _: @Vector(2, f32), speed: @Vector(2, f32)) anyerror!void {
+    const energy_threshold = 500;
+    // const energy_max_volume = 500;
+
+    const static = struct {
+        var next_entry: u32 = 0;
+    };
+
+    const energy = la.sqrLength(speed);
+    if (energy < energy_threshold) return;
+
+    // const volume = la.clamp((energy - energy_threshold) / (energy_max_volume - energy_threshold), 0, 1);
+
+    const sfx_ids = [_]u32{
+        ctx.systems.audio.streams_slut.get("audio/wood/wood_hit_01.ogg") orelse return error.ResNotFound,
+        ctx.systems.audio.streams_slut.get("audio/wood/wood_hit_02.ogg") orelse return error.ResNotFound,
+        ctx.systems.audio.streams_slut.get("audio/wood/wood_hit_03.ogg") orelse return error.ResNotFound,
+        ctx.systems.audio.streams_slut.get("audio/wood/wood_hit_04.ogg") orelse return error.ResNotFound,
+    };
+
+    defer static.next_entry = if (static.next_entry + 1 == sfx_ids.len) 0 else static.next_entry + 1;
+
+    try ctx.systems.audio.mixer.playSound(sfx_ids[static.next_entry]);
 }
