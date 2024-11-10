@@ -7,7 +7,7 @@ const zigra = @import("zigra");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+    // defer _ = gpa.deinit();
 
     var ctx = try zigra.Context.init(gpa.allocator());
     defer ctx.deinit();

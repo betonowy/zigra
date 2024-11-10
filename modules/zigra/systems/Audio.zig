@@ -11,6 +11,8 @@ const res_list = @import("Audio/res_list.zig");
 const streams = @import("Audio/streams.zig");
 const Mixer = @import("Audio/Mixer.zig");
 
+const log = std.log.scoped(.Audio);
+
 allocator: std.mem.Allocator,
 device: *zaudio.Device = undefined,
 mixer: Mixer,
@@ -29,6 +31,8 @@ pub fn init(allocator: std.mem.Allocator) !@This() {
 }
 
 pub fn deinit(self: *@This()) void {
+    self.device.stop() catch log.err("Failed to stop playback device", .{});
+    self.device.destroy();
     self.mixer.deinit();
     var iterator = self.streams.iterator();
     while (iterator.next()) |stream| stream.deinit();
@@ -56,10 +60,7 @@ pub fn systemInit(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
     try self.device.start();
 }
 
-pub fn systemDeinit(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
-    try self.device.stop();
-    self.device.destroy();
-}
+pub fn systemDeinit(_: *@This(), _: *lifetime.ContextBase) anyerror!void {}
 
 pub fn loadResources(self: *@This()) !void {
     for (res_list.sounds) |sound_path| {

@@ -10,8 +10,6 @@ const prototypes = @import("../prototypes.zig");
 allocator: std.mem.Allocator,
 begin_cam: @Vector(2, i32) = undefined,
 
-active_bodies: std.ArrayList(u32),
-
 rand: std.Random.DefaultPrng,
 id_channel: u32 = undefined,
 
@@ -19,7 +17,6 @@ pub fn init(allocator: std.mem.Allocator) !@This() {
     return .{
         .allocator = allocator,
         .rand = std.Random.DefaultPrng.init(395828523321213),
-        .active_bodies = std.ArrayList(u32).init(allocator),
     };
 }
 
@@ -81,35 +78,40 @@ pub fn systemInit(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void
 
 pub fn systemDeinit(_: *@This(), _: *lifetime.ContextBase) anyerror!void {}
 
-pub fn deinit(self: *@This()) void {
-    self.active_bodies.deinit();
-}
+pub fn deinit(_: *@This()) void {}
 
 pub fn tickProcess(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     const ctx = ctx_base.parent(zigra.Context);
 
-    if (self.active_bodies.items.len <= 2) {
+    if (try self.removeSleepingBodies(ctx) <= 2) {
         try self.pushCrateBatch(ctx, 1);
         try self.pushChunkBatch(ctx, 1);
     }
 
-    try self.removeSleepingBodies(ctx);
-
     switch (ctx.systems.camera.target) {
         .entity => {},
         else => {
-            if (self.active_bodies.items.len == 0) return;
+            var iterator = ctx.systems.bodies.bodies.iterator();
 
-            const id = self.active_bodies.items[0];
-            const body = ctx.systems.bodies.bodies.getById(id);
+            const eid_opt: ?u32 = if (iterator.next()) |body| brk: {
+                switch (body.*) {
+                    else => @panic("Unimplemented"),
+                    .point => |p| break :brk p.id_entity,
+                    .rigid => |r| break :brk r.id_entity,
+                }
+            } else null;
 
-            const id_entity = switch (body.*) {
-                .point => |p| p.id_entity,
-                .rigid => |r| r.id_entity,
-                .character => unreachable,
-            };
+            if (eid_opt) |eid| {
+                const body = ctx.systems.bodies.bodies.getByEid(eid) orelse unreachable;
 
-            ctx.systems.camera.setTarget(.{ .id_entity = .{ .id = id_entity, .ctx = ctx } });
+                const id_entity = switch (body.*) {
+                    .point => |p| p.id_entity,
+                    .rigid => |r| r.id_entity,
+                    .character => unreachable,
+                };
+
+                ctx.systems.camera.setTarget(.{ .id_entity = .{ .id = id_entity, .ctx = ctx } });
+            }
         },
     }
 }
@@ -121,10 +123,7 @@ fn pushCrateBatch(self: *@This(), ctx: *zigra.Context, count: usize) !void {
             (self.rand.random().floatNorm(f32) + 1) * -80,
         };
 
-        const entity_id = try prototypes.Crate.default(ctx, .{ 0, 0 }, random_vel_chunk);
-        const body_id = ctx.systems.bodies.bodies.map.get(entity_id).?;
-
-        try self.active_bodies.append(body_id);
+        _ = try prototypes.Crate.default(ctx, .{ 0, 0 }, random_vel_chunk);
     }
 }
 
@@ -135,51 +134,45 @@ fn pushChunkBatch(self: *@This(), ctx: *zigra.Context, count: usize) !void {
             (self.rand.random().floatNorm(f32) + 1) * -80,
         };
 
-        const entity_id = try prototypes.Chunk.default(ctx, .{ 0, 0 }, random_vel_chunk);
-        const body_id = ctx.systems.bodies.bodies.map.get(entity_id).?;
-
-        try self.active_bodies.append(body_id);
+        _ = try prototypes.Chunk.default(ctx, .{ 0, 0 }, random_vel_chunk);
     }
 }
 
-fn removeSleepingBodies(self: *@This(), ctx: *zigra.Context) !void {
+fn removeSleepingBodies(self: *@This(), ctx: *zigra.Context) !usize {
     const stack_capacity = 128;
-    const IndexType = usize;
+    const IndexType = u32;
 
     var stack_fallback = std.heap.stackFallback(stack_capacity * @sizeOf(IndexType), self.allocator);
     var to_remove = std.ArrayList(IndexType).initCapacity(stack_fallback.get(), stack_capacity) catch unreachable;
     defer to_remove.deinit();
 
-    for (self.active_bodies.items, 0..) |id, i| {
-        const body = ctx.systems.bodies.bodies.getById(id);
-
+    var body_count: usize = 0;
+    var iterator = ctx.systems.bodies.bodies.arr.iterator();
+    while (iterator.next()) |body| : (body_count += 1) {
         switch (body.*) {
             else => @panic("Unimplemented"),
             .point => |p| if (p.sleeping) {
-                ctx.systems.entities.destroyEntity(ctx, p.id_entity);
-                try to_remove.append(i);
+                try to_remove.append(p.id_entity);
             } else {
                 const transform = ctx.systems.transform.data.getById(p.id_transform);
                 if (transform.pos[1] > 1000) {
-                    ctx.systems.entities.destroyEntity(ctx, p.id_entity);
-                    try to_remove.append(i);
+                    try to_remove.append(p.id_entity);
                 }
             },
             .rigid => |r| if (r.sleeping) {
-                ctx.systems.entities.destroyEntity(ctx, r.id_entity);
-                try to_remove.append(i);
+                try to_remove.append(r.id_entity);
             } else {
                 const transform = ctx.systems.transform.data.getById(r.id_transform);
                 if (transform.pos[1] > 1000) {
-                    ctx.systems.entities.destroyEntity(ctx, r.id_entity);
-                    try to_remove.append(i);
+                    try to_remove.append(r.id_entity);
                 }
             },
         }
     }
 
-    var iterator = std.mem.reverseIterator(to_remove.items);
-    while (iterator.next()) |i| _ = self.active_bodies.swapRemove(i);
+    for (to_remove.items) |eid| try ctx.systems.entities.deferDestroyEntity(eid);
+
+    return body_count;
 }
 
 pub fn netRecv(self: *@This(), ctx_base: *lifetime.ContextBase, data: []const u8) !void {

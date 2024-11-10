@@ -104,6 +104,7 @@ fn runLoopPostTicks(_: *@This(), ctx: *zigra.Context) !void {
     try run(ctx, .nuklear, .render);
     try run(ctx, .sprite_man, .render);
     try run(ctx, .vulkan, .pushProcessParallel);
+    try run(ctx, .entities, .executePendingDestructions);
 }
 
 fn run(ctx: *zigra.Context, comptime system_tag: anytype, comptime function_tag: anytype) !void {

@@ -14,9 +14,14 @@ const max_points_per_mesh = 15;
 pub const Character = struct {};
 
 pub const RigidTerrainCollisionCb = fn (*zigra.Context, *Rigid, point: @Vector(2, f32), speed: @Vector(2, f32)) anyerror!void;
+pub const PointTerrainCollisionCb = fn (*zigra.Context, *Point, point: @Vector(2, f32), speed: @Vector(2, f32)) anyerror!void;
 
 pub const RigidCbs = struct {
     terrain_collision: ?*const RigidTerrainCollisionCb = null,
+};
+
+pub const PointCbs = struct {
+    terrain_collision: ?*const PointTerrainCollisionCb = null,
 };
 
 pub const Point = struct {
@@ -30,6 +35,8 @@ pub const Point = struct {
     sleepcheck_tick: u64 = 0,
     sleepcheck_pos: @Vector(2, f32) = .{ 0, 0 },
     sleeping: bool = false,
+
+    cb_table: PointCbs = .{},
 };
 
 pub const Rigid = struct {
@@ -272,6 +279,8 @@ fn processBodyPoint(
         b_next.sleepcheck_tick = ctx.systems.time.tick_current;
         b_next.sleeping = true;
     }
+
+    if (b_next.cb_table.terrain_collision) |cb| try cb(ctx, &b_next, t_next.pos, t_next.vel);
 }
 
 fn processBodyRigid(

@@ -7,6 +7,7 @@ pub const cell_types = sand_sim_defs.cell_types;
 
 const marching = @import("marching.zig");
 const utils = @import("utils");
+const la = @import("la");
 
 pub const tile_size = 128;
 pub const tile_size_v2 = @Vector(2, i32){ tile_size, tile_size };
@@ -925,7 +926,7 @@ pub fn simulateParticles(self: *@This(), delta: f32) !void {
     while (i < self.particles.items.len) {
         const current = &self.particles.items[i];
 
-        const cell_before_move = try view.getMutable(@intFromFloat(current.pos));
+        const cell_before_move = try view.get(@intFromFloat(current.pos));
 
         if (cell_before_move.type != .air) {
             try self.spawnCell(&view, self.particles.swapRemove(i));
@@ -986,8 +987,37 @@ pub fn spawnCell(_: *@This(), view: *LandscapeView, particle: CellParticle) !voi
         return;
     }
 
-    std.log.err("Particle lost!: {any}, max_search_len: {}, origin_pos: {}", .{ particle, max_search_len, origin_pos });
-    unreachable;
+    std.log.err("Particle lost!: max_search_len: {}, origin_pos: {}", .{ max_search_len, origin_pos });
+}
+
+pub fn explode(self: *@This(), pos: @Vector(2, i32), radius: i32) !void {
+    if (radius > tile_size - 1) return error.ExplosionTooBig;
+
+    var view = self.getView();
+
+    const ul = pos - la.splat(2, radius);
+    const br = pos + la.splat(2, radius);
+
+    var y = ul[1];
+    while (y < br[1]) : (y += 1) {
+        var x = ul[0];
+        while (x < br[0]) : (x += 1) {
+            const gpos = @Vector(2, i32){ x, y };
+            const rpos = gpos - pos;
+
+            if (la.sqrLength(rpos) > radius * radius) continue;
+
+            const cell = try view.getMutable(gpos);
+
+            switch (cell.type) {
+                .solid => {
+                    cell.* = if (cell.has_bkg) cell_types.bkg else cell_types.air;
+                    (try view.getTile(gpos)).?.wakeUp(); // guaranteed at this point
+                },
+                else => {},
+            }
+        }
+    }
 }
 
 test "Minimal lifetime" {

@@ -28,7 +28,7 @@ pub fn cameraEntityDeinit(_: *systems.Entities.Entity, ctx: *zigra.Context, id: 
     ctx.systems.transform.destroyByEntityId(id);
 }
 
-pub fn targetDeinitLoopCb(node: *anyopaque, _: *systems.Entities.Entity, _: *zigra.Context, _: u32) void {
+pub fn targetDeinitLoopCb(node: *anyopaque, _: *zigra.Context, _: u32) void {
     const entity: *Target.Entity = @fieldParentPtr("node", @as(*systems.Entities.DeinitLoopNode, @alignCast(@ptrCast(node))));
     const target: *Target = @fieldParentPtr("entity", entity);
     const self: *@This() = @fieldParentPtr("target", target);

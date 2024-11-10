@@ -81,6 +81,15 @@ pub fn IdArray(T: type) type {
             return &self.getDataSlice()[id];
         }
 
+        pub fn tryAt(self: *const @This(), id: u32) ?*T {
+            const div = id / @bitSizeOf(KeyMask);
+            const mod = id % @bitSizeOf(KeyMask);
+
+            if ((self.keys[div] & (@as(KeyMask, 1) << @intCast(mod))) == 0) return null;
+
+            return &self.getDataSlice()[id];
+        }
+
         pub fn remove(self: *@This(), id: u32) void {
             self.setIdMask(id, false);
             self.data[id] = undefined;

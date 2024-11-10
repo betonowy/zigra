@@ -51,13 +51,13 @@ pub fn default(ctx: *zigra.Context, pos: @Vector(2, f32), vel: @Vector(2, f32)) 
         .id_entity = id_entity,
         .id_mesh = id_mesh,
         .id_transform = id_transform,
-        .cb_table = .{ .terrain_collision = &rigidBodyCollisionCb },
+        .cb_table = .{ .terrain_collision = &terrainCollisionCb },
     } }, id_entity);
 
     return id_entity;
 }
 
-fn rigidBodyCollisionCb(ctx: *zigra.Context, _: *systems.Bodies.Rigid, pos: @Vector(2, f32), speed: @Vector(2, f32)) anyerror!void {
+fn terrainCollisionCb(ctx: *zigra.Context, _: *systems.Bodies.Rigid, pos: @Vector(2, f32), speed: @Vector(2, f32)) anyerror!void {
     const energy_threshold = 500;
     const energy_max_volume = 5000;
 
