@@ -303,15 +303,29 @@ fn processBodyRigid(
         b_curr.* = b_next;
     }
 
-    const acc = @Vector(2, f32){ 0, self.gravity } - la.splat(2, mesh.drag) * t_curr.vel;
+    const center_cell = try view.get(@intFromFloat(t_next.pos));
+
+    const gravity = switch (center_cell.type) {
+        .liquid => -self.gravity * 0.25,
+        else => self.gravity,
+    };
+
+    const drag = switch (center_cell.type) {
+        .liquid => mesh.drag * 100,
+        else => mesh.drag,
+    };
+
+    const acc = @Vector(2, f32){ 0, gravity } - la.splat(2, drag) * t_curr.vel;
     t_next.pos = integrators.verletPosition(@Vector(2, f32), t_curr.pos, t_curr.vel, acc, delay);
     t_next.vel = integrators.verletVelocity(@Vector(2, f32), t_curr.vel, acc, delay);
+    const omega = -drag * t_curr.spin;
+    t_next.spin = integrators.verletVelocity(f32, t_next.spin, omega, delay);
     t_next.rot += t_next.spin * delay;
 
     var has_hit = false;
 
     for (mesh.points.constSlice()) |p| {
-        has_hit = has_hit or try self.processBodyRigidPointCollision(view, t_curr, b_curr, &t_next, &b_next, mesh, p, delay, ctx);
+        has_hit = has_hit or try self.processBodyRigidPointCollision(view, t_curr, b_curr, &t_next, &b_next, mesh, p, delay, ctx, center_cell.type == .liquid);
     }
 
     if (!has_hit) return;
@@ -336,6 +350,7 @@ fn processBodyRigidPointCollision(
     point: @Vector(2, f32),
     delay: f32,
     ctx: *zigra.Context,
+    is_underwater: bool,
 ) !bool {
     _ = self; // autofix
     _ = b_curr; // autofix
@@ -344,38 +359,45 @@ fn processBodyRigidPointCollision(
     const offset_curr_init = la.rotate2d(point, t_curr.rot);
     const offset_next_init = la.rotate2d(point, t_next.rot);
 
-    const vel_rel_curr_init = la.perp2d(offset_curr_init) * la.splat(2, t_curr.spin);
     const vel_rel_next_init = la.perp2d(offset_next_init) * la.splat(2, t_next.spin);
 
     const pos_curr_init = offset_curr_init + t_curr.pos;
     const pos_next_init = offset_next_init + t_next.pos;
     const pos_next_init_adjusted = pos_next_init + (pos_next_init - pos_curr_init) * la.splatT(2, f32, 0.01);
 
-    const vel_curr_init = vel_rel_curr_init + t_curr.vel;
     const vel_next_init = vel_rel_next_init + t_next.vel;
-    const msq_result = try view.intersect(pos_curr_init, pos_next_init_adjusted, solidCmp) orelse return false;
+    const msq_result = try view.intersect(pos_curr_init, pos_next_init_adjusted, solidCmp) orelse {
+        if (!is_underwater) return false;
+
+        if (b_next.sleepcheck_tick == 0) {
+            b_next.sleepcheck_tick = ctx.systems.time.tick_current;
+            return false;
+        }
+
+        if (la.length(b_next.sleepcheck_pos - t_curr.pos) > 2) {
+            b_next.sleepcheck_pos = t_curr.pos;
+            b_next.sleepcheck_tick = ctx.systems.time.tick_current;
+        }
+
+        if (b_next.sleepcheck_tick + 100 < ctx.systems.time.tick_current) {
+            b_next.sleepcheck_pos = t_curr.pos;
+            b_next.sleepcheck_tick = ctx.systems.time.tick_current;
+            b_next.sleeping = true;
+        }
+
+        return false;
+    };
 
     const hit_pos = msq_result.pos;
-    const hit_dir = msq_result.dir;
-    const hit_nor = msq_result.nor orelse {
-        std.log.info("tick {}: Fallback detection {} {d:.3}, curr: {d:.3} {d:.3}, next: {d:.3} {d:.3}", .{
-            ctx.systems.time.tick_current,
-            hit_pos,
-            hit_dir,
-            pos_curr_init,
-            vel_curr_init,
-            pos_next_init,
-            vel_next_init,
-        });
-        @panic("elo musk");
-        // t_next.vel = .{ 0, 0 };
-        // t_next.spin = 0;
-        // t_next.pos = t_curr.pos;
-        // t_next.rot = t_curr.rot;
+    const hit_nor = msq_result.nor orelse brk: {
+        if (try view.normalKernel3(hit_pos, solidCmp)) |normal| break :brk normal;
+        if (try view.normalKernel5(hit_pos, solidCmp)) |normal| break :brk normal;
 
-        // // t_next.spin = 0;
-        // b_next.sleeping = true;
-        // return true;
+        t_next.vel = .{ 0, 0 };
+        t_next.spin = 0;
+        t_next.pos = t_curr.pos;
+        t_next.rot = t_curr.rot;
+        return true;
     };
 
     {
@@ -448,6 +470,11 @@ fn processBodyRigidPointCollision(
 
         t_next.vel += vel_delta;
         t_next.spin += spin_delta;
+    }
+
+    if (b_next.sleepcheck_tick == 0) {
+        b_next.sleepcheck_tick = ctx.systems.time.tick_current;
+        return false;
     }
 
     if (la.length(b_next.sleepcheck_pos - t_curr.pos) > 2) {

@@ -575,6 +575,30 @@ pub const LandscapeView = struct {
     ) !?marching.Result {
         return marching.intersect(self, start, target, cmp_fn);
     }
+
+    pub fn normalKernel3(self: *@This(), pos: @Vector(2, f32), cmp_fn: marching.CellCompareFn) !?@Vector(2, f32) {
+        return self.normalKernelImpl(pos, cmp_fn, &[_]i32{ -1, 0, 1 });
+    }
+
+    pub fn normalKernel5(self: *@This(), pos: @Vector(2, f32), cmp_fn: marching.CellCompareFn) !?@Vector(2, f32) {
+        return self.normalKernelImpl(pos, cmp_fn, &[_]i32{ -2, -1, 0, 1, 2 });
+    }
+
+    fn normalKernelImpl(self: *@This(), pos: @Vector(2, f32), cmp_fn: marching.CellCompareFn, comptime offsets: []const i32) !?@Vector(2, f32) {
+        const ipos: @Vector(2, i32) = @intFromFloat(pos);
+
+        var normal = @Vector(2, f32){ 0, 0 };
+
+        inline for (offsets) |y| {
+            inline for (offsets) |x| {
+                const kpos = @Vector(2, i32){ x, y };
+                if (cmp_fn(try self.get(kpos + ipos)) == 0) normal += @floatFromInt(kpos);
+            }
+        }
+
+        if (@reduce(.And, normal == @Vector(2, f32){ 0, 0 })) return null;
+        return la.normalize(normal);
+    }
 };
 
 pub fn simulateCells(self: *@This()) !void {

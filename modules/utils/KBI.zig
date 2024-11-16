@@ -95,12 +95,10 @@ fn intersectImpl(k: @Vector(4, f32), pos: @Vector(2, f32), dir: @Vector(2, f32))
     const hit: @Vector(2, f32) = .{ root, line.value(root) };
 
     if (@reduce(.Add, (hit - pos) * dir) < 0) {
-        // std.log.info("Hit behind: {}", .{hit});
         return noIntersection(k, pos);
     }
 
     if ((hit[0] < 0 or hit[0] > 1 or hit[1] < 0 or hit[1] > 1)) {
-        // std.log.info("Hit outside: {}, r1: {}, r2: {}", .{ hit, @Vector(2, f32){ roots[0], line.value(roots[0]) }, @Vector(2, f32){ roots[1], line.value(roots[1]) } });
         return noIntersection(k, pos);
     }
 

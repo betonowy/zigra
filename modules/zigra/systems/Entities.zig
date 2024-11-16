@@ -30,6 +30,7 @@ pub fn init(allocator: std.mem.Allocator) !@This() {
 }
 
 pub fn deinit(self: *@This()) void {
+    self.ids_to_destroy_later.deinit();
     self.store.deinit();
 }
 

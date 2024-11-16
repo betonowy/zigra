@@ -7,7 +7,6 @@ pub fn SpScQueue(T: type) type {
         items: []T,
         head: AtomicSize align(std.atomic.cache_line) = .{ .raw = 0 },
         tail: AtomicSize align(std.atomic.cache_line) = .{ .raw = 0 },
-        cvar: std.Thread.Condition = .{},
 
         pub fn init(allocator: std.mem.Allocator, len: usize) !@This() {
             return .{ .items = try allocator.alloc(T, len) };
