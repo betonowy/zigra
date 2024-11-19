@@ -17,14 +17,14 @@ allocator: std.mem.Allocator,
 device: *zaudio.Device = undefined,
 mixer: Mixer,
 
-streams: utils.IdArray(streams.Stream),
+streams_ia: utils.IdArray(streams.Stream),
 streams_slut: std.StringHashMap(u32),
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
     zaudio.init(allocator);
     return .{
         .allocator = allocator,
-        .streams = utils.IdArray(streams.Stream).init(allocator),
+        .streams_ia = utils.IdArray(streams.Stream).init(allocator),
         .streams_slut = std.StringHashMap(u32).init(allocator),
         .mixer = try Mixer.init(allocator),
     };
@@ -34,9 +34,9 @@ pub fn deinit(self: *@This()) void {
     self.device.stop() catch log.err("Failed to stop playback device", .{});
     self.device.destroy();
     self.mixer.deinit();
-    var iterator = self.streams.iterator();
+    var iterator = self.streams_ia.iterator();
     while (iterator.next()) |stream| stream.deinit();
-    self.streams.deinit();
+    self.streams_ia.deinit();
     self.streams_slut.deinit();
     zaudio.deinit();
 }
@@ -64,12 +64,12 @@ pub fn systemDeinit(_: *@This(), _: *lifetime.ContextBase) anyerror!void {}
 
 pub fn loadResources(self: *@This()) !void {
     for (res_list.sounds) |sound_path| {
-        const id = try self.streams.put(try streams.Stream.initFromFile(self.allocator, sound_path, .{ .stream = false }));
+        const id = try self.streams_ia.put(try streams.Stream.initFromFile(self.allocator, sound_path, .{ .stream = false }));
         try self.streams_slut.put(sound_path, id);
     }
 
     for (res_list.music) |music_path| {
-        const id = try self.streams.put(try streams.Stream.initFromFile(self.allocator, music_path, .{ .stream = true }));
+        const id = try self.streams_ia.put(try streams.Stream.initFromFile(self.allocator, music_path, .{ .stream = true }));
         try self.streams_slut.put(music_path, id);
     }
 }

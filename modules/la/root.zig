@@ -79,11 +79,11 @@ pub fn fract(a: anytype) @TypeOf(a) {
 
     return switch (@typeInfo(@TypeOf(a))) {
         else => unreachable,
-        .Array,
+        .array,
         => fractMatrix(a),
-        .Vector,
-        .Float,
-        .ComptimeFloat,
+        .vector,
+        .float,
+        .comptime_float,
         => fractVectorOrScalar(a),
     };
 }

@@ -38,7 +38,7 @@ const explosion_radius = 25;
 
 fn terrainCollisionCb(ctx: *zigra.Context, point: *systems.Bodies.Point, pos: @Vector(2, f32), _: @Vector(2, f32)) anyerror!void {
     const sfx_id = ctx.systems.audio.streams_slut.get("audio/wood/small_explosion_01.ogg") orelse return error.ResNotFound;
-    try ctx.systems.audio.mixer.playSound(.{ .id_sound = sfx_id, .pos = pos });
+    ctx.systems.audio.mixer.playSound(.{ .id_sound = sfx_id, .pos = pos }) catch {};
     try ctx.systems.world.sand_sim.explode(@intFromFloat(pos), 12);
     try ctx.systems.entities.deferDestroyEntity(point.id_entity);
 }

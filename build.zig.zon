@@ -1,19 +1,19 @@
 .{
     .name = "zigra",
-    .version = "0.0.1",
-    .minimum_zig_version = "0.14.0-dev.470+7e7681813",
+    .version = "0.1.0",
+    .minimum_zig_version = "0.14.0-dev.2261+fbcb00fbb",
     .dependencies = .{
         .mach_glfw = .{
-            .url = "https://github.com/betonowy/mach-glfw/archive/326f22cecbdeacb71b1836e873a96adbd2c6af76.tar.gz",
-            .hash = "1220cdcde5cb8c8e323ebfbdcbde734ac5638bacaa5e6affabd4fbfd74fecf6eace4",
+            .url = "https://github.com/castholm/mach-glfw/archive/37478672f127ea0b09197e2eedf44c33e0104f9d.tar.gz",
+            .hash = "122063ff4f78ff0971747c14b06310ac0b8959c4866647e59fb78778cfc4e9bb000b",
         },
         .vulkan_zig = .{
-            .url = "https://github.com/Snektron/vulkan-zig/archive/18f38ef2b7ae394734bd8b28d43f120f2b9567c1.tar.gz",
-            .hash = "1220530d62adb3f7ab87bacde31c302955a5803db52e302a0c7f8e107ca03f7aeca5",
+            .url = "https://github.com/Snektron/vulkan-zig/archive/e43d635893de4c8b89d5ca8aa142984872b7e68f.tar.gz",
+            .hash = "122064f889ea10097a67fc28744fe95d0bfde9af252de147a9b90aa55cecfc30c01c",
         },
         .vulkan_headers = .{
-            .url = "https://github.com/KhronosGroup/Vulkan-Headers/archive/595c8d4794410a4e64b98dc58d27c0310d7ea2fd.tar.gz",
-            .hash = "1220dba588188c5dfba1b294785b0ed360ad1ea2e69bf7c076169cffdeec2fa2c0b4",
+            .url = "https://github.com/KhronosGroup/Vulkan-Headers/archive/f864bc6dfe6229a399566e979c16795386d0f308.tar.gz",
+            .hash = "1220a018951fce4a42f9c8e9e50c40640fd98cdfcbbd76512ca1e9d1bab665ee2556",
         },
         .tracy = .{
             .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.11.0.tar.gz",
@@ -23,7 +23,10 @@
             .url = "https://github.com/zpl-c/enet/archive/dfe906c400a2d68c61f7b5f40f51f7566503a6f6.tar.gz",
             .hash = "12204747026d010e1498a2d2a63fdf5c1d0d27a0bf8427a543e32889f025d1283acf",
         },
-        .zaudio = .{ .path = "thirdparty/zig-gamedev/libs/zaudio" },
+        .zaudio = .{
+            .url = "https://github.com/zig-gamedev/zaudio/archive/7c8a86c1b7a44b906e5de5f3ee18cdd0b8de018b.tar.gz",
+            .hash = "1220423c756c4d6f58d9465a597c2b9f982d929a56fa5ceab4b7626d0ea2685bcd6c",
+        },
     },
     .paths = .{
         "build.zig",

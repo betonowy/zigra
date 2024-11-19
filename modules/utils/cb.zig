@@ -35,9 +35,9 @@ pub fn LinkedChild(FnType: type) type {
 pub fn LinkedParent(FnType: type) type {
     const Child = LinkedChild(FnType);
 
-    const ReturnType = comptime switch (@typeInfo(@typeInfo(FnType).Fn.return_type.?)) {
-        .ErrorUnion => anyerror!void,
-        .Void => void,
+    const ReturnType = comptime switch (@typeInfo(@typeInfo(FnType).@"fn".return_type.?)) {
+        .error_union => anyerror!void,
+        .void => void,
         else => unreachable,
     };
 
@@ -58,15 +58,15 @@ pub fn LinkedParent(FnType: type) type {
                     cb_args[0] = child;
                     inline for (0..field_count) |i| cb_args[i + 1] = args[i];
 
-                    switch (@typeInfo(@typeInfo(FnType).Fn.return_type.?)) {
-                        .ErrorUnion => try @call(.auto, child.cb, cb_args),
-                        .Void => @call(.auto, child.cb, cb_args),
+                    switch (@typeInfo(@typeInfo(FnType).@"fn".return_type.?)) {
+                        .error_union => try @call(.auto, child.cb, cb_args),
+                        .void => @call(.auto, child.cb, cb_args),
                         else => unreachable,
                     }
                 } else {
-                    switch (@typeInfo(@typeInfo(FnType).Fn.return_type.?)) {
-                        .ErrorUnion => try @call(.auto, child.cb, args),
-                        .Void => @call(.auto, child.cb, args),
+                    switch (@typeInfo(@typeInfo(FnType).@"fn".return_type.?)) {
+                        .error_union => try @call(.auto, child.cb, args),
+                        .void => @call(.auto, child.cb, args),
                         else => unreachable,
                     }
                 }

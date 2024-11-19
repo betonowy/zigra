@@ -21,9 +21,9 @@ pub const Pipelines = struct {
     pipeline_gui: Pipeline = .{},
 
     descriptor_set_layout: vk.DescriptorSetLayout = .null_handle,
-    resolved_depth_format: vk.Format = .undefined,
-    resolved_depth_layout: vk.ImageLayout = .undefined,
-    resolved_depth_aspect: vk.ImageAspectFlags = .undefined,
+    resolved_depth_format: vk.Format = undefined,
+    resolved_depth_layout: vk.ImageLayout = undefined,
+    resolved_depth_aspect: vk.ImageAspectFlags = undefined,
 };
 
 pub const BasicPushConstant = extern struct {

@@ -10,7 +10,7 @@ pub fn M(x: comptime_int, y: comptime_int, T: type) type {
 
 pub fn isVector(T: type) bool {
     return switch (@typeInfo(T)) {
-        .Vector => true,
+        .vector => true,
         else => false,
     };
 }
@@ -22,7 +22,7 @@ test "isVector" {
 
 pub fn isMatrix(T: type) bool {
     return switch (@typeInfo(T)) {
-        .Array => |Array| if (Array.sentinel == null) isVector(Array.child) else false,
+        .array => |array| if (array.sentinel == null) isVector(array.child) else false,
         else => false,
     };
 }
@@ -34,7 +34,7 @@ test "isMatrix" {
 
 pub fn isScalar(T: type) bool {
     return switch (@typeInfo(T)) {
-        .Int, .Float, .ComptimeInt, .ComptimeFloat => true,
+        .int, .float, .comptime_int, .comptime_float => true,
         else => false,
     };
 }
@@ -47,7 +47,7 @@ test "isScalar" {
 
 pub fn isFloat(T: type) bool {
     return switch (@typeInfo(T)) {
-        .Float, .ComptimeFloat => true,
+        .float, .comptime_float => true,
         else => false,
     };
 }
@@ -65,8 +65,8 @@ pub fn Child(T: type) type {
     if (!isVector(T) and !isMatrix(T)) @compileError("Must be a vector or a matrix");
 
     return switch (@typeInfo(T)) {
-        .Vector => |Vector| Vector.child,
-        .Array => |Array| std.meta.Child(Array.child),
+        .vector => |vector| vector.child,
+        .array => |array| std.meta.Child(array.child),
         else => unreachable,
     };
 }
@@ -86,7 +86,7 @@ test "Child" {
 
 pub fn len(T: type) comptime_int {
     if (!isVector(T)) @compileError("Must be a vector");
-    return @typeInfo(T).Vector.len;
+    return @typeInfo(T).vector.len;
 }
 
 test "length" {
@@ -95,9 +95,9 @@ test "length" {
 
 pub fn dim(T: type) [2]comptime_int {
     if (!isMatrix(T)) @compileError("Must be a matrix");
-    const Array = @typeInfo(T).Array;
-    const Vector = @typeInfo(Array.child).Vector;
-    return .{ Array.len, Vector.len };
+    const array = @typeInfo(T).array;
+    const vector = @typeInfo(array.child).vector;
+    return .{ array.len, vector.len };
 }
 
 test "dim" {

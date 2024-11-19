@@ -69,8 +69,8 @@ fn toGlslTypeName(comptime T: type) []const u8 {
     comptime std.debug.assert(@alignOf(T) >= 4);
 
     return switch (@typeInfo(T)) {
-        .Int, .Float => simpleGlslName(T),
-        .Vector => |v| vectorGlslName(v),
+        .int, .float => simpleGlslName(T),
+        .vector => |v| vectorGlslName(v),
         else => unreachable,
     };
 }

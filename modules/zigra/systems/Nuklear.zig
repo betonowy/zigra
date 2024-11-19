@@ -15,7 +15,7 @@ const nk_mem_alignment = 16;
 
 allocator: std.mem.Allocator,
 nk_mem: []u8 = undefined,
-nk: nk.Context = undefined,
+nk_ctx: nk.Context = undefined,
 is_active: bool = false,
 
 window_char_cb: systems.Window.CbCharChild = .{ .cb = &windowCharCb },
@@ -48,7 +48,7 @@ pub fn systemInit(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void
         .width = &Font.textWidth,
     };
 
-    try nk.initFixed(&self.nk, self.nk_mem, &user_font);
+    try nk.initFixed(&self.nk_ctx, self.nk_mem, &user_font);
 
     self.window_char_cb.node.link(&ctx.systems.window.cb_char_root.node);
     self.window_key_cb.node.link(&ctx.systems.window.cb_key_root.node);
@@ -56,25 +56,25 @@ pub fn systemInit(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void
 
 pub fn systemDeinit(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
     self.window_char_cb.node.unlink();
-    nk.deinit(&self.nk);
+    nk.deinit(&self.nk_ctx);
     self.allocator.free(self.nk_mem);
 }
 
 pub fn inputProcess(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     const ctx = ctx_base.parent(zigra.Context);
-    nk_glfw.processInput(ctx.systems.window.window, &self.nk, self.char_buffer.constSlice(), self.key_buffer.constSlice());
+    nk_glfw.processInput(ctx.systems.window.window, &self.nk_ctx, self.char_buffer.constSlice(), self.key_buffer.constSlice());
     self.char_buffer.len = 0;
     self.key_buffer.len = 0;
 }
 
 pub fn postProcess(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
-    self.is_active = nk.hasFocus(&self.nk);
+    self.is_active = nk.hasFocus(&self.nk_ctx);
 }
 
 pub fn render(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     const ctx = ctx_base.parent(zigra.Context);
-    try nk.forEachDrawCommand(&self.nk, *zigra.Context, ctx, nk_vk.renderCallback);
-    nk.clear(&self.nk);
+    try nk.forEachDrawCommand(&self.nk_ctx, *zigra.Context, ctx, nk_vk.renderCallback);
+    nk.clear(&self.nk_ctx);
 }
 
 fn windowCharCb(cb: *anyopaque, char: u21) !void {

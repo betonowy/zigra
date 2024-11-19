@@ -187,12 +187,14 @@ pub fn tickProcessBodies(self: *@This(), ctx_base: *lifetime.ContextBase) !void 
         }
     };
 
-    const task_count = brk: {
-        const max_tasks = ctx.base.thread_pool.threads.len;
-        const key_count = self.bodies.arr.keys.len;
-        if (key_count == 0) return;
-        break :brk @min(max_tasks, @max(key_count / 2, 1));
-    };
+    // const task_count = brk: {
+    //     const max_tasks = ctx.base.thread_pool.threads.len;
+    //     const key_count = self.bodies.arr.keys.len;
+    //     if (key_count == 0) return;
+    //     break :brk @min(max_tasks, @max(key_count / 2, 1));
+    // };
+
+    const task_count = 1;
 
     const dispatch_ctx = try self.call_arena.allocator().allocWithOptions(TaskCtx, task_count, std.atomic.cache_line, null);
     var dispatch_index = std.atomic.Value(u32).init(0);

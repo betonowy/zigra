@@ -19,7 +19,7 @@ const stb = @cImport(@cInclude("stb/stb_image.h"));
 const log = std.log.scoped(.Vulkan_backend);
 
 pub const frame_data_count: u8 = 2;
-pub const frame_max_draw_commands = 0x10000;
+pub const frame_max_draw_commands = 0x100000;
 pub const frame_target_width = 320;
 pub const frame_target_height = 200;
 pub const frame_format = vk.Format.r16g16b16a16_sfloat;

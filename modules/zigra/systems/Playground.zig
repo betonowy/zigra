@@ -83,9 +83,8 @@ pub fn deinit(_: *@This()) void {}
 pub fn tickProcess(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     const ctx = ctx_base.parent(zigra.Context);
 
-    if (try self.removeSleepingBodies(ctx) <= 2) {
+    if (try self.removeSleepingBodies(ctx) < 10) {
         try self.pushCrateBatch(ctx, 1);
-        try self.pushChunkBatch(ctx, 1);
     }
 
     switch (ctx.systems.camera.target) {

@@ -79,5 +79,5 @@ fn terrainCollisionCb(ctx: *zigra.Context, _: *systems.Bodies.Rigid, pos: @Vecto
 
     defer static.next_entry = if (static.next_entry + 1 == sfx_ids.len) 0 else static.next_entry + 1;
 
-    try ctx.systems.audio.mixer.playSound(.{ .id_sound = sfx_ids[static.next_entry], .pos = pos, .volume = volume });
+    ctx.systems.audio.mixer.playSound(.{ .id_sound = sfx_ids[static.next_entry], .pos = pos, .volume = volume }) catch {};
 }

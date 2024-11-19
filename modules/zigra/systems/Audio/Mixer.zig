@@ -8,7 +8,7 @@ const streams = @import("streams.zig");
 
 const log = std.log.scoped(.Mixer);
 
-const sound_channel_count = 4;
+const sound_channel_count = 32;
 const request_queue_len = 128;
 const event_queue_len = 128;
 
@@ -97,7 +97,7 @@ fn handlePendingRequests(self: *@This()) !void {
 
     while (self.requests.pop()) |request| switch (request) {
         .play_music => |r| {
-            const stream = self.parent().streams.at(r.id_sound);
+            const stream = self.parent().streams_ia.at(r.id_sound);
             if (self.music) |*music| music.deinit();
             self.music = Channel.init(
                 stream.reader(),
@@ -105,10 +105,10 @@ fn handlePendingRequests(self: *@This()) !void {
             );
         },
         .play_sound => |r| {
-            const stream = self.parent().streams.at(r.id_sound);
+            const stream = self.parent().streams_ia.at(r.id_sound);
 
             const channel = self.getFreeChannel() orelse {
-                log.err("No free channels at the moment", .{});
+                // log.err("No free channels at the moment", .{});
                 continue;
             };
 
