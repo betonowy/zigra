@@ -2,7 +2,12 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 pub const File = struct {
-    data: []align(std.mem.page_size) const u8,
+    const SliceType = switch (implType()) {
+        .posix => []align(std.mem.page_size) const u8,
+        .windows => []const u8,
+    };
+
+    data: SliceType,
     ctx: Ctx,
 
     const Ctx = switch (implType()) {
@@ -11,9 +16,7 @@ pub const File = struct {
     };
 
     const CtxPosix = struct {};
-    const CtxWindows = struct {
-        file_handle: std.os.windows.HANDLE,
-    };
+    const CtxWindows = struct {}; // TODO Actual MIO
 
     const ImplType = enum { posix, windows };
 
@@ -44,19 +47,11 @@ pub const File = struct {
         };
     }
 
-    fn openWindows(path: []const u8, _: std.fs.File.Stat) !@This() {
-        var wpath: [std.os.windows.MAX_PATH]u16 = undefined;
-        if (path.len > std.os.windows.MAX_PATH) return error.PathTooLong;
-        for (path[0..], wpath[0..path.len]) |src, *dst| dst.* = src;
-
-        const handle = try std.os.windows.OpenFile(wpath[0..path.len], .{
-            .access_mask = std.os.windows.GENERIC_READ,
-            .creation = std.os.windows.FILE_SHARE_READ,
-            .share_access = std.os.windows.OPEN_EXISTING,
-        });
-        _ = handle; // autofix
-
-        @compileError("Unimplemented.");
+    fn openWindows(path: []const u8) !@This() { // TODO Actual MIO
+        return .{
+            .data = try std.fs.cwd().readFileAlloc(std.heap.page_allocator, path, std.math.maxInt(usize)),
+            .ctx = .{},
+        };
     }
 
     pub fn close(self: @This()) void {
@@ -70,7 +65,7 @@ pub const File = struct {
         std.posix.munmap(self.data);
     }
 
-    fn closeWindows(_: @This()) void {
-        @compileError("Unimplemented");
+    fn closeWindows(self: @This()) void { // TODO Actual MIO
+        std.heap.page_allocator.free(self.data);
     }
 };
