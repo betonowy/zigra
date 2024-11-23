@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const enet = @import("enet");
 const lifetime = @import("lifetime");
@@ -42,6 +43,8 @@ pub fn init(allocator: std.mem.Allocator) !@This() {
 }
 
 pub fn systemInit(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
+    if (builtin.os.tag == .windows) return; // This spin of ENet doesn't work on windows...
+
     const address = "127.0.0.1";
     const port = 7777;
 
@@ -56,6 +59,8 @@ pub fn systemInit(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
 }
 
 pub fn systemDeinit(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
+    if (builtin.os.tag == .windows) return; // This spin of ENet doesn't work on windows...
+
     log.info("Deinitializing", .{});
 
     switch (self.variant) {
@@ -65,6 +70,8 @@ pub fn systemDeinit(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
 }
 
 pub fn tickBegin(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
+    if (builtin.os.tag == .windows) return; // This spin of ENet doesn't work on windows...
+
     const trace = tracy.trace(@src());
     trace.end();
 
@@ -77,6 +84,8 @@ pub fn tickBegin(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void 
 }
 
 pub fn tickEnd(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
+    if (builtin.os.tag == .windows) return; // This spin of ENet doesn't work on windows...
+
     const trace = tracy.trace(@src());
     trace.end();
 

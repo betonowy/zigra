@@ -102,6 +102,11 @@ pub fn build(b: *std.Build) !void {
     exe.step.dependOn(&step_gen_spv.step);
     exe.root_module.addImport("zigra", mod_zigra);
 
+    if (target.result.os.tag == .windows) {
+        exe.linkSystemLibrary("ws2_32");
+        exe.linkSystemLibrary("winmm");
+    }
+
     b.installArtifact(exe);
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
