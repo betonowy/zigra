@@ -31,6 +31,7 @@ const SysCtxHashMap = std.StringHashMap(CallProfilingCtx);
 pub const WindowState = enum {
     Disabled,
     General,
+    Entities,
     Profiling,
     Preferences,
 };
@@ -160,7 +161,7 @@ pub fn processUi(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void 
     if (self.state == .Disabled) return;
 
     const ctx = ctx_base.parent(zigra.Context);
-    const nk_ctx = &ctx.systems.nuklear.nk;
+    const nk_ctx = &ctx.systems.nuklear.nk_ctx;
 
     if (nk.begin(
         nk_ctx,
@@ -170,6 +171,7 @@ pub fn processUi(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void 
     )) {
         nk.layoutRowStatic(nk_ctx, 20, 100, 3);
         if (self.processUi_tabButton(nk_ctx, "General", self.state == .General)) self.state = .General;
+        if (options.profiling and self.processUi_tabButton(nk_ctx, "Entities", self.state == .Profiling)) self.state = .Entities;
         if (options.profiling and self.processUi_tabButton(nk_ctx, "Systems", self.state == .Profiling)) self.state = .Profiling;
         if (self.processUi_tabButton(nk_ctx, "Preferences", self.state == .Preferences)) self.state = .Preferences;
 
@@ -179,6 +181,7 @@ pub fn processUi(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void 
         switch (self.state) {
             .General => try self.processUi_General(ctx),
             .Profiling => try self.processUi_Profiling(ctx),
+            .Entities => try self.processUi_Entities(ctx),
             .Preferences => try self.processUi_Preferences(ctx),
             .Disabled => {},
         }
@@ -199,8 +202,8 @@ fn processUi_tabButton(_: *@This(), nk_ctx: *nk.Context, title: [*:0]const u8, s
     };
 }
 
-fn processUi_General(self: *@This(), ctx: *zigra.Context) !void {
-    const nk_ctx = &ctx.systems.nuklear.nk;
+fn processUi_General(_: *@This(), ctx: *zigra.Context) !void {
+    const nk_ctx = &ctx.systems.nuklear.nk_ctx;
 
     if (nk.treeBeginHashed(nk_ctx, .node, "Performance", @src(), 0, .maximized)) {
         defer nk.treePop(nk_ctx);
@@ -217,13 +220,43 @@ fn processUi_General(self: *@This(), ctx: *zigra.Context) !void {
         nk.label(nk_ctx, try std.fmt.bufPrintZ(buf[0..], "FPS (max): {d:.1}", .{perf.fps_max}), nk.text_left);
         nk.label(nk_ctx, try std.fmt.bufPrintZ(buf[0..], "FPS (now): {d:.1}", .{perf.fps_now}), nk.text_left);
     }
+}
 
-    nk.layoutRowDynamic(nk_ctx, 20, 1);
-    nk.textField(nk_ctx, &self.text_field.buffer, &self.text_field.len);
+fn processUi_Entities(_: *@This(), ctx: *zigra.Context) !void {
+    const nk_ctx = &ctx.systems.nuklear.nk_ctx;
+
+    nk.layoutRowDynamic(nk_ctx, 10, 1);
+    nk.label(nk_ctx, "  arrayId:pc:generation:name", nk.text_left);
+    nk.layoutRowDynamic(nk_ctx, 1, 1);
+    nk.rule(nk_ctx, nk_ctx.style.text.color);
+
+    var buf: [1024]u8 = undefined;
+
+    for (0..ctx.systems.entities.store.arr.capacity, ctx.systems.entities.store.arr.data[0..]) |i, k| {
+        if (ctx.systems.entities.store.arr.tryAt(@intCast(i)) != null) {
+            if (nk.treeBeginHashed(nk_ctx, .tab, try std.fmt.bufPrintZ(
+                buf[0..],
+                "{:07}:{:02}:{x:010}:{s}",
+                .{ i, k.descriptor.player, k.descriptor.gen, k.data.vt.name },
+            ), @src(), @intCast(k.descriptor.gen), .minimized)) {
+                defer nk.treePop(nk_ctx);
+
+                nk.label(nk_ctx, try std.fmt.bufPrintZ(buf[0..], "deinit:0x{x}", .{@intFromPtr(k.data.vt.deinit_fn)}), nk.text_left);
+
+                const normal = nk.Color{ .r = 0x60, .g = 0x20, .b = 0x10, .a = 0xff };
+                const hover = nk.Color{ .r = 0x40, .g = 0x20, .b = 0x10, .a = 0xff };
+                const active = nk.Color{ .r = 0x20, .g = 0x20, .b = 0x10, .a = 0xff };
+
+                if (nk.buttonLabelColored(nk_ctx, "Destroy", normal, hover, active)) {
+                    try ctx.systems.entities.deferDestroyEntity(.{ .index = @intCast(i), .gen = k.descriptor.gen, .player = k.descriptor.player });
+                }
+            }
+        } else {}
+    }
 }
 
 fn processUi_Profiling(self: *@This(), ctx: *zigra.Context) !void {
-    const nk_ctx = &ctx.systems.nuklear.nk;
+    const nk_ctx = &ctx.systems.nuklear.nk_ctx;
 
     for (self.view_system_call_profiling_data[0..], 0..) |data, i| {
         // TODO add filter and colors for quality of life
@@ -232,7 +265,7 @@ fn processUi_Profiling(self: *@This(), ctx: *zigra.Context) !void {
 }
 
 fn processUi_Preferences(self: *@This(), ctx: *zigra.Context) !void {
-    const nk_ctx = &ctx.systems.nuklear.nk;
+    const nk_ctx = &ctx.systems.nuklear.nk_ctx;
     nk.layoutRowDynamic(nk_ctx, 0, 1);
     nk.label(nk_ctx, "Chart height", nk.text_center);
     _ = nk.sliderI32(nk_ctx, 20, &self.pref_chart_height, 200, 1);

@@ -3,15 +3,20 @@ const std = @import("std");
 const la = @import("la");
 const zigra = @import("../root.zig");
 const systems = @import("../systems.zig");
+const util = @import("utils");
 
-fn deinit(_: *systems.Entities.Entity, ctx: *zigra.Context, id: u32) void {
-    ctx.systems.sprite_man.destroyByEntityId(id);
-    ctx.systems.transform.destroyByEntityId(id);
-    ctx.systems.bodies.destroyByEntityId(id);
+fn deinit(_: *systems.Entities.Entity, ctx: *zigra.Context, uuid: util.ecs.Uuid) void {
+    ctx.systems.sprite_man.destroyByEntityUuid(uuid);
+    ctx.systems.transform.destroyByEntityUuid(uuid);
+    ctx.systems.bodies.destroyByEntityUuid(uuid);
 }
 
-pub fn default(ctx: *zigra.Context, pos: @Vector(2, f32), vel: @Vector(2, f32)) !u32 {
-    const id_entity = try ctx.systems.entities.create(&deinit);
+pub fn default(ctx: *zigra.Context, pos: @Vector(2, f32), vel: @Vector(2, f32)) !util.ecs.Uuid {
+    const id_entity = try ctx.systems.entities.create(&.{
+        .deinit_fn = &deinit,
+        .name = "crate_default",
+    });
+
     const id_vk_sprite = ctx.systems.vulkan.impl.atlas.getRectIdByPath("images/crate_16.png") orelse unreachable;
     const id_transform = try ctx.systems.transform.createId(.{ .pos = pos, .vel = vel }, id_entity);
 

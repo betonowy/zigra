@@ -4,32 +4,29 @@ const cell_types = @import("../modules/zigra/systems/World/sand_sim_definitions.
 const types = @import("../modules/zigra/systems/Vulkan/types.zig");
 
 pub fn step(b: *std.Build) *std.Build.Step {
-    var build_step = b.step("gen_glsl", "Generate glsl code");
-    build_step.makeFn = &make;
+    const build_step = b.allocator.create(std.Build.Step) catch @panic("OOM");
+    build_step.* = std.Build.Step.init(.{
+        .makeFn = &make,
+        .id = .custom,
+        .name = "gen_glsl",
+        .owner = b,
+    });
     return build_step;
 }
 
-fn make(build_step: *std.Build.Step, make_options: std.Build.Step.MakeOptions) anyerror!void {
+fn make(build_step: *std.Build.Step, _: std.Build.Step.MakeOptions) anyerror!void {
     var timer = try std.time.Timer.start();
     defer build_step.result_duration_ns = timer.read();
 
     const b = build_step.owner;
-    var node = make_options.progress_node.start("Generating glsl code from zig types", 3);
-    defer make_options.progress_node.end();
-
     var arena = std.heap.ArenaAllocator.init(b.allocator);
     defer arena.deinit();
     defer build_step.result_peak_rss = arena.queryCapacity();
     build_step.result_cached = true;
 
-    if (try genPushConstant(b, types.BasicPushConstant, &arena, &node)) build_step.result_cached = false;
-    node.completeOne();
-
-    if (try genPushConstant(b, types.TextPushConstant, &arena, &node)) build_step.result_cached = false;
-    node.completeOne();
-
-    if (try genLandscapeCells(b, &arena, &node)) build_step.result_cached = false;
-    node.completeOne();
+    if (try genPushConstant(b, types.BasicPushConstant, &arena)) build_step.result_cached = false;
+    if (try genPushConstant(b, types.TextPushConstant, &arena)) build_step.result_cached = false;
+    if (try genLandscapeCells(b, &arena)) build_step.result_cached = false;
 }
 
 const GlslField = struct {
@@ -122,10 +119,9 @@ fn replaceIfDifferent(b: *std.Build, path: []const u8, contents: []const u8, all
     return true;
 }
 
-fn genPushConstant(b: *std.Build, comptime T: type, arena: *std.heap.ArenaAllocator, node: *std.Progress.Node) !bool {
+fn genPushConstant(b: *std.Build, comptime T: type, arena: *std.heap.ArenaAllocator) !bool {
     var string = std.ArrayList(u8).init(arena.allocator());
     errdefer string.deinit();
-    defer node.completeOne();
 
     try string.appendSlice("layout(push_constant, std430) uniform PushConstant {\n");
     try appendFields(T, &string);
@@ -141,10 +137,9 @@ fn genPushConstant(b: *std.Build, comptime T: type, arena: *std.heap.ArenaAlloca
     return replaceIfDifferent(b, path, string.items, arena.allocator());
 }
 
-fn genLandscapeCells(b: *std.Build, arena: *std.heap.ArenaAllocator, node: *std.Progress.Node) !bool {
+fn genLandscapeCells(b: *std.Build, arena: *std.heap.ArenaAllocator) !bool {
     var string = std.ArrayList(u8).init(arena.allocator());
     errdefer string.deinit();
-    defer node.completeOne();
 
     const T = cell_types;
 

@@ -12,7 +12,6 @@ pub fn step(b: *std.Build, opt_gen_step: ?*std.Build.Step) *ShaderStep {
     shader_step.* = .{
         .gen_step = opt_gen_step,
         .step = std.Build.Step.init(.{
-            .first_ret_addr = @returnAddress(),
             .id = .custom,
             .makeFn = &make,
             .name = "gen_spv_zig",

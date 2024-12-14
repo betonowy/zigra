@@ -12,6 +12,9 @@ pub fn main() !void {
         .ReleaseSmall, .ReleaseFast => false,
     };
 
+    const a = 0;
+    _ = a; // autofix
+
     var gpa = if (use_zig_allocator) std.heap.GeneralPurposeAllocator(.{}){} else {};
     defer _ = if (use_zig_allocator) gpa.deinit();
 

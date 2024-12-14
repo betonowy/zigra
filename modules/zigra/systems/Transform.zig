@@ -1,5 +1,5 @@
 const std = @import("std");
-const utils = @import("utils");
+const util = @import("utils");
 const la = @import("la");
 
 const lifetime = @import("lifetime");
@@ -20,20 +20,20 @@ pub const Data = struct {
     }
 };
 
-data: utils.ExtIdMappedIdArray(Data),
+data: util.ecs.UuidContainer(Data),
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
-    return .{ .data = utils.ExtIdMappedIdArray(Data).init(allocator) };
+    return .{ .data = util.ecs.UuidContainer(Data).init(allocator) };
 }
 
 pub fn deinit(self: *@This()) void {
     self.data.deinit();
 }
 
-pub fn createId(self: *@This(), comp: Data, entity_id: u32) !u32 {
-    return try self.data.put(entity_id, comp);
+pub fn createId(self: *@This(), comp: Data, uuid: util.ecs.Uuid) !u32 {
+    return try self.data.tryPut(uuid, comp);
 }
 
-pub fn destroyByEntityId(self: *@This(), id: u32) void {
-    self.data.remove(id);
+pub fn destroyByEntityUuid(self: *@This(), uuid: util.ecs.Uuid) void {
+    self.data.remove(uuid) catch {};
 }

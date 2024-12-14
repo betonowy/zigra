@@ -14,6 +14,7 @@ pub const dtors = @import("dtors.zig");
 pub const mt = @import("mt.zig");
 pub const mio = @import("mio.zig");
 pub const CLikeAllocator = @import("CLikeAllocator.zig");
+pub const ecs = @import("ecs.zig");
 
 test {
     comptime std.testing.refAllDecls(id_containers);

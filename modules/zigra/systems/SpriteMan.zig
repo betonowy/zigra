@@ -1,5 +1,5 @@
 const std = @import("std");
-const utils = @import("utils");
+const util = @import("utils");
 const lifetime = @import("lifetime");
 const tracy = @import("tracy");
 
@@ -16,22 +16,22 @@ const SpriteRef = struct {
 
 const SpriteType = enum { Opaque, Blended };
 
-sprite_refs: utils.ExtIdMappedIdArray(SpriteRef),
+sprite_refs: util.ecs.UuidContainer(SpriteRef),
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
-    return .{ .sprite_refs = utils.ExtIdMappedIdArray(SpriteRef).init(allocator) };
+    return .{ .sprite_refs = util.ecs.UuidContainer(SpriteRef).init(allocator) };
 }
 
 pub fn deinit(self: *@This()) void {
     self.sprite_refs.deinit();
 }
 
-pub fn createId(self: *@This(), comp: SpriteRef, entity_id: u32) !u32 {
-    return try self.sprite_refs.put(entity_id, comp);
+pub fn createId(self: *@This(), comp: SpriteRef, uuid: util.ecs.Uuid) !u32 {
+    return try self.sprite_refs.tryPut(uuid, comp);
 }
 
-pub fn destroyByEntityId(self: *@This(), eid: u32) void {
-    self.sprite_refs.remove(eid);
+pub fn destroyByEntityUuid(self: *@This(), uuid: util.ecs.Uuid) void {
+    self.sprite_refs.remove(uuid) catch {};
 }
 
 pub fn render(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {

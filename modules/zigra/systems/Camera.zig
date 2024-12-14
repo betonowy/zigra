@@ -1,5 +1,5 @@
 const std = @import("std");
-const utils = @import("utils");
+const util = @import("utils");
 const la = @import("la");
 
 const systems = @import("../systems.zig");
@@ -8,7 +8,7 @@ const zigra = @import("../root.zig");
 
 const log = std.log.scoped(.Camera);
 
-id_entity: u32 = undefined,
+id_entity: util.ecs.Uuid = undefined,
 id_transform: u32 = undefined,
 
 target: Target = .null,
@@ -17,18 +17,18 @@ const attract_acc = 300;
 const look_ahead_delay = 0.66;
 
 const Target = union(enum) {
-    const Entity = struct { node: systems.Entities.DeinitLoopNode, id: u32 };
+    const Entity = struct { node: systems.Entities.DeinitLoopNode, uuid: util.ecs.Uuid };
 
     null: void,
     pos: @Vector(2, f32),
     entity: Entity,
 };
 
-pub fn cameraEntityDeinit(_: *systems.Entities.Entity, ctx: *zigra.Context, id: u32) void {
-    ctx.systems.transform.destroyByEntityId(id);
+pub fn cameraEntityDeinit(_: *systems.Entities.Entity, ctx: *zigra.Context, uuid: util.ecs.Uuid) void {
+    ctx.systems.transform.destroyByEntityUuid(uuid);
 }
 
-pub fn targetDeinitLoopCb(node: *anyopaque, _: *zigra.Context, _: u32) void {
+pub fn targetDeinitLoopCb(node: *anyopaque, _: *zigra.Context, _: util.ecs.Uuid) void {
     const entity: *Target.Entity = @fieldParentPtr("node", @as(*systems.Entities.DeinitLoopNode, @alignCast(@ptrCast(node))));
     const target: *Target = @fieldParentPtr("entity", entity);
     const self: *@This() = @fieldParentPtr("target", target);
@@ -37,7 +37,12 @@ pub fn targetDeinitLoopCb(node: *anyopaque, _: *zigra.Context, _: u32) void {
 
 pub fn systemInit(self: *@This(), ctx_base: *lifetime.ContextBase) !void {
     const ctx = ctx_base.parent(zigra.Context);
-    self.id_entity = try ctx.systems.entities.create(&cameraEntityDeinit);
+
+    self.id_entity = try ctx.systems.entities.create(&.{
+        .deinit_fn = &cameraEntityDeinit,
+        .name = "camera",
+    });
+
     self.id_transform = try ctx.systems.transform.createId(.{}, self.id_entity);
     self.target = .{ .pos = .{ 0, 0 } };
 }
@@ -51,12 +56,12 @@ pub fn tick(self: *@This(), ctx_base: *lifetime.ContextBase) !void {
     const pos_target = switch (self.target) {
         .null => transform.pos,
         .pos => |pos| pos,
-        .entity => |e| if (ctx.systems.transform.data.getByEid(e.id)) |t| t.pos else return error.InvalidEid,
+        .entity => |e| if (ctx.systems.transform.data.getByUuid(e.uuid)) |t| t.pos else return error.InvalidEid,
     };
 
     const acc_target_raw = la.splat(2, attract_acc * time_constant) * (pos_target - transform.pos);
 
-    const pos_predicted = utils.integrators.verletPosition(
+    const pos_predicted = util.integrators.verletPosition(
         @Vector(2, f32),
         transform.pos,
         transform.vel,
@@ -66,7 +71,7 @@ pub fn tick(self: *@This(), ctx_base: *lifetime.ContextBase) !void {
 
     const acc_target_corrected = la.splat(2, attract_acc * time_constant) * (pos_target - pos_predicted);
 
-    transform.pos = utils.integrators.verletPosition(
+    transform.pos = util.integrators.verletPosition(
         @Vector(2, f32),
         transform.pos,
         transform.vel,
@@ -74,7 +79,7 @@ pub fn tick(self: *@This(), ctx_base: *lifetime.ContextBase) !void {
         time_constant,
     );
 
-    transform.vel = utils.integrators.verletVelocity(
+    transform.vel = util.integrators.verletVelocity(
         @Vector(2, f32),
         transform.vel,
         acc_target_corrected + acc_target_raw,
@@ -103,7 +108,7 @@ const SetTarget = union(enum) {
     null: void,
     pos: @Vector(2, f32),
     id_entity: struct {
-        id: u32,
+        id: util.ecs.Uuid,
         ctx: *zigra.Context,
     },
 };
@@ -114,12 +119,12 @@ pub fn setTarget(self: *@This(), param: SetTarget) void {
         .null => self.target = .null,
         .pos => |pos| self.target = .{ .pos = pos },
         .id_entity => |p| {
-            const entity = p.ctx.systems.entities.store.at(p.id);
+            const entity = p.ctx.systems.entities.store.get(p.id);
             self.target = .{ .entity = .{
-                .id = p.id,
+                .uuid = p.id,
                 .node = .{ .cb = &targetDeinitLoopCb },
             } };
-            self.target.entity.node.link(&entity.on_deinit_loop);
+            self.target.entity.node.link(&entity.?.on_deinit_loop);
         },
     }
 }

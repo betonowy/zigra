@@ -1,9 +1,9 @@
 const std = @import("std");
-const utils = @import("utils");
+const util = @import("utils");
 const la = @import("la");
 const tracy = @import("tracy");
 
-const integrators = utils.integrators;
+const integrators = util.integrators;
 
 const lifetime = @import("lifetime");
 const systems = @import("../systems.zig");
@@ -25,7 +25,7 @@ pub const PointCbs = struct {
 };
 
 pub const Point = struct {
-    id_entity: u32 = 0,
+    id_entity: util.ecs.Uuid = .{},
     id_transform: u32 = 0,
 
     weight: f16 = 1,
@@ -40,7 +40,7 @@ pub const Point = struct {
 };
 
 pub const Rigid = struct {
-    id_entity: u32 = 0,
+    id_entity: util.ecs.Uuid = .{},
     id_transform: u32 = 0,
     id_mesh: u32 = 0,
 
@@ -69,18 +69,18 @@ pub const Mesh = struct {
 
 call_arena: std.heap.ArenaAllocator,
 
-meshes: utils.IdArray(Mesh),
+meshes: util.IdArray(Mesh),
 meshes_id_map: std.StringArrayHashMap(u32),
 
-bodies: utils.ExtIdMappedIdArray(Body),
+bodies: util.ecs.UuidContainer(Body),
 
 gravity: f32 = 100,
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
     return .{
         .call_arena = std.heap.ArenaAllocator.init(allocator),
-        .bodies = utils.ExtIdMappedIdArray(Body).init(allocator),
-        .meshes = utils.IdArray(Mesh).init(allocator),
+        .bodies = util.ecs.UuidContainer(Body).init(allocator),
+        .meshes = util.IdArray(Mesh).init(allocator),
         .meshes_id_map = std.StringArrayHashMap(u32).init(allocator),
     };
 }
@@ -92,12 +92,12 @@ pub fn deinit(self: *@This()) void {
     self.meshes.deinit();
 }
 
-pub fn createId(self: *@This(), comp: Body, entity_id: u32) !u32 {
-    return self.bodies.put(entity_id, comp);
+pub fn createId(self: *@This(), comp: Body, uuid: util.ecs.Uuid) !u32 {
+    return self.bodies.tryPut(uuid, comp);
 }
 
-pub fn destroyByEntityId(self: *@This(), id: u32) void {
-    self.bodies.remove(id);
+pub fn destroyByEntityUuid(self: *@This(), uuid: util.ecs.Uuid) void {
+    self.bodies.remove(uuid) catch {};
 }
 
 pub fn getMeshIdForPath(self: *@This(), path: []const u8) !u32 {
@@ -164,7 +164,7 @@ pub fn tickProcessBodies(self: *@This(), ctx_base: *lifetime.ContextBase) !void 
                             point,
                             task.delay,
                             worker_ctx,
-                        ) catch |e| utils.tried.panic(e, @errorReturnTrace()),
+                        ) catch |e| util.tried.panic(e, @errorReturnTrace()),
 
                         .rigid => |*rigid| task.self.processBodyRigid(
                             &task.view,
@@ -173,7 +173,7 @@ pub fn tickProcessBodies(self: *@This(), ctx_base: *lifetime.ContextBase) !void 
                             &task.meshes[rigid.id_mesh],
                             task.delay,
                             worker_ctx,
-                        ) catch |e| utils.tried.panic(e, @errorReturnTrace()),
+                        ) catch |e| util.tried.panic(e, @errorReturnTrace()),
 
                         else => @panic("Unimplemented"),
                     }

@@ -4,6 +4,7 @@ const systems = @import("../systems.zig");
 const lifetime = @import("lifetime");
 const zigra = @import("../root.zig");
 const la = @import("la");
+const util = @import("utils");
 
 const prototypes = @import("../prototypes.zig");
 
@@ -92,7 +93,7 @@ pub fn tickProcess(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!voi
         else => {
             var iterator = ctx.systems.bodies.bodies.iterator();
 
-            const eid_opt: ?u32 = if (iterator.next()) |body| brk: {
+            const uuid_opt: ?util.ecs.Uuid = if (iterator.next()) |body| brk: {
                 switch (body.*) {
                     else => @panic("Unimplemented"),
                     .point => |p| break :brk p.id_entity,
@@ -100,8 +101,8 @@ pub fn tickProcess(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!voi
                 }
             } else null;
 
-            if (eid_opt) |eid| {
-                const body = ctx.systems.bodies.bodies.getByEid(eid) orelse unreachable;
+            if (uuid_opt) |uuid| {
+                const body = ctx.systems.bodies.bodies.getByUuid(uuid) orelse unreachable;
 
                 const id_entity = switch (body.*) {
                     .point => |p| p.id_entity,
@@ -139,7 +140,7 @@ fn pushChunkBatch(self: *@This(), ctx: *zigra.Context, count: usize) !void {
 
 fn removeSleepingBodies(self: *@This(), ctx: *zigra.Context) !usize {
     const stack_capacity = 128;
-    const IndexType = u32;
+    const IndexType = util.ecs.Uuid;
 
     var stack_fallback = std.heap.stackFallback(stack_capacity * @sizeOf(IndexType), self.allocator);
     var to_remove = std.ArrayList(IndexType).initCapacity(stack_fallback.get(), stack_capacity) catch unreachable;
@@ -169,7 +170,7 @@ fn removeSleepingBodies(self: *@This(), ctx: *zigra.Context) !usize {
         }
     }
 
-    for (to_remove.items) |eid| try ctx.systems.entities.deferDestroyEntity(eid);
+    for (to_remove.items) |uuid| try ctx.systems.entities.deferDestroyEntity(uuid);
 
     return body_count;
 }
