@@ -46,8 +46,8 @@ pub fn deinit(self: *@This()) void {
     self.* = undefined;
 }
 
-pub fn waitForAvailableFrame(self: *@This(), m: *root.Modules) anyerror!void {
-    var t = common.systemTrace(@This(), @src(), m);
+pub fn waitForFrame(self: *@This(), _: *root.Modules) anyerror!void {
+    var t = common.systemTrace(@This(), @src(), null);
     defer t.end();
 
     self.wg_process.wait();
@@ -55,7 +55,7 @@ pub fn waitForAvailableFrame(self: *@This(), m: *root.Modules) anyerror!void {
     try self.impl.waitForFreeFrame();
 }
 
-pub fn pushProcessParallel(self: *@This(), m: *root.Modules) anyerror!void {
+pub fn schedule(self: *@This(), m: *root.Modules) anyerror!void {
     common.systemMessage(@This(), @src());
     m.thread_pool.spawnWg(&self.wg_process, process, .{ self, m });
 }

@@ -117,9 +117,9 @@ pub fn enter(self: @This(), _: *root.Sequencer, m: *root.Modules) !void {
 
 pub fn updateEnter(_: @This(), _: *root.Sequencer, m: *root.Modules) !void {
     try m.window.process(m);
-    try m.nuklear.inputProcess(m);
-    if (build_options.debug_ui) try m.debug_ui.processUi(m);
-    try m.nuklear.postProcess(m);
+    try m.nuklear.earlyProcess(m);
+    if (build_options.debug_ui) try m.debug_ui.doUi(m);
+    try m.nuklear.lateProcess(m);
 }
 
 pub fn tickEnter(_: @This(), _: *root.Sequencer, m: *root.Modules) !void {
@@ -127,9 +127,9 @@ pub fn tickEnter(_: @This(), _: *root.Sequencer, m: *root.Modules) !void {
 }
 
 pub fn tickExit(_: @This(), _: *root.Sequencer, m: *root.Modules) !void {
-    try m.world.tickProcessSandSimCells(m);
-    try m.world.tickProcessSandSimParticles(m);
-    try m.bodies.tickProcessBodies(m);
+    try m.world.tickCells(m);
+    try m.world.tickParticles(m);
+    try m.bodies.tick(m);
     try m.camera.tick(m);
     try m.net.tickEnd(m);
     m.time.finishTick(m);
@@ -137,14 +137,14 @@ pub fn tickExit(_: @This(), _: *root.Sequencer, m: *root.Modules) !void {
 
 pub fn updateExit(_: @This(), _: *root.Sequencer, m: *root.Modules) !void {
     try m.camera.update(m);
-    try m.vulkan.waitForAvailableFrame(m);
+    try m.vulkan.waitForFrame(m);
     try m.background.render(m);
     try m.world.render(m);
     try m.nuklear.render(m);
     try m.sprite_man.render(m);
-    try m.vulkan.pushProcessParallel(m);
-    try m.entities.executePendingDestructions(m);
-    if (build_options.profiling and build_options.debug_ui) try m.debug_ui.processProfilingData(m);
+    try m.vulkan.schedule(m);
+    try m.entities.pendingDeinits(m);
+    if (build_options.profiling and build_options.debug_ui) try m.debug_ui.processData(m);
     m.time.checkpoint(m);
 }
 

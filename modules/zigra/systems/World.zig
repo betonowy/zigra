@@ -37,14 +37,14 @@ pub fn deinit(self: *@This()) void {
     self.* = undefined;
 }
 
-pub fn tickProcessSandSimCells(self: *@This(), m: *root.Modules) anyerror!void {
+pub fn tickCells(self: *@This(), m: *root.Modules) anyerror!void {
     var t = common.systemTrace(@This(), @src(), m);
     defer t.end();
 
     try self.sand_sim.simulateCells();
 }
 
-pub fn tickProcessSandSimParticles(self: *@This(), m: *root.Modules) anyerror!void {
+pub fn tickParticles(self: *@This(), m: *root.Modules) anyerror!void {
     var t = common.systemTrace(@This(), @src(), m);
     defer t.end();
 

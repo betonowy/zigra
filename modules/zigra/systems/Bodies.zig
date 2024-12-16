@@ -115,7 +115,7 @@ fn solidCmp(cell: systems.World.SandSim.Cell) f32 {
     return if (cell.type == .solid) 1 else 0;
 }
 
-pub fn tickProcessBodies(self: *@This(), m: *root.Modules) !void {
+pub fn tick(self: *@This(), m: *root.Modules) !void {
     var t = common.systemTrace(@This(), @src(), m);
     defer t.end();
 

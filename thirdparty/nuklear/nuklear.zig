@@ -88,6 +88,9 @@ pub const WindowFlag = enum(u32) {
     closeable = c.NK_WINDOW_CLOSABLE,
     scalable = c.NK_WINDOW_SCALABLE,
     movable = c.NK_WINDOW_MOVABLE,
+    no_scrollbar = c.NK_WINDOW_NO_SCROLLBAR,
+    scale_left = c.NK_WINDOW_SCALE_LEFT,
+    border = c.NK_WINDOW_BORDER,
     _,
 };
 
@@ -214,6 +217,34 @@ pub fn treeBeginHashed(
     );
 }
 
+pub fn treeBeginHashedColor(
+    ctx: *Context,
+    tree_type: TreeType,
+    title: [*:0]const u8,
+    comptime src_location: std.builtin.SourceLocation,
+    id: c_int,
+    state: CollapseState,
+    base_color: Color,
+) bool {
+    if (!c.nk_style_push_style_item(ctx, &ctx.style.tab.background, c.nk_style_item_color(base_color))) unreachable;
+    if (!c.nk_style_push_style_item(ctx, &ctx.style.tab.tab_maximize_button.normal, c.nk_style_item_color(base_color))) unreachable;
+    if (!c.nk_style_push_style_item(ctx, &ctx.style.tab.tab_maximize_button.active, c.nk_style_item_color(base_color))) unreachable;
+    if (!c.nk_style_push_style_item(ctx, &ctx.style.tab.tab_maximize_button.hover, c.nk_style_item_color(base_color))) unreachable;
+    if (!c.nk_style_push_style_item(ctx, &ctx.style.tab.tab_minimize_button.normal, c.nk_style_item_color(base_color))) unreachable;
+    if (!c.nk_style_push_style_item(ctx, &ctx.style.tab.tab_minimize_button.active, c.nk_style_item_color(base_color))) unreachable;
+    if (!c.nk_style_push_style_item(ctx, &ctx.style.tab.tab_minimize_button.hover, c.nk_style_item_color(base_color))) unreachable;
+    if (!c.nk_style_push_style_item(ctx, &ctx.style.tab.node_maximize_button.normal, c.nk_style_item_color(base_color))) unreachable;
+    if (!c.nk_style_push_style_item(ctx, &ctx.style.tab.node_maximize_button.active, c.nk_style_item_color(base_color))) unreachable;
+    if (!c.nk_style_push_style_item(ctx, &ctx.style.tab.node_maximize_button.hover, c.nk_style_item_color(base_color))) unreachable;
+    if (!c.nk_style_push_style_item(ctx, &ctx.style.tab.node_minimize_button.normal, c.nk_style_item_color(base_color))) unreachable;
+    if (!c.nk_style_push_style_item(ctx, &ctx.style.tab.node_minimize_button.active, c.nk_style_item_color(base_color))) unreachable;
+    if (!c.nk_style_push_style_item(ctx, &ctx.style.tab.node_minimize_button.hover, c.nk_style_item_color(base_color))) unreachable;
+
+    defer for (0..13) |_| if (!c.nk_style_pop_style_item(ctx)) unreachable;
+
+    return treeBeginHashed(ctx, tree_type, title, src_location, id, state);
+}
+
 pub fn treePop(ctx: *Context) void {
     c.nk_tree_pop(ctx);
 }
@@ -244,6 +275,27 @@ pub fn sliderI32(ctx: *Context, min: i32, val: *i32, max: i32, step: i32) bool {
 
 pub fn radioLabel(ctx: *Context, name: [*:0]const u8, active: *bool) void {
     _ = c.nk_radio_label(ctx, name, active);
+}
+
+const Image = struct {
+    handle: usize,
+    size: @Vector(2, u16),
+    ul: ?@Vector(2, u16) = null,
+    br: ?@Vector(2, u16) = null,
+};
+
+pub fn image(ctx: *Context, img: Image) void {
+    c.nk_image(ctx, .{
+        .handle = .{ .ptr = @ptrFromInt(img.handle) },
+        .w = img.size[0],
+        .h = img.size[1],
+        .region = .{
+            if (img.ul) |ul| ul[0] else 0,
+            if (img.ul) |ul| ul[1] else 0,
+            if (img.br) |br| br[0] else img.size[0],
+            if (img.br) |br| br[1] else img.size[1],
+        },
+    });
 }
 
 pub fn clear(ctx: *Context) void {

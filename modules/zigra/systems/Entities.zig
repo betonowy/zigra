@@ -50,7 +50,7 @@ pub fn deferDestroyEntity(self: *@This(), uuid: util.ecs.Uuid) !void {
     try self.uuids_to_destroy_later.append(uuid);
 }
 
-pub fn executePendingDestructions(self: *@This(), m: *root.Modules) !void {
+pub fn pendingDeinits(self: *@This(), m: *root.Modules) !void {
     var t = common.systemTrace(@This(), @src(), m);
     defer t.end();
     for (self.uuids_to_destroy_later.items) |id| self.destroyEntity(m, id);

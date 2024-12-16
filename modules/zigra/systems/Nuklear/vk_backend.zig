@@ -2,6 +2,7 @@ const nk = @import("nuklear");
 const root = @import("../../root.zig");
 const vk_types = @import("../Vulkan/types.zig");
 const std = @import("std");
+const la = @import("la");
 
 pub fn renderCallback(nk_ctx: *nk.Context, cmd: *const nk.Command, m: *root.Modules) anyerror!void {
     switch (cmd.type) {
@@ -22,7 +23,7 @@ pub fn renderCallback(nk_ctx: *nk.Context, cmd: *const nk.Command, m: *root.Modu
         nk.command_polygon_filled => @panic("Unimplemented"),
         nk.command_polyline => @panic("Unimplemented"),
         nk.command_text => try renderText(nk_ctx, @ptrCast(cmd), m),
-        nk.command_image => @panic("Unimplemented"),
+        nk.command_image => try renderImage(nk_ctx, @ptrCast(cmd), m),
         nk.command_custom => @panic("Unimplemented"),
         else => @panic("Invalid NK draw command"),
     }
@@ -250,4 +251,40 @@ pub fn renderCircleFilled(_: *nk.Context, cmd: *const nk.CommandCircleFilled, m:
 
         try m.vulkan.pushGuiTriangle(vertices[0..]);
     }
+}
+
+pub fn renderImage(_: *nk.Context, cmd: *const nk.CommandImage, m: *root.Modules) !void {
+    const pivot: @Vector(3, f32) = .{ @floatFromInt(cmd.x), @floatFromInt(cmd.y), 0 };
+    const layout_size: @Vector(3, f32) = .{ @floatFromInt(cmd.w), @floatFromInt(cmd.h), 0 };
+    const img_size: @Vector(2, f32) = .{ @floatFromInt(cmd.img.w), @floatFromInt(cmd.img.h) };
+    const img_ul: @Vector(2, f32) = .{ @floatFromInt(cmd.img.region[0]), @floatFromInt(cmd.img.region[1]) };
+    const img_br: @Vector(2, f32) = .{ @floatFromInt(cmd.img.region[2]), @floatFromInt(cmd.img.region[3]) };
+
+    const effective_size = @min(layout_size, la.zeroExtend(3, img_size));
+
+    const vertices = [_]vk_types.VertexData{
+        .{
+            .point = pivot + effective_size * @Vector(3, f32){ 0, 0, 0 },
+            .color = .{ 1, 1, 1, 1 },
+            .uv = .{ img_ul[0], img_ul[1] },
+        },
+        .{
+            .point = pivot + effective_size * @Vector(3, f32){ 1, 0, 0 },
+            .color = .{ 1, 1, 1, 1 },
+            .uv = .{ img_br[0], img_ul[1] },
+        },
+        .{
+            .point = pivot + effective_size * @Vector(3, f32){ 0, 1, 0 },
+            .color = .{ 1, 1, 1, 1 },
+            .uv = .{ img_ul[0], img_br[1] },
+        },
+        .{
+            .point = pivot + effective_size * @Vector(3, f32){ 1, 1, 0 },
+            .color = .{ 1, 1, 1, 1 },
+            .uv = .{ img_br[0], img_br[1] },
+        },
+    };
+
+    try m.vulkan.pushGuiTriangle(vertices[0..3]);
+    try m.vulkan.pushGuiTriangle(vertices[1..4]);
 }

@@ -59,7 +59,7 @@ pub fn systemInit(self: *@This(), m: *root.Modules) anyerror!void {
     self.window_key_cb.node.link(&m.window.cb_key_root.node);
 }
 
-pub fn inputProcess(self: *@This(), m: *root.Modules) anyerror!void {
+pub fn earlyProcess(self: *@This(), m: *root.Modules) anyerror!void {
     var t = common.systemTrace(@This(), @src(), m);
     defer t.end();
 
@@ -68,7 +68,7 @@ pub fn inputProcess(self: *@This(), m: *root.Modules) anyerror!void {
     self.key_buffer.len = 0;
 }
 
-pub fn postProcess(self: *@This(), m: *root.Modules) anyerror!void {
+pub fn lateProcess(self: *@This(), m: *root.Modules) anyerror!void {
     var t = common.systemTrace(@This(), @src(), m);
     defer t.end();
 
