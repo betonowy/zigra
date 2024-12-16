@@ -2,27 +2,29 @@ const std = @import("std");
 const lifetime = @import("lifetime");
 const systems = @import("systems.zig");
 const options = @import("options");
+const util = @import("util");
+
+pub const states = @import("states.zig");
 
 pub const Modules = struct {
+    thread_pool: systems.ThreadPool = undefined,
+    time: systems.Time,
+    entities: systems.Entities,
+    audio: systems.Audio,
     window: systems.Window,
     vulkan: systems.Vulkan,
-    world: systems.World,
-    playground: systems.Playground,
-    time: systems.Time,
-    sequencer: systems.Sequencer,
-    nuklear: systems.Nuklear,
-    debug_ui: if (options.debug_ui) systems.DebugUI else systems.Null,
+    net: systems.Net,
     sprite_man: systems.SpriteMan,
-    entities: systems.Entities,
+    world: systems.World,
     transform: systems.Transform,
     bodies: systems.Bodies,
-    net: systems.Net,
-    audio: systems.Audio,
+    nuklear: systems.Nuklear,
+    debug_ui: if (options.debug_ui) systems.DebugUI else systems.Null,
     camera: systems.Camera,
     background: systems.Background,
 };
 
-pub const Context = lifetime.Context(Modules);
+pub const Sequencer = util.stack_states.Sequencer(Modules);
 
 test {
     comptime std.testing.refAllDeclsRecursive(@This());

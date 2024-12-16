@@ -1,10 +1,11 @@
 const std = @import("std");
-const utils = @import("utils");
+const utils = @import("util");
 // const la = @import("la");
 
 const zaudio = @import("zaudio");
 const lifetime = @import("lifetime");
-// const zigra = @import("../root.zig");
+const root = @import("../root.zig");
+const common = @import("common.zig");
 const tracy = @import("tracy");
 
 const res_list = @import("Audio/res_list.zig");
@@ -21,6 +22,9 @@ streams_ia: utils.IdArray(streams.Stream),
 streams_slut: std.StringHashMap(u32),
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
+    var t = common.systemTrace(@This(), @src(), null);
+    defer t.end();
+
     zaudio.init(allocator);
     return .{
         .allocator = allocator,
@@ -31,6 +35,9 @@ pub fn init(allocator: std.mem.Allocator) !@This() {
 }
 
 pub fn deinit(self: *@This()) void {
+    var t = common.systemTrace(@This(), @src(), null);
+    defer t.end();
+
     self.device.stop() catch log.err("Failed to stop playback device", .{});
     self.device.destroy();
     self.mixer.deinit();
@@ -39,9 +46,13 @@ pub fn deinit(self: *@This()) void {
     self.streams_ia.deinit();
     self.streams_slut.deinit();
     zaudio.deinit();
+    self.* = undefined;
 }
 
-pub fn systemInit(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
+pub fn zaudioInit(self: *@This()) !void {
+    var t = common.systemTrace(@This(), @src(), null);
+    defer t.end();
+
     self.device = device: {
         var config = zaudio.Device.Config.init(.playback);
         config.data_callback = audioCallback;
@@ -59,8 +70,6 @@ pub fn systemInit(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
 
     try self.device.start();
 }
-
-pub fn systemDeinit(_: *@This(), _: *lifetime.ContextBase) anyerror!void {}
 
 pub fn loadResources(self: *@This()) !void {
     for (res_list.sounds) |sound_path| {

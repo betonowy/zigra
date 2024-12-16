@@ -6,7 +6,7 @@ const vk = @import("vk");
 const types = @import("types.zig");
 const initialization = @import("init.zig");
 const builder = @import("builder.zig");
-const utils = @import("utils");
+const utils = @import("util");
 const push_commands = @import("push_commands.zig");
 const VkAllocator = @import("VkAllocator.zig");
 pub const Atlas = @import("Atlas.zig");
@@ -229,9 +229,6 @@ pub fn waitForFreeFrame(self: *@This()) !void {
 }
 
 pub fn process(self: *@This()) !void {
-    const trace = tracy.trace(@src());
-    defer trace.end();
-
     try self.vkd.resetCommandBuffer(self.frames[self.frame_index].command_buffer, .{});
     try self.vkd.beginCommandBuffer(self.frames[self.frame_index].command_buffer, &.{ .flags = .{ .one_time_submit_bit = true } });
 

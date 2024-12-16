@@ -1,7 +1,8 @@
 const std = @import("std");
-const util = @import("utils");
+const util = @import("util");
 const lifetime = @import("lifetime");
-const zigra = @import("../root.zig");
+const root = @import("../root.zig");
+const common = @import("common.zig");
 
 pub const Entity = struct {
     on_deinit_loop: util.cb.LinkedParent(OnDeinitLoopFn) = .{},
@@ -12,14 +13,14 @@ pub const Entity = struct {
         name: [:0]const u8,
     };
 
-    pub fn deinit(self: *@This(), ctx: *zigra.Context, uuid: util.ecs.Uuid) void {
-        self.on_deinit_loop.callAll(.{ ctx, uuid });
+    pub fn deinit(self: *@This(), m: *root.Modules, uuid: util.ecs.Uuid) void {
+        self.on_deinit_loop.callAll(.{ m, uuid });
         self.on_deinit_loop.node.unlink();
-        self.vt.deinit_fn(self, ctx, uuid);
+        self.vt.deinit_fn(self, m, uuid);
     }
 
-    pub const DeinitFn = fn (self: *Entity, ctx: *zigra.Context, uuid: util.ecs.Uuid) void;
-    pub const OnDeinitLoopFn = fn (self: *anyopaque, ctx: *zigra.Context, uuid: util.ecs.Uuid) void;
+    pub const DeinitFn = fn (self: *Entity, m: *root.Modules, uuid: util.ecs.Uuid) void;
+    pub const OnDeinitLoopFn = fn (self: *anyopaque, m: *root.Modules, uuid: util.ecs.Uuid) void;
 };
 
 pub const DeinitLoopNode = util.cb.LinkedChild(Entity.OnDeinitLoopFn);
@@ -40,8 +41,8 @@ pub fn deinit(self: *@This()) void {
     self.store.deinit();
 }
 
-pub fn destroyEntity(self: *@This(), ctx: *zigra.Context, uuid: util.ecs.Uuid) void {
-    (self.store.get(uuid) orelse return).deinit(ctx, uuid);
+pub fn destroyEntity(self: *@This(), m: *root.Modules, uuid: util.ecs.Uuid) void {
+    (self.store.get(uuid) orelse return).deinit(m, uuid);
     self.store.destroy(uuid) catch {};
 }
 
@@ -49,8 +50,10 @@ pub fn deferDestroyEntity(self: *@This(), uuid: util.ecs.Uuid) !void {
     try self.uuids_to_destroy_later.append(uuid);
 }
 
-pub fn executePendingDestructions(self: *@This(), ctx: *lifetime.ContextBase) !void {
-    for (self.uuids_to_destroy_later.items) |id| self.destroyEntity(ctx.parent(zigra.Context), id);
+pub fn executePendingDestructions(self: *@This(), m: *root.Modules) !void {
+    var t = common.systemTrace(@This(), @src(), m);
+    defer t.end();
+    for (self.uuids_to_destroy_later.items) |id| self.destroyEntity(m, id);
     self.uuids_to_destroy_later.clearRetainingCapacity();
 }
 

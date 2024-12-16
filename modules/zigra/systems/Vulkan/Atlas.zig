@@ -2,7 +2,7 @@ const std = @import("std");
 const vk = @import("vk");
 const types = @import("types.zig");
 const VulkanBackend = @import("Backend.zig");
-const utils = @import("utils");
+const utils = @import("util");
 
 const stb = @cImport(@cInclude("stb/stb_image.h"));
 

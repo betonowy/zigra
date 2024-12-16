@@ -1,10 +1,11 @@
 const std = @import("std");
-const util = @import("utils");
+const util = @import("util");
 const la = @import("la");
 
 const systems = @import("../systems.zig");
 const lifetime = @import("lifetime");
-const zigra = @import("../root.zig");
+const root = @import("../root.zig");
+const common = @import("common.zig");
 
 const log = std.log.scoped(.Camera);
 
@@ -24,39 +25,43 @@ const Target = union(enum) {
     entity: Entity,
 };
 
-pub fn cameraEntityDeinit(_: *systems.Entities.Entity, ctx: *zigra.Context, uuid: util.ecs.Uuid) void {
-    ctx.systems.transform.destroyByEntityUuid(uuid);
+pub fn cameraEntityDeinit(_: *systems.Entities.Entity, m: *root.Modules, uuid: util.ecs.Uuid) void {
+    m.transform.destroyByEntityUuid(uuid);
 }
 
-pub fn targetDeinitLoopCb(node: *anyopaque, _: *zigra.Context, _: util.ecs.Uuid) void {
+pub fn targetDeinitLoopCb(node: *anyopaque, _: *root.Modules, _: util.ecs.Uuid) void {
     const entity: *Target.Entity = @fieldParentPtr("node", @as(*systems.Entities.DeinitLoopNode, @alignCast(@ptrCast(node))));
     const target: *Target = @fieldParentPtr("entity", entity);
     const self: *@This() = @fieldParentPtr("target", target);
     self.target = .null;
 }
 
-pub fn systemInit(self: *@This(), ctx_base: *lifetime.ContextBase) !void {
-    const ctx = ctx_base.parent(zigra.Context);
+pub fn init(m: *root.Modules) !@This() {
+    var self = @This(){};
 
-    self.id_entity = try ctx.systems.entities.create(&.{
+    self.id_entity = try m.entities.create(&.{
         .deinit_fn = &cameraEntityDeinit,
         .name = "camera",
     });
 
-    self.id_transform = try ctx.systems.transform.createId(.{}, self.id_entity);
+    self.id_transform = try m.transform.createId(.{}, self.id_entity);
     self.target = .{ .pos = .{ 0, 0 } };
+
+    return self;
 }
 
-pub fn tick(self: *@This(), ctx_base: *lifetime.ContextBase) !void {
-    const ctx = ctx_base.parent(zigra.Context);
-    const transform = self.getCameraTransform(ctx);
+pub fn tick(self: *@This(), m: *root.Modules) !void {
+    var t = common.systemTrace(@This(), @src(), m);
+    defer t.end();
 
-    const time_constant = ctx.systems.time.tickDelay();
+    const transform = self.getCameraTransform(m);
+
+    const time_constant = m.time.tickDelay();
 
     const pos_target = switch (self.target) {
         .null => transform.pos,
         .pos => |pos| pos,
-        .entity => |e| if (ctx.systems.transform.data.getByUuid(e.uuid)) |t| t.pos else return error.InvalidEid,
+        .entity => |e| if (m.transform.data.getByUuid(e.uuid)) |tf| tf.pos else return error.InvalidEid,
     };
 
     const acc_target_raw = la.splat(2, attract_acc * time_constant) * (pos_target - transform.pos);
@@ -87,16 +92,18 @@ pub fn tick(self: *@This(), ctx_base: *lifetime.ContextBase) !void {
     );
 }
 
-pub fn update(self: *@This(), ctx_base: *lifetime.ContextBase) !void {
-    const ctx = ctx_base.parent(zigra.Context);
-    const transform = self.getCameraTransform(ctx);
-    const pos = transform.visualPos(ctx.systems.time.tickDrift());
-    ctx.systems.vulkan.setCameraPosition(@intFromFloat(pos));
-    ctx.systems.audio.mixer.setListenerPos(pos) catch log.warn("Failed to push setListenerPos", .{});
+pub fn update(self: *@This(), m: *root.Modules) !void {
+    var t = common.systemTrace(@This(), @src(), m);
+    defer t.end();
+
+    const transform = self.getCameraTransform(m);
+    const pos = transform.visualPos(m.time.tickDrift());
+    m.vulkan.setCameraPosition(@intFromFloat(pos));
+    m.audio.mixer.setListenerPos(pos) catch log.warn("Failed to push setListenerPos", .{});
 }
 
-pub fn getCameraTransform(self: *@This(), ctx: *zigra.Context) *systems.Transform.Data {
-    return ctx.systems.transform.data.getById(self.id_transform);
+pub fn getCameraTransform(self: *@This(), m: *root.Modules) *systems.Transform.Data {
+    return m.transform.data.getById(self.id_transform);
 }
 
 pub fn clearTarget(self: *@This()) void {
@@ -109,7 +116,7 @@ const SetTarget = union(enum) {
     pos: @Vector(2, f32),
     id_entity: struct {
         id: util.ecs.Uuid,
-        ctx: *zigra.Context,
+        m: *root.Modules,
     },
 };
 
@@ -119,7 +126,7 @@ pub fn setTarget(self: *@This(), param: SetTarget) void {
         .null => self.target = .null,
         .pos => |pos| self.target = .{ .pos = pos },
         .id_entity => |p| {
-            const entity = p.ctx.systems.entities.store.get(p.id);
+            const entity = p.m.entities.store.get(p.id);
             self.target = .{ .entity = .{
                 .uuid = p.id,
                 .node = .{ .cb = &targetDeinitLoopCb },

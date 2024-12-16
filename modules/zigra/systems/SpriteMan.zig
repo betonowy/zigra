@@ -1,11 +1,12 @@
 const std = @import("std");
-const util = @import("utils");
+const util = @import("util");
 const lifetime = @import("lifetime");
 const tracy = @import("tracy");
 
-const zigra = @import("../root.zig");
+const root = @import("../root.zig");
 const systems = @import("../systems.zig");
 const vk_types = @import("Vulkan/types.zig");
+const common = @import("common.zig");
 
 const SpriteRef = struct {
     type: SpriteType,
@@ -34,10 +35,12 @@ pub fn destroyByEntityUuid(self: *@This(), uuid: util.ecs.Uuid) void {
     self.sprite_refs.remove(uuid) catch {};
 }
 
-pub fn render(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
-    const ctx = ctx_base.parent(zigra.Context);
-    const time_drift = ctx.systems.time.tickDrift();
-    const transforms = ctx.systems.transform.data.arr.data;
+pub fn render(self: *@This(), m: *root.Modules) anyerror!void {
+    var t = common.systemTrace(@This(), @src(), m);
+    defer t.end();
+
+    const time_drift = m.time.tickDrift();
+    const transforms = m.transform.data.arr.data;
 
     var iterator = self.sprite_refs.iterator();
 
@@ -47,12 +50,12 @@ pub fn render(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
         const pos = transform.visualPos(time_drift);
         const rot = transform.visualRot(time_drift);
 
-        try ctx.systems.vulkan.pushCmdVertices(&createSprite(ctx, pos, -rot, depth, sprite_ref.id_vk_sprite));
+        try m.vulkan.pushCmdVertices(&createSprite(m, pos, -rot, depth, sprite_ref.id_vk_sprite));
     }
 }
 
-fn createSprite(ctx: *zigra.Context, pos: @Vector(2, f32), rot: f32, depth: f32, sprite_id: u32) [6]vk_types.VertexData {
-    const rect = ctx.systems.vulkan.impl.atlas.getRectById(sprite_id);
+fn createSprite(m: *root.Modules, pos: @Vector(2, f32), rot: f32, depth: f32, sprite_id: u32) [6]vk_types.VertexData {
+    const rect = m.vulkan.impl.atlas.getRectById(sprite_id);
 
     const cos = @cos(rot);
     const sin = @sin(rot);

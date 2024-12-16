@@ -13,17 +13,13 @@ pub const Uuid = packed struct {
     index: Index = 0,
     player: Player = 0,
     gen: Generation = 0,
-
-    pub fn asU64(self: @This()) u64 {
-        return @bitCast(self);
-    }
 };
 
 pub const UuidGenerator = struct {
     gen: std.atomic.Value(u64) = .{ .raw = 0 },
 
     pub fn next(self: *@This()) Generation {
-        return std.math.cast(u40, self.gen.fetchAdd(1, .monotonic)) orelse @panic("Gen overflows u40");
+        return std.math.cast(Generation, self.gen.fetchAdd(1, .monotonic)) orelse @panic("Gen overflow");
     }
 };
 

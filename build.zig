@@ -44,11 +44,11 @@ pub fn build(b: *std.Build) !void {
     });
 
     const mod_la = b.createModule(.{ .root_source_file = b.path("modules/la/root.zig") });
-    const mod_utils = b.createModule(.{ .root_source_file = b.path("modules/utils/root.zig") });
-    mod_utils.addImport("la", mod_la);
+    const mod_util = b.createModule(.{ .root_source_file = b.path("modules/util/root.zig") });
+    mod_util.addImport("la", mod_la);
 
     const mod_options = options.createModule();
-    const mod_stb = thirdparty.stb.module(b, mod_utils);
+    const mod_stb = thirdparty.stb.module(b, mod_util);
     const mod_nuklear = thirdparty.nuklear.module(b);
     const mod_lz4 = thirdparty.lz4.module(b);
 
@@ -79,7 +79,7 @@ pub fn build(b: *std.Build) !void {
     mod_zigra.addImport("vk", mod_vk);
     mod_zigra.addImport("options", mod_options);
     mod_zigra.addImport("nuklear", mod_nuklear);
-    mod_zigra.addImport("utils", mod_utils);
+    mod_zigra.addImport("util", mod_util);
     mod_zigra.addImport("lz4", mod_lz4);
     mod_zigra.addImport("stb", mod_stb);
     mod_zigra.addImport("lifetime", mod_lifetime);
@@ -101,6 +101,7 @@ pub fn build(b: *std.Build) !void {
 
     exe.step.dependOn(&step_gen_spv.step);
     exe.root_module.addImport("zigra", mod_zigra);
+    exe.root_module.addImport("util", mod_util);
 
     if (target.result.os.tag == .windows) {
         exe.linkSystemLibrary("ws2_32");
@@ -134,7 +135,7 @@ pub fn build(b: *std.Build) !void {
 
     tests.addTest(test_ctx, "modules-la", "modules/la/root.zig", mod_la, .{ .use_llvm = use_llvm });
     tests.addTest(test_ctx, "modules-lifetime", "modules/lifetime/lifetime.zig", mod_lifetime, .{ .use_llvm = use_llvm });
-    tests.addTest(test_ctx, "modules-utils", "modules/utils/root.zig", mod_utils, .{ .tsan = thread_sanitizer, .use_llvm = use_llvm });
+    tests.addTest(test_ctx, "modules-util", "modules/util/root.zig", mod_util, .{ .tsan = thread_sanitizer, .use_llvm = use_llvm });
     tests.addTest(test_ctx, "modules-zigra", "modules/zigra/root.zig", mod_zigra, .{ .use_llvm = use_llvm });
     tests.addTest(test_ctx, "thirdparty-lz4", "thirdparty/lz4/lz4.zig", mod_lz4, .{ .use_llvm = use_llvm });
     tests.addTest(test_ctx, "modules-enet", "modules/enet/root.zig", mod_enet, .{ .use_llvm = use_llvm });

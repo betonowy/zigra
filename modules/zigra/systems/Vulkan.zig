@@ -5,8 +5,9 @@ const types = @import("Vulkan/types.zig");
 
 const lifetime = @import("lifetime");
 const tracy = @import("tracy");
-const utils = @import("utils");
-const zigra = @import("../root.zig");
+const utils = @import("util");
+const root = @import("../root.zig");
+const common = @import("common.zig");
 
 pub const vk = @import("vk");
 pub const WindowCallbacks = types.WindowCallbacks;
@@ -16,45 +17,53 @@ impl: Backend,
 
 wg_process: std.Thread.WaitGroup,
 
-pub fn init(allocator: std.mem.Allocator) !@This() {
-    return .{
+pub fn init(allocator: std.mem.Allocator, m: *root.Modules) !@This() {
+    var t = common.systemTrace(@This(), @src(), null);
+    defer t.end();
+
+    var self = @This(){
         .allocator = allocator,
         .impl = undefined,
         .wg_process = std.Thread.WaitGroup{},
     };
-}
-
-pub fn systemInit(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
-    const ctx = ctx_base.parent(zigra.Context);
 
     self.impl = try Backend.init(
         self.allocator,
-        @as(vk.PfnGetInstanceProcAddr, @ptrCast(ctx.systems.window.pfnGetInstanceProcAddress())),
-        &ctx.systems.window.cbs_vulkan,
+        @as(vk.PfnGetInstanceProcAddr, @ptrCast(m.window.pfnGetInstanceProcAddress())),
+        &m.window.cbs_vulkan,
     );
-}
 
-pub fn systemDeinit(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
-    self.wg_process.wait();
-    self.wg_process.reset();
-    self.impl.deinit();
+    return self;
 }
 
 pub fn deinit(self: *@This()) void {
+    var t = common.systemTrace(@This(), @src(), null);
+    defer t.end();
+
+    self.wg_process.wait();
+    self.wg_process.reset();
+    self.impl.deinit();
     self.* = undefined;
 }
 
-pub fn waitForAvailableFrame(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
+pub fn waitForAvailableFrame(self: *@This(), m: *root.Modules) anyerror!void {
+    var t = common.systemTrace(@This(), @src(), m);
+    defer t.end();
+
     self.wg_process.wait();
     self.wg_process.reset();
     try self.impl.waitForFreeFrame();
 }
 
-pub fn pushProcessParallel(self: *@This(), ctx: *lifetime.ContextBase) anyerror!void {
-    ctx.thread_pool.spawnWg(&self.wg_process, process, .{ self, ctx });
+pub fn pushProcessParallel(self: *@This(), m: *root.Modules) anyerror!void {
+    common.systemMessage(@This(), @src());
+    m.thread_pool.spawnWg(&self.wg_process, process, .{ self, m });
 }
 
-pub fn process(self: *@This(), _: *lifetime.ContextBase) void {
+pub fn process(self: *@This(), m: *root.Modules) void {
+    var t = common.systemTrace(@This(), @src(), m);
+    defer t.end();
+
     self.impl.process() catch |e| utils.tried.panic(e, @errorReturnTrace());
 }
 

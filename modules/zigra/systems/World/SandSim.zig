@@ -6,7 +6,7 @@ pub const Cell = sand_sim_defs.Cell;
 pub const cell_types = sand_sim_defs.cell_types;
 
 const marching = @import("marching.zig");
-const utils = @import("utils");
+const utils = @import("util");
 const la = @import("la");
 
 pub const tile_size = 128;

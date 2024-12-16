@@ -1,5 +1,6 @@
 const std = @import("std");
 const lifetime = @import("lifetime");
+const root = @import("../root.zig");
 const options = @import("options");
 
 const cfg_ns_per_tick = 20 * std.time.ns_per_ms;
@@ -57,7 +58,7 @@ pub fn deinit(self: *@This()) void {
     self.* = undefined;
 }
 
-pub fn checkpoint(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
+pub fn checkpoint(self: *@This(), _: *root.Modules) void {
     const last_ns = self.time_ns;
     self.time_ns = self.timer_main.read();
     self.time_checkpoint_delay_ns = self.time_ns - last_ns;
@@ -80,7 +81,7 @@ pub fn checkpoint(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
     self.calculatePerfCounters();
 }
 
-pub fn ensureMinimumCheckpointTime(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
+pub fn ensureMinimumCheckpointTime(self: *@This(), _: *root.Modules) anyerror!void {
     const now_ns = self.timer_main.read();
 
     const wait_for_ns =
@@ -92,7 +93,7 @@ pub fn ensureMinimumCheckpointTime(self: *@This(), _: *lifetime.ContextBase) any
     std.time.sleep(@intCast(wait_for_ns));
 }
 
-pub fn finishTick(self: *@This(), _: *lifetime.ContextBase) !void {
+pub fn finishTick(self: *@This(), _: *root.Modules) void {
     self.tick_current += 1;
 }
 

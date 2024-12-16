@@ -2,10 +2,11 @@ const std = @import("std");
 
 const systems = @import("../systems.zig");
 const lifetime = @import("lifetime");
-const zigra = @import("../root.zig");
+const root = @import("../root.zig");
 
 const options = @import("options");
 const nk = @import("nuklear");
+const common = @import("common.zig");
 
 allocator: std.mem.Allocator,
 view_arena: std.heap.ArenaAllocator,
@@ -136,7 +137,7 @@ pub fn pushOtherProfilingData(self: *@This(), data: CallProfilingData) !void {
     }
 }
 
-pub fn processProfilingData(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
+pub fn processProfilingData(self: *@This(), _: *root.Modules) anyerror!void {
     if (!options.profiling) return error.Unimplemented;
 
     if (!self.view_arena.reset(.retain_capacity)) return error.ArenaResetFailed;
@@ -157,11 +158,13 @@ pub fn processProfilingData(self: *@This(), _: *lifetime.ContextBase) anyerror!v
     std.sort.pdq(SysCtxHashMap.Entry, self.view_system_call_profiling_data, {}, sort.ltSysCtxHashMap);
 }
 
-pub fn processUi(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
+pub fn processUi(self: *@This(), m: *root.Modules) anyerror!void {
+    var t = common.systemTrace(@This(), @src(), m);
+    defer t.end();
+
     if (self.state == .Disabled) return;
 
-    const ctx = ctx_base.parent(zigra.Context);
-    const nk_ctx = &ctx.systems.nuklear.nk_ctx;
+    const nk_ctx = &m.nuklear.nk_ctx;
 
     if (nk.begin(
         nk_ctx,
@@ -179,10 +182,10 @@ pub fn processUi(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void 
         nk.rule(nk_ctx, nk_ctx.style.text.color);
 
         switch (self.state) {
-            .General => try self.processUi_General(ctx),
-            .Profiling => try self.processUi_Profiling(ctx),
-            .Entities => try self.processUi_Entities(ctx),
-            .Preferences => try self.processUi_Preferences(ctx),
+            .General => try self.processUi_General(m),
+            .Profiling => try self.processUi_Profiling(m),
+            .Entities => try self.processUi_Entities(m),
+            .Preferences => try self.processUi_Preferences(m),
             .Disabled => {},
         }
     } else {
@@ -202,14 +205,14 @@ fn processUi_tabButton(_: *@This(), nk_ctx: *nk.Context, title: [*:0]const u8, s
     };
 }
 
-fn processUi_General(_: *@This(), ctx: *zigra.Context) !void {
-    const nk_ctx = &ctx.systems.nuklear.nk_ctx;
+fn processUi_General(_: *@This(), m: *root.Modules) !void {
+    const nk_ctx = &m.nuklear.nk_ctx;
 
     if (nk.treeBeginHashed(nk_ctx, .node, "Performance", @src(), 0, .maximized)) {
         defer nk.treePop(nk_ctx);
 
         var buf: [64]u8 = undefined;
-        const perf = ctx.systems.time.perf;
+        const perf = m.time.perf;
 
         nk.label(nk_ctx, try std.fmt.bufPrintZ(buf[0..], "Frame time (avg): {d:.1} ms", .{perf.frame_time_ms_avg}), nk.text_left);
         nk.label(nk_ctx, try std.fmt.bufPrintZ(buf[0..], "Frame time (min): {d:.1} ms", .{perf.frame_time_ms_min}), nk.text_left);
@@ -222,8 +225,8 @@ fn processUi_General(_: *@This(), ctx: *zigra.Context) !void {
     }
 }
 
-fn processUi_Entities(_: *@This(), ctx: *zigra.Context) !void {
-    const nk_ctx = &ctx.systems.nuklear.nk_ctx;
+fn processUi_Entities(_: *@This(), m: *root.Modules) !void {
+    const nk_ctx = &m.nuklear.nk_ctx;
 
     nk.layoutRowDynamic(nk_ctx, 10, 1);
     nk.label(nk_ctx, "  arrayId:pc:generation:name", nk.text_left);
@@ -232,8 +235,8 @@ fn processUi_Entities(_: *@This(), ctx: *zigra.Context) !void {
 
     var buf: [1024]u8 = undefined;
 
-    for (0..ctx.systems.entities.store.arr.capacity, ctx.systems.entities.store.arr.data[0..]) |i, k| {
-        if (ctx.systems.entities.store.arr.tryAt(@intCast(i)) != null) {
+    for (0..m.entities.store.arr.capacity, m.entities.store.arr.data[0..]) |i, k| {
+        if (m.entities.store.arr.tryAt(@intCast(i)) != null) {
             if (nk.treeBeginHashed(nk_ctx, .tab, try std.fmt.bufPrintZ(
                 buf[0..],
                 "{:07}:{:02}:{x:010}:{s}",
@@ -248,15 +251,15 @@ fn processUi_Entities(_: *@This(), ctx: *zigra.Context) !void {
                 const active = nk.Color{ .r = 0x20, .g = 0x20, .b = 0x10, .a = 0xff };
 
                 if (nk.buttonLabelColored(nk_ctx, "Destroy", normal, hover, active)) {
-                    try ctx.systems.entities.deferDestroyEntity(.{ .index = @intCast(i), .gen = k.descriptor.gen, .player = k.descriptor.player });
+                    try m.entities.deferDestroyEntity(.{ .index = @intCast(i), .gen = k.descriptor.gen, .player = k.descriptor.player });
                 }
             }
         } else {}
     }
 }
 
-fn processUi_Profiling(self: *@This(), ctx: *zigra.Context) !void {
-    const nk_ctx = &ctx.systems.nuklear.nk_ctx;
+fn processUi_Profiling(self: *@This(), m: *root.Modules) !void {
+    const nk_ctx = &m.nuklear.nk_ctx;
 
     for (self.view_system_call_profiling_data[0..], 0..) |data, i| {
         // TODO add filter and colors for quality of life
@@ -264,15 +267,15 @@ fn processUi_Profiling(self: *@This(), ctx: *zigra.Context) !void {
     }
 }
 
-fn processUi_Preferences(self: *@This(), ctx: *zigra.Context) !void {
-    const nk_ctx = &ctx.systems.nuklear.nk_ctx;
+fn processUi_Preferences(self: *@This(), m: *root.Modules) !void {
+    const nk_ctx = &m.nuklear.nk_ctx;
     nk.layoutRowDynamic(nk_ctx, 0, 1);
     nk.label(nk_ctx, "Chart height", nk.text_center);
     _ = nk.sliderI32(nk_ctx, 20, &self.pref_chart_height, 200, 1);
 
     nk.layoutRowDynamic(nk_ctx, @floatFromInt(self.pref_chart_height), 1);
     if (nk.chartBeginColored(nk_ctx, .lines, chart_base_color, chart_active_color, 10, -1, 1)) {
-        const mod = @as(f32, @floatFromInt(ctx.systems.time.time_ns)) / std.time.ns_per_s;
+        const mod = @as(f32, @floatFromInt(m.time.time_ns)) / std.time.ns_per_s;
         for (0..10) |i| nk.chartPush(nk_ctx, @sin(@as(f32, @floatFromInt(i)) + mod));
         nk.chartEnd(nk_ctx);
     }

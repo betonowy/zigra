@@ -1,9 +1,9 @@
 const std = @import("std");
-const util = @import("utils");
+const util = @import("util");
 const la = @import("la");
 
 const lifetime = @import("lifetime");
-const zigra = @import("../root.zig");
+const root = @import("../root.zig");
 
 pub const Data = struct {
     pos: @Vector(2, f32) = .{ 0, 0 },

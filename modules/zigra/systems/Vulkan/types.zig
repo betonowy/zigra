@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const utils = @import("utils");
+const utils = @import("util");
 const vk = @import("vk");
 
 pub const Pipeline = struct {

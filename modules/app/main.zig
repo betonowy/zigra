@@ -5,6 +5,14 @@ comptime {
 const std = @import("std");
 const builtin = @import("builtin");
 const zigra = @import("zigra");
+const util = @import("util");
+
+fn create(T: type, allocator: std.mem.Allocator, args: anytype) !*T {
+    const o = try allocator.create(T);
+    errdefer allocator.destroy(o);
+    o.* = try @call(.always_inline, @field(T, "init"), args);
+    return o;
+}
 
 pub fn main() !void {
     const use_zig_allocator = comptime switch (builtin.mode) {
@@ -12,20 +20,27 @@ pub fn main() !void {
         .ReleaseSmall, .ReleaseFast => false,
     };
 
-    const a = 0;
-    _ = a; // autofix
-
     var gpa = if (use_zig_allocator) std.heap.GeneralPurposeAllocator(.{}){} else {};
     defer _ = if (use_zig_allocator) gpa.deinit();
 
     const allocator = if (use_zig_allocator) gpa.allocator() else std.heap.c_allocator;
 
-    var ctx = try zigra.Context.init(allocator);
-    defer ctx.deinit();
+    const modules = try allocator.create(zigra.Modules);
+    defer allocator.destroy(modules);
 
-    std.log.scoped(.main).info("Context size in bytes: {}", .{@sizeOf(@TypeOf(ctx))});
+    var stack_sequencer = util.stack_states.Sequencer(zigra.Modules).init(allocator);
+    defer stack_sequencer.deinit();
 
-    try ctx.systems.sequencer.runInit(&ctx.base);
-    while (!ctx.systems.window.quit_requested) try ctx.systems.sequencer.runLoop(&ctx.base);
-    try ctx.systems.sequencer.runDeinit(&ctx.base);
+    const base = try zigra.states.Base.init(.{ .allocator = allocator, .resource_dir = "../res" });
+    const playground = try zigra.states.Playground.init(.{ .allocator = allocator });
+
+    try stack_sequencer.setAny(.{ base, playground });
+    while (try stack_sequencer.update(modules, 1) != .stable) {}
+
+    while (!modules.window.quit_requested) {
+        _ = try stack_sequencer.update(modules, modules.time.ticks_this_checkpoint);
+    }
+
+    try stack_sequencer.setAny(.{});
+    while (try stack_sequencer.update(modules, 1) != .stable) {}
 }

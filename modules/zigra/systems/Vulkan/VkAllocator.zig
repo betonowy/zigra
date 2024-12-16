@@ -1,6 +1,6 @@
 const std = @import("std");
 const vk = @import("vk");
-const utils = @import("utils");
+const utils = @import("util");
 const Impl = utils.CLikeAllocator;
 
 cbs: vk.AllocationCallbacks,

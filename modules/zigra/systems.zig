@@ -12,8 +12,6 @@ pub const Net = @import("systems/Net.zig");
 pub const Audio = @import("systems/Audio.zig");
 pub const Camera = @import("systems/Camera.zig");
 pub const Background = @import("systems/Background.zig");
-
-pub const Sequencer = @import("systems/Sequencer.zig");
-pub const Playground = @import("systems/Playground.zig");
+pub const ThreadPool = @import("systems/ThreadPool.zig");
 
 pub const Null = struct {};

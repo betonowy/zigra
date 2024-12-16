@@ -2,13 +2,14 @@ const std = @import("std");
 
 const systems = @import("../systems.zig");
 const lifetime = @import("lifetime");
-const zigra = @import("../root.zig");
+const root = @import("../root.zig");
 
 const nk = @import("nuklear");
 const nk_vk = @import("Nuklear/vk_backend.zig");
 const nk_glfw = @import("Nuklear/glfw_backend.zig");
 
 const glfw = @import("glfw");
+const common = @import("common.zig");
 
 const nk_max_mem = 1 * 1024 * 1024;
 const nk_mem_alignment = 16;
@@ -29,11 +30,15 @@ pub fn init(allocator: std.mem.Allocator) !@This() {
 }
 
 pub fn deinit(self: *@This()) void {
+    self.window_char_cb.node.unlink();
+    nk.deinit(&self.nk_ctx);
+    self.allocator.free(self.nk_mem);
     self.* = undefined;
 }
 
-pub fn systemInit(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
-    const ctx = ctx_base.parent(zigra.Context);
+pub fn systemInit(self: *@This(), m: *root.Modules) anyerror!void {
+    var t = common.systemTrace(@This(), @src(), null);
+    defer t.end();
 
     self.nk_mem = try self.allocator.allocWithOptions(u8, nk_max_mem, nk_mem_alignment, null);
 
@@ -50,30 +55,31 @@ pub fn systemInit(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void
 
     try nk.initFixed(&self.nk_ctx, self.nk_mem, &user_font);
 
-    self.window_char_cb.node.link(&ctx.systems.window.cb_char_root.node);
-    self.window_key_cb.node.link(&ctx.systems.window.cb_key_root.node);
+    self.window_char_cb.node.link(&m.window.cb_char_root.node);
+    self.window_key_cb.node.link(&m.window.cb_key_root.node);
 }
 
-pub fn systemDeinit(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
-    self.window_char_cb.node.unlink();
-    nk.deinit(&self.nk_ctx);
-    self.allocator.free(self.nk_mem);
-}
+pub fn inputProcess(self: *@This(), m: *root.Modules) anyerror!void {
+    var t = common.systemTrace(@This(), @src(), m);
+    defer t.end();
 
-pub fn inputProcess(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
-    const ctx = ctx_base.parent(zigra.Context);
-    nk_glfw.processInput(ctx.systems.window.window, &self.nk_ctx, self.char_buffer.constSlice(), self.key_buffer.constSlice());
+    nk_glfw.processInput(m.window.window, &self.nk_ctx, self.char_buffer.constSlice(), self.key_buffer.constSlice());
     self.char_buffer.len = 0;
     self.key_buffer.len = 0;
 }
 
-pub fn postProcess(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
+pub fn postProcess(self: *@This(), m: *root.Modules) anyerror!void {
+    var t = common.systemTrace(@This(), @src(), m);
+    defer t.end();
+
     self.is_active = nk.hasFocus(&self.nk_ctx);
 }
 
-pub fn render(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
-    const ctx = ctx_base.parent(zigra.Context);
-    try nk.forEachDrawCommand(&self.nk_ctx, *zigra.Context, ctx, nk_vk.renderCallback);
+pub fn render(self: *@This(), m: *root.Modules) anyerror!void {
+    var t = common.systemTrace(@This(), @src(), m);
+    defer t.end();
+
+    try nk.forEachDrawCommand(&self.nk_ctx, *root.Modules, m, nk_vk.renderCallback);
     nk.clear(&self.nk_ctx);
 }
 

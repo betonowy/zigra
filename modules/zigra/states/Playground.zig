@@ -1,10 +1,9 @@
 const std = @import("std");
-
+const root = @import("../root.zig");
 const systems = @import("../systems.zig");
-const lifetime = @import("lifetime");
-const zigra = @import("../root.zig");
 const la = @import("la");
-const util = @import("utils");
+const util = @import("util");
+const common = @import("common.zig");
 
 const prototypes = @import("../prototypes.zig");
 
@@ -12,32 +11,39 @@ allocator: std.mem.Allocator,
 begin_cam: @Vector(2, i32) = undefined,
 
 rand: std.Random.DefaultPrng,
-id_channel: u32 = undefined,
+id_channel: u8 = undefined,
 
-pub fn init(allocator: std.mem.Allocator) !@This() {
-    return .{
-        .allocator = allocator,
-        .rand = std.Random.DefaultPrng.init(395828523321213),
-    };
+const log = std.log.scoped(.states_Playground);
+
+const InitOptions = struct {
+    allocator: std.mem.Allocator,
+};
+
+pub fn init(options: InitOptions) !*@This() {
+    const self = try options.allocator.create(@This());
+    errdefer options.allocator.destroy(self);
+
+    self.* = .{ .allocator = options.allocator, .rand = std.Random.DefaultPrng.init(2137) };
+    return self;
 }
 
-pub fn systemInit(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
-    const ctx = ctx_base.parent(zigra.Context);
+pub fn enter(self: *@This(), _: *root.Sequencer, m: *root.Modules) !void {
+    util.meta.logFn(log, @src());
 
-    if (ctx.systems.net.isMaster()) {
-        try ctx.systems.world.sand_sim.loadFromPngFile(
+    if (m.net.isMaster()) {
+        try m.world.sand_sim.loadFromPngFile(
             .{ .coord = .{ -256, -256 }, .size = .{ 512, 512 } },
             "land/TEST_LEVEL_WATERFALL_BIGGAP.png",
         );
     }
 
-    self.id_channel = try ctx.systems.net.registerChannel(systems.Net.Channel.init(self));
+    self.id_channel = try m.net.registerChannel(systems.Net.Channel.init(self));
 
-    const id_sound = ctx.systems.audio.streams_slut.get("music/t01.ogg") orelse unreachable;
-    try ctx.systems.audio.mixer.playMusic(id_sound);
+    const id_sound = m.audio.streams_slut.get("music/t01.ogg") orelse unreachable;
+    try m.audio.mixer.playMusic(id_sound);
 
-    _ = try ctx.systems.background.createId(.{
-        .id_vk_sprite = ctx.systems.vulkan.impl.atlas.getRectIdByPath("images/mountains/full_00.png"),
+    _ = try m.background.createId(.{
+        .id_vk_sprite = m.vulkan.impl.atlas.getRectIdByPath("images/mountains/full_00.png"),
         .top_gradient = la.srgbColor(f16, 1.0 / 255.0, 17.0 / 255.0, 38.0 / 255.0, 1),
         .bottom_gradient = la.srgbColor(f16, 170.0 / 255.0, 174.0 / 255.0, 203.0 / 255.0, 1),
         .camera_influence = .{ 0.2, 0.2 },
@@ -45,31 +51,31 @@ pub fn systemInit(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void
         .depth = 1,
     });
 
-    _ = try ctx.systems.background.createId(.{
-        .id_vk_sprite = ctx.systems.vulkan.impl.atlas.getRectIdByPath("images/mountains/cut_01.png"),
+    _ = try m.background.createId(.{
+        .id_vk_sprite = m.vulkan.impl.atlas.getRectIdByPath("images/mountains/cut_01.png"),
         .bottom_gradient = la.srgbColor(f16, 123.0 / 255.0, 126.0 / 255.0, 154.0 / 255.0, 1),
         .camera_influence = .{ 0.3, 0.3 },
         .depth = 1,
     });
 
-    _ = try ctx.systems.background.createId(.{
-        .id_vk_sprite = ctx.systems.vulkan.impl.atlas.getRectIdByPath("images/mountains/cut_02.png"),
+    _ = try m.background.createId(.{
+        .id_vk_sprite = m.vulkan.impl.atlas.getRectIdByPath("images/mountains/cut_02.png"),
         .bottom_gradient = la.srgbColor(f16, 91.0 / 255.0, 95.0 / 255.0, 121.0 / 255.0, 1),
         .camera_influence = .{ 0.35, 0.35 },
         .offset = .{ 0, 60 },
         .depth = 1,
     });
 
-    _ = try ctx.systems.background.createId(.{
-        .id_vk_sprite = ctx.systems.vulkan.impl.atlas.getRectIdByPath("images/mountains/cut_03.png"),
+    _ = try m.background.createId(.{
+        .id_vk_sprite = m.vulkan.impl.atlas.getRectIdByPath("images/mountains/cut_03.png"),
         .bottom_gradient = la.srgbColor(f16, 64.0 / 255.0, 68.0 / 255.0, 92.0 / 255.0, 1),
         .camera_influence = .{ 0.4, 0.4 },
         .offset = .{ 0, 80 },
         .depth = 1,
     });
 
-    _ = try ctx.systems.background.createId(.{
-        .id_vk_sprite = ctx.systems.vulkan.impl.atlas.getRectIdByPath("images/mountains/cut_04.png"),
+    _ = try m.background.createId(.{
+        .id_vk_sprite = m.vulkan.impl.atlas.getRectIdByPath("images/mountains/cut_04.png"),
         .bottom_gradient = la.srgbColor(f16, 32.0 / 255.0, 30.0 / 255.0, 52.0 / 255.0, 1),
         .camera_influence = .{ 0.45, 0.45 },
         .offset = .{ 0, 100 },
@@ -77,21 +83,31 @@ pub fn systemInit(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void
     });
 }
 
-pub fn systemDeinit(_: *@This(), _: *lifetime.ContextBase) anyerror!void {}
+pub fn exit(self: *const @This(), _: *root.Sequencer, m: *root.Modules) void {
+    util.meta.logFn(log, @src());
 
-pub fn deinit(_: *@This()) void {}
+    m.net.unregisterChannel(self.id_channel);
+    m.world.sand_sim.clear();
+    self.allocator.destroy(self);
+}
 
-pub fn tickProcess(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
-    const ctx = ctx_base.parent(zigra.Context);
+pub fn tickEnter(self: *@This(), _: *root.Sequencer, m: *root.Modules) !void {
+    try self.tickProcess(m);
+}
 
-    if (try self.removeSleepingBodies(ctx) < 10) {
-        try self.pushCrateBatch(ctx, 1);
+fn tickProcess(self: *@This(), m: *root.Modules) !void {
+    // TODO implement tracing for states
+    // var t = common.systemTrace(@This(), @src(), m);
+    // defer t.end();
+
+    if (try self.removeSleepingBodies(m) < 10) {
+        try self.pushCrateBatch(m, 1);
     }
 
-    switch (ctx.systems.camera.target) {
+    switch (m.camera.target) {
         .entity => {},
         else => {
-            var iterator = ctx.systems.bodies.bodies.iterator();
+            var iterator = m.bodies.bodies.iterator();
 
             const uuid_opt: ?util.ecs.Uuid = if (iterator.next()) |body| brk: {
                 switch (body.*) {
@@ -102,7 +118,7 @@ pub fn tickProcess(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!voi
             } else null;
 
             if (uuid_opt) |uuid| {
-                const body = ctx.systems.bodies.bodies.getByUuid(uuid) orelse unreachable;
+                const body = m.bodies.bodies.getByUuid(uuid) orelse unreachable;
 
                 const id_entity = switch (body.*) {
                     .point => |p| p.id_entity,
@@ -110,35 +126,35 @@ pub fn tickProcess(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!voi
                     .character => unreachable,
                 };
 
-                ctx.systems.camera.setTarget(.{ .id_entity = .{ .id = id_entity, .ctx = ctx } });
+                m.camera.setTarget(.{ .id_entity = .{ .id = id_entity, .m = m } });
             }
         },
     }
 }
 
-fn pushCrateBatch(self: *@This(), ctx: *zigra.Context, count: usize) !void {
+fn pushCrateBatch(self: *@This(), m: *root.Modules, count: usize) !void {
     for (0..count) |_| {
         const random_vel_chunk: @Vector(2, f32) = .{
             self.rand.random().floatNorm(f32) * 80,
             (self.rand.random().floatNorm(f32) + 1) * -80,
         };
 
-        _ = try prototypes.Crate.default(ctx, .{ 0, 0 }, random_vel_chunk);
+        _ = try prototypes.Crate.default(m, .{ 0, 0 }, random_vel_chunk);
     }
 }
 
-fn pushChunkBatch(self: *@This(), ctx: *zigra.Context, count: usize) !void {
+fn pushChunkBatch(self: *@This(), m: *root.Modules, count: usize) !void {
     for (0..count) |_| {
         const random_vel_chunk: @Vector(2, f32) = .{
             self.rand.random().floatNorm(f32) * 80,
             (self.rand.random().floatNorm(f32) + 1) * -80,
         };
 
-        _ = try prototypes.Chunk.default(ctx, .{ 0, 0 }, random_vel_chunk);
+        _ = try prototypes.Chunk.default(m, .{ 0, 0 }, random_vel_chunk);
     }
 }
 
-fn removeSleepingBodies(self: *@This(), ctx: *zigra.Context) !usize {
+fn removeSleepingBodies(self: *@This(), m: *root.Modules) !usize {
     const stack_capacity = 128;
     const IndexType = util.ecs.Uuid;
 
@@ -147,14 +163,14 @@ fn removeSleepingBodies(self: *@This(), ctx: *zigra.Context) !usize {
     defer to_remove.deinit();
 
     var body_count: usize = 0;
-    var iterator = ctx.systems.bodies.bodies.arr.iterator();
+    var iterator = m.bodies.bodies.arr.iterator();
     while (iterator.next()) |body| : (body_count += 1) {
         switch (body.*) {
             else => @panic("Unimplemented"),
             .point => |p| if (p.sleeping) {
                 try to_remove.append(p.id_entity);
             } else {
-                const transform = ctx.systems.transform.data.getById(p.id_transform);
+                const transform = m.transform.data.getById(p.id_transform);
                 if (transform.pos[1] > 1000) {
                     try to_remove.append(p.id_entity);
                 }
@@ -162,7 +178,7 @@ fn removeSleepingBodies(self: *@This(), ctx: *zigra.Context) !usize {
             .rigid => |r| if (r.sleeping) {
                 try to_remove.append(r.id_entity);
             } else {
-                const transform = ctx.systems.transform.data.getById(r.id_transform);
+                const transform = m.transform.data.getById(r.id_transform);
                 if (transform.pos[1] > 1000) {
                     try to_remove.append(r.id_entity);
                 }
@@ -170,14 +186,9 @@ fn removeSleepingBodies(self: *@This(), ctx: *zigra.Context) !usize {
         }
     }
 
-    for (to_remove.items) |uuid| try ctx.systems.entities.deferDestroyEntity(uuid);
+    for (to_remove.items) |uuid| try m.entities.deferDestroyEntity(uuid);
 
     return body_count;
 }
 
-pub fn netRecv(self: *@This(), ctx_base: *lifetime.ContextBase, data: []const u8) !void {
-    _ = self; // autofix
-    _ = data; // autofix
-    const ctx = ctx_base.parent(zigra.Context);
-    _ = ctx; // autofix
-}
+pub fn netRecv(_: *@This(), _: *root.Modules, _: []const u8) !void {}

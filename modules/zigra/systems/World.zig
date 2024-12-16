@@ -4,10 +4,10 @@ pub const SandSim = @import("World/SandSim.zig");
 const world_net = @import("World/net.zig");
 
 const lifetime = @import("lifetime");
-const zigra = @import("../root.zig");
+const root = @import("../root.zig");
 const Net = @import("Net.zig");
 const lz4 = @import("lz4");
-const tracy = @import("tracy");
+const common = @import("common.zig");
 
 const log = std.log.scoped(.World);
 
@@ -23,35 +23,40 @@ pub fn init(allocator: std.mem.Allocator) !@This() {
     };
 }
 
-pub fn systemInit(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
-    const ctx = ctx_base.parent(zigra.Context);
-    self.sand_sim = try SandSim.init(self.allocator);
-    self.id_channel = try ctx.systems.net.registerChannel(Net.Channel.init(self));
-}
+pub fn systemInit(self: *@This(), m: *root.Modules) anyerror!void {
+    var t = common.systemTrace(@This(), @src(), null);
+    defer t.end();
 
-pub fn systemDeinit(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
-    self.sand_sim.deinit();
-    self.sand_sim = undefined;
+    self.sand_sim = try SandSim.init(self.allocator);
+    self.id_channel = try m.net.registerChannel(Net.Channel.init(self));
 }
 
 pub fn deinit(self: *@This()) void {
+    self.sand_sim.deinit();
+    self.sand_sim = undefined;
     self.* = undefined;
 }
 
-pub fn tickProcessSandSimCells(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
+pub fn tickProcessSandSimCells(self: *@This(), m: *root.Modules) anyerror!void {
+    var t = common.systemTrace(@This(), @src(), m);
+    defer t.end();
+
     try self.sand_sim.simulateCells();
 }
 
-pub fn tickProcessSandSimParticles(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
-    const ctx = ctx_base.parent(zigra.Context);
-    try self.sand_sim.simulateParticles(ctx.systems.time.tickDelay());
+pub fn tickProcessSandSimParticles(self: *@This(), m: *root.Modules) anyerror!void {
+    var t = common.systemTrace(@This(), @src(), m);
+    defer t.end();
+
+    try self.sand_sim.simulateParticles(m.time.tickDelay());
 }
 
-pub fn render(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
-    const ctx = ctx_base.parent(zigra.Context);
+pub fn render(self: *@This(), m: *root.Modules) anyerror!void {
+    var t = common.systemTrace(@This(), @src(), m);
+    defer t.end();
 
-    const set = try ctx.systems.vulkan.prepareLandscapeUpdateRegion();
-    const lve = ctx.systems.vulkan.getLandscapeVisibleExtent();
+    const set = try m.vulkan.prepareLandscapeUpdateRegion();
+    const lve = m.vulkan.getLandscapeVisibleExtent();
 
     const ss_node_extent = SandSim.NodeExtent{
         .coord = .{ lve.offset.x, lve.offset.y },
@@ -64,16 +69,16 @@ pub fn render(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
 
     for (used_tiles) |src| for (set) |dst| {
         if (@reduce(.Or, src.coord != dst.tile.coord)) continue;
-        try ctx.systems.vulkan.pushCmdLandscapeTileUpdate(dst.tile, std.mem.asBytes(&src.matrix));
+        try m.vulkan.pushCmdLandscapeTileUpdate(dst.tile, std.mem.asBytes(&src.matrix));
     };
 
-    ctx.systems.vulkan.shouldDrawLandscape();
+    m.vulkan.shouldDrawLandscape();
 
     for (self.sand_sim.particles.items) |particle| {
-        const point_a = particle.pos - particle.vel * @as(@Vector(2, f32), @splat(ctx.systems.time.tickDelay()));
+        const point_a = particle.pos - particle.vel * @as(@Vector(2, f32), @splat(m.time.tickDelay()));
         const point_b = particle.pos;
 
-        try ctx.systems.vulkan.pushCmdLine(.{
+        try m.vulkan.pushCmdLine(.{
             .points = .{ point_a, point_b },
             .color = .{ 0.0125, 0.025, 0.5, 1.0 },
             .depth = 0.01,
@@ -82,9 +87,9 @@ pub fn render(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
     }
 }
 
-pub fn netRecv(self: *@This(), _: *lifetime.ContextBase, data: []const u8) !void {
-    const trace = tracy.trace(@src());
-    defer trace.end();
+pub fn netRecv(self: *@This(), m: *root.Modules, data: []const u8) !void {
+    var t = common.systemTrace(@This(), @src(), m);
+    defer t.end();
 
     var stream = std.io.fixedBufferStream(data);
     const reader = stream.reader();
@@ -100,8 +105,8 @@ fn netRecvSyncTiles(
     reader: std.io.FixedBufferStream([]const u8).Reader,
     data: []const u8,
 ) !void {
-    const trace = tracy.trace(@src());
-    defer trace.end();
+    var t = common.systemTrace(@This(), @src(), null);
+    defer t.end();
 
     const header = try reader.readStructEndian(world_net.SyncTilesHeader, .little);
 
@@ -144,9 +149,9 @@ fn netRecvSyncTiles(
     self.sand_sim.iteration = header.iteration;
 }
 
-pub fn netSyncAll(self: *@This(), ctx_base: *lifetime.ContextBase) !void {
-    const trace = tracy.trace(@src());
-    defer trace.end();
+pub fn netSyncAll(self: *@This(), m: *root.Modules) !void {
+    var t = common.systemTrace(@This(), @src(), m);
+    defer t.end();
 
     log.info("netSyncAll", .{});
 
@@ -217,6 +222,5 @@ pub fn netSyncAll(self: *@This(), ctx_base: *lifetime.ContextBase) !void {
 
     log.info("Resulting buffer: {}", .{output_stream.getWritten().len});
 
-    const ctx = ctx_base.parent(zigra.Context);
-    try ctx.systems.net.send(self.id_channel, output_stream.getWritten(), .{ .reliable = true });
+    try m.net.send(self.id_channel, output_stream.getWritten(), .{ .reliable = true });
 }

@@ -1,5 +1,5 @@
 const std = @import("std");
-const util = @import("utils");
+const util = @import("util");
 const la = @import("la");
 const tracy = @import("tracy");
 
@@ -7,14 +7,15 @@ const integrators = util.integrators;
 
 const lifetime = @import("lifetime");
 const systems = @import("../systems.zig");
-const zigra = @import("../root.zig");
+const root = @import("../root.zig");
+const common = @import("common.zig");
 
 const max_points_per_mesh = 15;
 
 pub const Character = struct {};
 
-pub const RigidTerrainCollisionCb = fn (*zigra.Context, *Rigid, point: @Vector(2, f32), speed: @Vector(2, f32)) anyerror!void;
-pub const PointTerrainCollisionCb = fn (*zigra.Context, *Point, point: @Vector(2, f32), speed: @Vector(2, f32)) anyerror!void;
+pub const RigidTerrainCollisionCb = fn (*root.Modules, *Rigid, point: @Vector(2, f32), speed: @Vector(2, f32)) anyerror!void;
+pub const PointTerrainCollisionCb = fn (*root.Modules, *Point, point: @Vector(2, f32), speed: @Vector(2, f32)) anyerror!void;
 
 pub const RigidCbs = struct {
     terrain_collision: ?*const RigidTerrainCollisionCb = null,
@@ -114,19 +115,20 @@ fn solidCmp(cell: systems.World.SandSim.Cell) f32 {
     return if (cell.type == .solid) 1 else 0;
 }
 
-pub fn tickProcessBodies(self: *@This(), ctx_base: *lifetime.ContextBase) !void {
-    defer _ = self.call_arena.reset(.retain_capacity);
+pub fn tickProcessBodies(self: *@This(), m: *root.Modules) !void {
+    var t = common.systemTrace(@This(), @src(), m);
+    defer t.end();
 
-    const ctx = ctx_base.parent(zigra.Context);
+    defer _ = self.call_arena.reset(.retain_capacity);
 
     if (try self.bodies.arr.shrinkIfOversized(4)) {
         self.bodies.map.shrinkAndFree(self.bodies.map.count() / 2);
     }
 
-    const delay = ctx.systems.time.tickDelay();
-    const view = ctx.systems.world.sand_sim.getView();
+    const delay = m.time.tickDelay();
+    const view = m.world.sand_sim.getView();
     const meshes: []Mesh = self.meshes.data;
-    const transforms: []systems.Transform.Data = ctx.systems.transform.data.arr.data;
+    const transforms: []systems.Transform.Data = m.transform.data.arr.data;
 
     const Self = @This();
 
@@ -139,11 +141,10 @@ pub fn tickProcessBodies(self: *@This(), ctx_base: *lifetime.ContextBase) !void 
         index: *std.atomic.Value(u32),
         range: u32,
 
-        pub fn work(task: *@This(), base: *lifetime.ContextBase) void {
+        pub fn work(task: *@This(), ctx: *root.Modules) void {
             const work_trace = tracy.traceNamed(@src(), "tickProcessBodies (MT)");
             defer work_trace.end();
 
-            const worker_ctx = base.parent(zigra.Context);
             var processed_bodies: u64 = 0;
 
             while (true) {
@@ -163,7 +164,7 @@ pub fn tickProcessBodies(self: *@This(), ctx_base: *lifetime.ContextBase) !void 
                             &task.transforms[point.id_transform],
                             point,
                             task.delay,
-                            worker_ctx,
+                            ctx,
                         ) catch |e| util.tried.panic(e, @errorReturnTrace()),
 
                         .rigid => |*rigid| task.self.processBodyRigid(
@@ -172,7 +173,7 @@ pub fn tickProcessBodies(self: *@This(), ctx_base: *lifetime.ContextBase) !void 
                             rigid,
                             &task.meshes[rigid.id_mesh],
                             task.delay,
-                            worker_ctx,
+                            ctx,
                         ) catch |e| util.tried.panic(e, @errorReturnTrace()),
 
                         else => @panic("Unimplemented"),
@@ -210,13 +211,13 @@ pub fn tickProcessBodies(self: *@This(), ctx_base: *lifetime.ContextBase) !void 
     };
 
     if (task_count == 1) {
-        dispatch_ctx[0].work(ctx_base);
+        dispatch_ctx[0].work(m);
         return;
     }
 
     var wg = std.Thread.WaitGroup{};
-    for (dispatch_ctx) |*group| ctx_base.thread_pool.spawnWg(&wg, TaskCtx.work, .{ group, ctx_base });
-    ctx_base.thread_pool.waitAndWork(&wg);
+    for (dispatch_ctx) |*group| m.thread_pool.spawnWg(&wg, TaskCtx.work, .{ group, m });
+    m.thread_pool.waitAndWork(&wg);
 }
 
 fn processBodyPoint(
@@ -225,7 +226,7 @@ fn processBodyPoint(
     t_curr: *systems.Transform.Data,
     b_curr: *Point,
     delay: f32,
-    ctx: *zigra.Context,
+    m: *root.Modules,
 ) !void {
     if (b_curr.sleeping) return;
 
@@ -273,16 +274,16 @@ fn processBodyPoint(
 
     if (la.length(b_next.sleepcheck_pos - t_curr.pos) > 2) {
         b_next.sleepcheck_pos = t_curr.pos;
-        b_next.sleepcheck_tick = ctx.systems.time.tick_current;
+        b_next.sleepcheck_tick = m.time.tick_current;
     }
 
-    if (b_next.sleepcheck_tick + 100 < ctx.systems.time.tick_current) {
+    if (b_next.sleepcheck_tick + 100 < m.time.tick_current) {
         b_next.sleepcheck_pos = t_curr.pos;
-        b_next.sleepcheck_tick = ctx.systems.time.tick_current;
+        b_next.sleepcheck_tick = m.time.tick_current;
         b_next.sleeping = true;
     }
 
-    if (b_next.cb_table.terrain_collision) |cb| try cb(ctx, &b_next, t_next.pos, t_next.vel);
+    if (b_next.cb_table.terrain_collision) |cb| try cb(m, &b_next, t_next.pos, t_next.vel);
 }
 
 fn processBodyRigid(
@@ -292,7 +293,7 @@ fn processBodyRigid(
     b_curr: *Rigid,
     mesh: *Mesh,
     delay: f32,
-    ctx: *zigra.Context,
+    m: *root.Modules,
 ) !void {
     if (b_curr.sleeping) return;
 
@@ -327,7 +328,7 @@ fn processBodyRigid(
     var has_hit = false;
 
     for (mesh.points.constSlice()) |p| {
-        has_hit = has_hit or try self.processBodyRigidPointCollision(view, t_curr, b_curr, &t_next, &b_next, mesh, p, delay, ctx, center_cell.type == .liquid);
+        has_hit = has_hit or try self.processBodyRigidPointCollision(view, t_curr, b_curr, &t_next, &b_next, mesh, p, delay, m, center_cell.type == .liquid);
     }
 
     if (!has_hit) return;
@@ -351,7 +352,7 @@ fn processBodyRigidPointCollision(
     mesh: *Mesh,
     point: @Vector(2, f32),
     delay: f32,
-    ctx: *zigra.Context,
+    m: *root.Modules,
     is_underwater: bool,
 ) !bool {
     _ = self; // autofix
@@ -372,18 +373,18 @@ fn processBodyRigidPointCollision(
         if (!is_underwater) return false;
 
         if (b_next.sleepcheck_tick == 0) {
-            b_next.sleepcheck_tick = ctx.systems.time.tick_current;
+            b_next.sleepcheck_tick = m.time.tick_current;
             return false;
         }
 
         if (la.length(b_next.sleepcheck_pos - t_curr.pos) > 2) {
             b_next.sleepcheck_pos = t_curr.pos;
-            b_next.sleepcheck_tick = ctx.systems.time.tick_current;
+            b_next.sleepcheck_tick = m.time.tick_current;
         }
 
-        if (b_next.sleepcheck_tick + 100 < ctx.systems.time.tick_current) {
+        if (b_next.sleepcheck_tick + 100 < m.time.tick_current) {
             b_next.sleepcheck_pos = t_curr.pos;
-            b_next.sleepcheck_tick = ctx.systems.time.tick_current;
+            b_next.sleepcheck_tick = m.time.tick_current;
             b_next.sleeping = true;
         }
 
@@ -475,22 +476,22 @@ fn processBodyRigidPointCollision(
     }
 
     if (b_next.sleepcheck_tick == 0) {
-        b_next.sleepcheck_tick = ctx.systems.time.tick_current;
+        b_next.sleepcheck_tick = m.time.tick_current;
         return false;
     }
 
     if (la.length(b_next.sleepcheck_pos - t_curr.pos) > 2) {
         b_next.sleepcheck_pos = t_curr.pos;
-        b_next.sleepcheck_tick = ctx.systems.time.tick_current;
+        b_next.sleepcheck_tick = m.time.tick_current;
     }
 
-    if (b_next.sleepcheck_tick + 100 < ctx.systems.time.tick_current) {
+    if (b_next.sleepcheck_tick + 100 < m.time.tick_current) {
         b_next.sleepcheck_pos = t_curr.pos;
-        b_next.sleepcheck_tick = ctx.systems.time.tick_current;
+        b_next.sleepcheck_tick = m.time.tick_current;
         b_next.sleeping = true;
     }
 
-    if (b_next.cb_table.terrain_collision) |cb| try cb(ctx, b_next, pos_next_init, vel_next_init);
+    if (b_next.cb_table.terrain_collision) |cb| try cb(m, b_next, pos_next_init, vel_next_init);
 
     return true;
 }

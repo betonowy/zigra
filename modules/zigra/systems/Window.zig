@@ -3,8 +3,11 @@ const builtin = @import("builtin");
 const glfw = @import("glfw");
 
 const lifetime = @import("lifetime");
-const utils = @import("utils");
+const root = @import("../root.zig");
+const util = @import("util");
 const Vulkan = @import("Vulkan.zig");
+
+const common = @import("common.zig");
 
 const consts = struct {
     const init_window_w = 640;
@@ -12,14 +15,12 @@ const consts = struct {
 };
 
 pub const CbKey = fn (*anyopaque, glfw.Key, glfw.Action) anyerror!void;
-pub const CbKeyChild = utils.cb.LinkedChild(CbKey);
-const CbKeyParent = utils.cb.LinkedParent(CbKey);
+pub const CbKeyChild = util.cb.LinkedChild(CbKey);
+const CbKeyParent = util.cb.LinkedParent(CbKey);
 
 pub const CbChar = fn (*anyopaque, u21) anyerror!void;
-pub const CbCharChild = utils.cb.LinkedChild(CbChar);
-const CbCharParent = utils.cb.LinkedParent(CbChar);
-
-var s_initialized = false;
+pub const CbCharChild = util.cb.LinkedChild(CbChar);
+const CbCharParent = util.cb.LinkedParent(CbChar);
 
 allocator: std.mem.Allocator,
 window: glfw.Window,
@@ -38,7 +39,8 @@ cbs_vulkan: Vulkan.WindowCallbacks = .{
 quit_requested: bool = false,
 
 pub fn init(allocator: std.mem.Allocator) !@This() {
-    if (s_initialized) @panic("This system can only have at most a single instance at any time!");
+    var t = common.systemTrace(@This(), @src(), null);
+    defer t.end();
 
     glfw.setErrorCallback(glfwCbError);
 
@@ -52,32 +54,32 @@ pub fn init(allocator: std.mem.Allocator) !@This() {
         return error.InitializationFailed;
     };
 
-    window.setSizeLimits(
-        .{ .width = consts.init_window_w, .height = consts.init_window_h },
-        .{ .width = null, .height = null },
-    );
-
-    window.setAttrib(.resizable, true);
-
-    s_initialized = true;
-
     return .{ .allocator = allocator, .window = window };
 }
 
-pub fn systemInit(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
+pub fn setup(self: *@This()) void {
     self.window.setUserPointer(&self.cbs_ctx_glfw);
+
     self.window.setCursorPosCallback(glfwCbCursorPos);
     self.window.setMouseButtonCallback(glfwCbMouse);
     self.window.setCharCallback(glfwCbChar);
     self.window.setKeyCallback(glfwCbKey);
     self.window.setScrollCallback(glfwCbScroll);
+
+    self.window.setAttrib(.resizable, true);
+
+    self.window.setSizeLimits(
+        .{ .width = consts.init_window_w, .height = consts.init_window_h },
+        .{ .width = null, .height = null },
+    );
 }
 
-pub fn systemDeinit(_: *@This(), _: *lifetime.ContextBase) anyerror!void {}
-
 pub fn deinit(self: *@This()) void {
+    var t = common.systemTrace(@This(), @src(), null);
+    defer t.end();
+
+    self.window.destroy();
     glfw.terminate();
-    s_initialized = false;
     self.* = undefined;
 }
 
@@ -120,13 +122,13 @@ fn glfwCbMouse(window: glfw.Window, button: glfw.MouseButton, action: glfw.Actio
 fn glfwCbChar(window: glfw.Window, codepoint: u21) void {
     const ctx_ptr = window.getUserPointer(GlfwCbCtx) orelse unreachable;
     const self: *@This() = @fieldParentPtr("cbs_ctx_glfw", ctx_ptr);
-    self.cb_char_root.callAll(.{@as(u21, codepoint)}) catch @panic("Can't return an error");
+    self.cb_char_root.callAll(.{@as(u21, codepoint)}) catch |e| util.tried.panic(e, @errorReturnTrace());
 }
 
 fn glfwCbKey(window: glfw.Window, key: glfw.Key, _: i32, action: glfw.Action, _: glfw.Mods) void {
     const ctx_ptr = window.getUserPointer(GlfwCbCtx) orelse unreachable;
     const self: *@This() = @fieldParentPtr("cbs_ctx_glfw", ctx_ptr);
-    self.cb_key_root.callAll(.{ key, action }) catch @panic("Can't return an error");
+    self.cb_key_root.callAll(.{ key, action }) catch |e| util.tried.panic(e, @errorReturnTrace());
 }
 
 fn glfwCbScroll(window: glfw.Window, xoffset: f64, yoffset: f64) void {
@@ -174,7 +176,10 @@ pub fn pfnGetInstanceProcAddress(_: *@This()) *const @TypeOf(glfw.getInstancePro
     return &glfw.getInstanceProcAddress;
 }
 
-pub fn process(self: *@This(), _: *lifetime.ContextBase) anyerror!void {
+pub fn process(self: *@This(), m: *root.Modules) anyerror!void {
+    var t = common.systemTrace(@This(), @src(), m);
+    defer t.end();
+
     glfw.pollEvents();
     self.quit_requested = self.window.shouldClose();
 }

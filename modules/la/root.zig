@@ -29,9 +29,9 @@ pub fn mix(a: anytype, b: anytype, c: anytype) @TypeOf(a, b) {
     comptime if (!types.isSupportedType(@TypeOf(a, b))) @compileError("Is not a supported type");
 
     return switch (@typeInfo(@TypeOf(a, b))) {
-        .Array => mixMatrix(a, b, c),
-        .Vector => mixVector(a, b, c),
-        .Int, .Float, .ComptimeInt, .ComptimeFloat => mixScalar(a, b, c),
+        .array => mixMatrix(a, b, c),
+        .vector => mixVector(a, b, c),
+        .int, .float, .comptime_int, .comptime_float => mixScalar(a, b, c),
         else => unreachable,
     };
 }

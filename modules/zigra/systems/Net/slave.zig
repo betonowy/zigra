@@ -2,51 +2,51 @@ const std = @import("std");
 const enet = @import("enet");
 
 const Self = @import("../Net.zig");
-const zigra = @import("../../root.zig");
+const root = @import("../../root.zig");
 const common = @import("common.zig");
 
 const log = std.log.scoped(.NetSlave);
 
-pub fn tickBegin(self: *Self, ctx: *zigra.Context, enet_ctx: *enet.HostClient) !void {
+pub fn tickBegin(self: *Self, m: *root.Modules, ctx: *enet.HostClient) !void {
     const handler: struct {
         parent: *Self,
-        ctx: *zigra.Context,
+        m: *root.Modules,
 
         pub fn connect(handler: @This(), id_peer: u32, peer: *enet.Peer, host: *enet.HostClient) !void {
-            try onConnect(handler.parent, handler.ctx, host, id_peer, peer);
+            try onConnect(handler.parent, handler.m, host, id_peer, peer);
         }
 
         pub fn disconnect(handler: @This(), id_peer: u32, peer: *enet.Peer, host: *enet.HostClient) !void {
-            try onDisconnect(handler.parent, handler.ctx, host, id_peer, peer);
+            try onDisconnect(handler.parent, handler.m, host, id_peer, peer);
         }
 
         pub fn disconnectTimeout(handler: @This(), id_peer: u32, peer: *enet.Peer, host: *enet.HostClient) !void {
-            try onDisconnect(handler.parent, handler.ctx, host, id_peer, peer);
+            try onDisconnect(handler.parent, handler.m, host, id_peer, peer);
         }
 
         pub fn receive(handler: @This(), id_peer: u32, peer: *enet.Peer, host: *enet.HostClient, data: []const u8, channel: u32) !void {
-            try onReceive(handler.parent, handler.ctx, host, id_peer, peer, data, channel);
+            try onReceive(handler.parent, handler.m, host, id_peer, peer, data, channel);
         }
-    } = .{ .parent = self, .ctx = ctx };
+    } = .{ .parent = self, .m = m };
 
-    try enet_ctx.service(handler);
+    try ctx.service(handler);
 }
 
-pub fn tickEnd(_: *Self, _: *zigra.Context, enet_ctx: *enet.HostClient) !void {
-    enet_ctx.flush();
+pub fn tickEnd(_: *Self, _: *root.Modules, ctx: *enet.HostClient) !void {
+    ctx.flush();
 }
 
-pub fn send(enet_ctx: *enet.HostClient, id_channel: u8, data: []const u8, options: enet.PacketOptions) !void {
-    try enet_ctx.sendPacket(data, id_channel, options);
+pub fn send(ctx: *enet.HostClient, id_channel: u8, data: []const u8, options: enet.PacketOptions) !void {
+    try ctx.sendPacket(data, id_channel, options);
 }
 
-fn onConnect(_: *Self, _: *zigra.Context, _: *enet.HostClient, _: u32, _: *enet.Peer) !void {}
+fn onConnect(_: *Self, _: *root.Modules, _: *enet.HostClient, _: u32, _: *enet.Peer) !void {}
 
-fn onDisconnect(_: *Self, _: *zigra.Context, _: *enet.HostClient, id_peer: u32, _: *enet.Peer) !void {
+fn onDisconnect(_: *Self, _: *root.Modules, _: *enet.HostClient, id_peer: u32, _: *enet.Peer) !void {
     log.info("Master disconnected: {}", .{id_peer});
 }
 
-fn onReceive(self: *Self, ctx: *zigra.Context, _: *enet.HostClient, _: u32, _: *enet.Peer, data: []const u8, channel: u32) !void {
+fn onReceive(self: *Self, m: *root.Modules, _: *enet.HostClient, _: u32, _: *enet.Peer, data: []const u8, channel: u32) !void {
     const handler = self.system_channels.at(channel);
-    try handler.recv(&ctx.base, data);
+    try handler.recv(m, data);
 }

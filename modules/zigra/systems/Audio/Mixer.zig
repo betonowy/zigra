@@ -1,5 +1,5 @@
 const std = @import("std");
-const utils = @import("utils");
+const utils = @import("util");
 const tracy = @import("tracy");
 
 const Audio = @import("../Audio.zig");

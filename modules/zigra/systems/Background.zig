@@ -1,12 +1,13 @@
 const std = @import("std");
-const utils = @import("utils");
+const utils = @import("util");
 const lifetime = @import("lifetime");
 const tracy = @import("tracy");
 const la = @import("la");
 
-const zigra = @import("../root.zig");
+const root = @import("../root.zig");
 const systems = @import("../systems.zig");
 const vk_types = @import("Vulkan/types.zig");
+const common = @import("common.zig");
 
 const Layer = struct {
     offset: @Vector(2, i32) = .{ 0, 0 },
@@ -36,22 +37,24 @@ pub fn destroyById(self: *@This(), id: u32) void {
     self.layers.remove(id);
 }
 
-pub fn render(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
-    const ctx = ctx_base.parent(zigra.Context);
+pub fn render(self: *@This(), m: *root.Modules) anyerror!void {
+    var t = common.systemTrace(@This(), @src(), m);
+    defer t.end();
+
     var iterator = self.layers.iterator();
 
     while (iterator.next()) |layer| {
-        const cam_offset_f32: @Vector(2, f32) = @floatFromInt(ctx.systems.vulkan.impl.camera_pos);
+        const cam_offset_f32: @Vector(2, f32) = @floatFromInt(m.vulkan.impl.camera_pos);
         const influenced_offset: @Vector(2, i32) = @intFromFloat(cam_offset_f32 * layer.camera_influence);
 
         const view_width = 320; // TODO
-        const left_boundary = ctx.systems.vulkan.impl.camera_pos[0] - view_width / 2;
-        const center = ctx.systems.vulkan.impl.camera_pos[1];
+        const left_boundary = m.vulkan.impl.camera_pos[0] - view_width / 2;
+        const center = m.vulkan.impl.camera_pos[1];
 
         const calculated_offset = layer.offset + @Vector(2, i32){ view_width / 2, 0 } - influenced_offset;
 
         if (layer.id_vk_sprite) |id| {
-            const rect = ctx.systems.vulkan.impl.atlas.getRectById(id);
+            const rect = m.vulkan.impl.atlas.getRectById(id);
             const count = view_width / rect.extent.width + 1;
 
             const mod_offset: @Vector(2, u32) = @intCast(@mod(calculated_offset, @Vector(2, i32){
@@ -69,11 +72,11 @@ pub fn render(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
                     @floatFromInt(calculated_offset[1] + center),
                 };
 
-                try ctx.systems.vulkan.pushCmdVertices(&createSprite(ctx, offset, layer.depth, id));
+                try m.vulkan.pushCmdVertices(&createSprite(m, offset, layer.depth, id));
             }
         }
 
-        const y = if (layer.id_vk_sprite) |id| ctx.systems.vulkan.impl.atlas.getRectById(id).extent.height else 0;
+        const y = if (layer.id_vk_sprite) |id| m.vulkan.impl.atlas.getRectById(id).extent.height else 0;
 
         if (layer.bottom_gradient) |color| {
             const offset = @Vector(2, f32){
@@ -84,7 +87,7 @@ pub fn render(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
             const ul: @Vector(2, i32) = .{ @intCast(left_boundary), 0 };
             const br: @Vector(2, i32) = .{ @intCast(left_boundary + 2 * view_width), std.math.maxInt(i32) };
 
-            try ctx.systems.vulkan.pushCmdVertices(&createRect(offset, layer.depth, ul, br, color));
+            try m.vulkan.pushCmdVertices(&createRect(offset, layer.depth, ul, br, color));
         }
 
         if (layer.top_gradient) |color| {
@@ -96,13 +99,13 @@ pub fn render(self: *@This(), ctx_base: *lifetime.ContextBase) anyerror!void {
             const ul: @Vector(2, i32) = .{ @intCast(left_boundary), std.math.minInt(i32) };
             const br: @Vector(2, i32) = .{ @intCast(left_boundary + 2 * view_width), 0 };
 
-            try ctx.systems.vulkan.pushCmdVertices(&createRect(offset, layer.depth, ul, br, color));
+            try m.vulkan.pushCmdVertices(&createRect(offset, layer.depth, ul, br, color));
         }
     }
 }
 
-fn createSprite(ctx: *zigra.Context, pos: @Vector(2, f32), depth: f32, sprite_id: u32) [6]vk_types.VertexData {
-    const rect = ctx.systems.vulkan.impl.atlas.getRectById(sprite_id);
+fn createSprite(m: *root.Modules, pos: @Vector(2, f32), depth: f32, sprite_id: u32) [6]vk_types.VertexData {
+    const rect = m.vulkan.impl.atlas.getRectById(sprite_id);
 
     const w = @as(f32, @floatFromInt(rect.extent.width)) * 0.5;
     const h = @as(f32, @floatFromInt(rect.extent.height)) * 0.5;

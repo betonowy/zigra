@@ -1,5 +1,9 @@
 const std = @import("std");
 
+pub fn logFn(log: anytype, src: std.builtin.SourceLocation) void {
+    log.debug("{s}", .{src.fn_name});
+}
+
 pub fn UnwrapOptionals(comptime T: type) type {
     const type_info = @typeInfo(T);
     var struct_fields: [type_info.@"struct".fields.len]std.builtin.Type.StructField = undefined;
@@ -58,5 +62,5 @@ pub fn asArray(ptr: anytype) *[1]std.meta.Child(@TypeOf(ptr)) {
 }
 
 pub fn ReturnType(comptime Fn: anytype) type {
-    return @typeInfo(@TypeOf(Fn)).Fn.return_type.?;
+    return @typeInfo(@TypeOf(Fn)).@"fn".return_type.?;
 }

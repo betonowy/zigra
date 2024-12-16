@@ -1,6 +1,6 @@
 const std = @import("std");
 const SandSim = @import("SandSim.zig");
-const utils = @import("utils");
+const utils = @import("util");
 const la = @import("la");
 
 pub const Result = struct {

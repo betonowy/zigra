@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const tracy = @import("tracy");
-const utils = @import("utils");
+const utils = @import("util");
 const vk = @import("vk");
 
 const types = @import("types.zig");
