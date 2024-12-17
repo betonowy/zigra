@@ -7,13 +7,6 @@ const builtin = @import("builtin");
 const zigra = @import("zigra");
 const util = @import("util");
 
-fn create(T: type, allocator: std.mem.Allocator, args: anytype) !*T {
-    const o = try allocator.create(T);
-    errdefer allocator.destroy(o);
-    o.* = try @call(.always_inline, @field(T, "init"), args);
-    return o;
-}
-
 pub fn main() !void {
     const use_zig_allocator = comptime switch (builtin.mode) {
         .Debug, .ReleaseSafe => true,

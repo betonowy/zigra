@@ -505,7 +505,7 @@ fn getSwapchainImages(
     return images;
 }
 
-fn createImageViews(
+fn createSwapchainImageViews(
     vkd: types.DeviceDispatch,
     vk_device: vk.Device,
     swapchain: types.SwapchainBasicData,

@@ -4,16 +4,16 @@
     .minimum_zig_version = "0.14.0-dev.2457+82f35c518",
     .dependencies = .{
         .mach_glfw = .{
-            .url = "https://github.com/castholm/mach-glfw/archive/37478672f127ea0b09197e2eedf44c33e0104f9d.tar.gz",
-            .hash = "122063ff4f78ff0971747c14b06310ac0b8959c4866647e59fb78778cfc4e9bb000b",
+            .url = "https://github.com/slimsag/mach-glfw/archive/daeb7b10187249aade7d92ccfef8dcf5a94f8148.tar.gz",
+            .hash = "12207f4bba892c44b3b1b92b13b7ce5df2b49da1e797ba3e02b38b08d1e78c5cec0d",
         },
         .vulkan_zig = .{
-            .url = "https://github.com/Snektron/vulkan-zig/archive/e43d635893de4c8b89d5ca8aa142984872b7e68f.tar.gz",
+            .url = "https://github.com/Snektron/vulkan-zig/archive/dd6e61d68954a2eaa476044305dc227081a8d3fe.tar.gz",
             .hash = "122064f889ea10097a67fc28744fe95d0bfde9af252de147a9b90aa55cecfc30c01c",
         },
         .vulkan_headers = .{
-            .url = "https://github.com/KhronosGroup/Vulkan-Headers/archive/f864bc6dfe6229a399566e979c16795386d0f308.tar.gz",
-            .hash = "1220a018951fce4a42f9c8e9e50c40640fd98cdfcbbd76512ca1e9d1bab665ee2556",
+            .url = "https://github.com/KhronosGroup/Vulkan-Headers/archive/6a74a7d65cafa19e38ec116651436cce6efd5b2e.tar.gz",
+            .hash = "1220f45c472e3545ce53b43687d0dc16e439351864e88eecf7b94000fa3b03b88bcc",
         },
         .tracy = .{
             .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.11.0.tar.gz",
@@ -29,8 +29,11 @@
         },
     },
     .paths = .{
-        "build.zig",
         "build.zig.zon",
-        "src",
+        "build.zig",
+        "build",
+        "LICENSE",
+        "modules",
+        "thirdparty",
     },
 }

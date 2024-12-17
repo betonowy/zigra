@@ -118,8 +118,6 @@ pub fn enter(self: @This(), _: *root.Sequencer, m: *root.Modules) !void {
 pub fn updateEnter(_: @This(), _: *root.Sequencer, m: *root.Modules) !void {
     try m.window.process(m);
     try m.nuklear.earlyProcess(m);
-    if (build_options.debug_ui) try m.debug_ui.doUi(m);
-    try m.nuklear.lateProcess(m);
 }
 
 pub fn tickEnter(_: @This(), _: *root.Sequencer, m: *root.Modules) !void {
@@ -136,6 +134,8 @@ pub fn tickExit(_: @This(), _: *root.Sequencer, m: *root.Modules) !void {
 }
 
 pub fn updateExit(_: @This(), _: *root.Sequencer, m: *root.Modules) !void {
+    if (build_options.debug_ui) try m.debug_ui.doUi(m);
+    try m.nuklear.lateProcess(m);
     try m.camera.update(m);
     try m.vulkan.waitForFrame(m);
     try m.background.render(m);
