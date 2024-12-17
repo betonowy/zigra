@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const cell_types = @import("../modules/zigra/systems/World/sand_sim_definitions.zig").cell_types;
-const types = @import("../modules/zigra/systems/Vulkan/types.zig");
+const types = @import("../modules/zigra/systems/Vulkan/Ctx/types.zig");
 
 pub fn step(b: *std.Build) *std.Build.Step {
     const build_step = b.allocator.create(std.Build.Step) catch @panic("OOM");

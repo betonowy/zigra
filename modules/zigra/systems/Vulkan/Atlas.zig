@@ -1,6 +1,6 @@
 const std = @import("std");
 const vk = @import("vk");
-const types = @import("types.zig");
+const types = @import("Ctx/types.zig");
 const VulkanBackend = @import("Backend.zig");
 const utils = @import("util");
 
@@ -12,13 +12,13 @@ image: types.ImageData,
 sampler: vk.Sampler,
 
 pub fn init(backend: *VulkanBackend, paths: []const []const u8) !@This() {
-    var extents = std.ArrayList(vk.Extent2D).init(backend.allocator);
+    var extents = std.ArrayList(vk.Extent2D).init(backend.ctx.allocator);
     defer extents.deinit();
 
     for (paths) |path| try extents.append(try readPngSize(path));
 
     var self: @This() = undefined;
-    self.rects = std.ArrayList(vk.Rect2D).init(backend.allocator);
+    self.rects = std.ArrayList(vk.Rect2D).init(backend.ctx.allocator);
     errdefer self.rects.deinit();
     try self.rects.resize(extents.items.len);
 
@@ -28,7 +28,7 @@ pub fn init(backend: *VulkanBackend, paths: []const []const u8) !@This() {
         };
     }
 
-    self.map = std.StringArrayHashMap(u32).init(backend.allocator);
+    self.map = std.StringArrayHashMap(u32).init(backend.ctx.allocator);
     errdefer {
         var it = self.map.iterator();
         while (it.next()) |next| self.map.allocator.free(next.key_ptr.*);
@@ -88,22 +88,22 @@ pub fn init(backend: *VulkanBackend, paths: []const []const u8) !@This() {
 
     var cmd: vk.CommandBuffer = undefined;
 
-    try backend.vkd.allocateCommandBuffers(backend.device, &.{
+    try backend.ctx.vkd.allocateCommandBuffers(backend.ctx.device, &.{
         .command_buffer_count = 1,
-        .command_pool = backend.graphic_command_pool,
+        .command_pool = backend.ctx.graphic_command_pool,
         .level = .primary,
     }, utils.meta.asArray(&cmd));
-    defer backend.vkd.freeCommandBuffers(backend.device, backend.graphic_command_pool, 1, utils.meta.asConstArray(&cmd));
+    defer backend.ctx.vkd.freeCommandBuffers(backend.ctx.device, backend.ctx.graphic_command_pool, 1, utils.meta.asConstArray(&cmd));
 
     {
-        try backend.vkd.beginCommandBuffer(cmd, &.{ .flags = .{ .one_time_submit_bit = true } });
+        try backend.ctx.vkd.beginCommandBuffer(cmd, &.{ .flags = .{ .one_time_submit_bit = true } });
 
         const pre_copy_barriers = [_]vk.ImageMemoryBarrier2{
             barrierPreinitializedToTransferSrc(staging_image.handle),
             barrierUndefinedToTransferDst(self.image.handle),
         };
 
-        backend.vkd.cmdPipelineBarrier2(cmd, &.{
+        backend.ctx.vkd.cmdPipelineBarrier2(cmd, &.{
             .image_memory_barrier_count = pre_copy_barriers.len,
             .p_image_memory_barriers = &pre_copy_barriers,
         });
@@ -130,7 +130,7 @@ pub fn init(backend: *VulkanBackend, paths: []const []const u8) !@This() {
             },
         };
 
-        backend.vkd.cmdCopyImage2(cmd, &.{
+        backend.ctx.vkd.cmdCopyImage2(cmd, &.{
             .src_image = staging_image.handle,
             .dst_image = self.image.handle,
             .src_image_layout = .transfer_src_optimal,
@@ -141,12 +141,12 @@ pub fn init(backend: *VulkanBackend, paths: []const []const u8) !@This() {
 
         const sampler_barrier = barrierTransferDstToSampler(self.image.handle);
 
-        backend.vkd.cmdPipelineBarrier2(cmd, &.{
+        backend.ctx.vkd.cmdPipelineBarrier2(cmd, &.{
             .image_memory_barrier_count = 1,
             .p_image_memory_barriers = utils.meta.asConstArray(&sampler_barrier),
         });
 
-        try backend.vkd.endCommandBuffer(cmd);
+        try backend.ctx.vkd.endCommandBuffer(cmd);
     }
 
     const submit_info = vk.SubmitInfo{
@@ -154,12 +154,12 @@ pub fn init(backend: *VulkanBackend, paths: []const []const u8) !@This() {
         .p_command_buffers = utils.meta.asConstArray(&cmd),
     };
 
-    const fence = try backend.vkd.createFence(backend.device, &.{}, null);
-    defer backend.vkd.destroyFence(backend.device, fence, null);
+    const fence = try backend.ctx.vkd.createFence(backend.ctx.device, &.{}, null);
+    defer backend.ctx.vkd.destroyFence(backend.ctx.device, fence, null);
 
-    try backend.vkd.queueSubmit(backend.graphic_queue, 1, utils.meta.asConstArray(&submit_info), fence);
+    try backend.ctx.vkd.queueSubmit(backend.ctx.graphic_queue, 1, utils.meta.asConstArray(&submit_info), fence);
 
-    self.sampler = try backend.vkd.createSampler(backend.device, &.{
+    self.sampler = try backend.ctx.vkd.createSampler(backend.ctx.device, &.{
         .mag_filter = .nearest,
         .min_filter = .nearest,
         .address_mode_u = .clamp_to_border,
@@ -177,15 +177,15 @@ pub fn init(backend: *VulkanBackend, paths: []const []const u8) !@This() {
         .max_lod = 0,
     }, null);
 
-    _ = try backend.vkd.waitForFences(backend.device, 1, utils.meta.asConstArray(&fence), vk.TRUE, 1_000_000_000);
+    _ = try backend.ctx.vkd.waitForFences(backend.ctx.device, 1, utils.meta.asConstArray(&fence), vk.TRUE, 1_000_000_000);
 
-    for (0.., paths) |i, path| try self.map.put(try backend.allocator.dupe(u8, path), @intCast(i));
+    for (0.., paths) |i, path| try self.map.put(try backend.ctx.allocator.dupe(u8, path), @intCast(i));
 
     return self;
 }
 
 pub fn deinit(self: *@This(), backend: *VulkanBackend) void {
-    backend.vkd.destroySampler(backend.device, self.sampler, null);
+    backend.ctx.vkd.destroySampler(backend.ctx.device, self.sampler, null);
     backend.destroyImage(self.image);
     var it = self.map.iterator();
     while (it.next()) |next| self.map.allocator.free(next.key_ptr.*);

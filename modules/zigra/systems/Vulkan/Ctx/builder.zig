@@ -5,8 +5,8 @@ const glfw = @import("glfw");
 const vk = @import("vk");
 const types = @import("types.zig");
 const initialization = @import("init.zig");
-const Atlas = @import("Atlas.zig");
-const Landscape = @import("Landscape.zig");
+const Atlas = @import("../Atlas.zig");
+const Landscape = @import("../Landscape.zig");
 const spv = @import("spv");
 
 const stb = @cImport(@cInclude("stb/stb_image.h"));

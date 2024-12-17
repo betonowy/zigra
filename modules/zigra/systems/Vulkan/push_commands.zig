@@ -1,8 +1,8 @@
 const Backend = @import("Backend.zig");
-const types = @import("types.zig");
+const types = @import("Ctx/types.zig");
 
 pub fn pushWorldLine(self: *Backend, points: [2]@Vector(2, f32), color: @Vector(4, f16), depth: f32, alpha: @Vector(2, f16)) !void {
-    try self.upload_line_data.append(self.allocator, .{
+    try self.upload_line_data.append(self.ctx.allocator, .{
         .points = points,
         .color = color,
         .depth = depth,
@@ -11,7 +11,7 @@ pub fn pushWorldLine(self: *Backend, points: [2]@Vector(2, f32), color: @Vector(
 }
 
 pub fn pushWorldVertex(self: *Backend, vertex: types.VertexData) !void {
-    try self.upload_triangle_data.append(self.allocator, vertex);
+    try self.upload_triangle_data.append(self.ctx.allocator, vertex);
 }
 
 pub fn pushGuiChar(self: *Backend, data: types.TextData) !void {
@@ -57,7 +57,7 @@ fn pushGuiScissorEdit(self: *Backend, scissor: types.GuiHeader.Scissor) void {
 }
 
 fn pushGuiScissorAppend(self: *Backend, scissor: types.GuiHeader.Scissor) !void {
-    try self.upload_gui_data.append(self.allocator, .{ .scissor = scissor });
+    try self.upload_gui_data.append(self.ctx.allocator, .{ .scissor = scissor });
 }
 
 pub fn pushGuiScissor(self: *Backend, scissor: types.GuiHeader.Scissor) !void {
@@ -73,17 +73,17 @@ pub fn pushGuiScissor(self: *Backend, scissor: types.GuiHeader.Scissor) !void {
 
 fn pushGuiTriangleEdit(self: *Backend, data: []const types.VertexData) !void {
     self.upload_gui_data.items[self.upload_gui_data.items.len - 1].triangles.end += @intCast(data.len);
-    try self.upload_gui_vertices.appendSlice(self.allocator, data);
+    try self.upload_gui_vertices.appendSlice(self.ctx.allocator, data);
 }
 
 fn pushGuiTriangleAppend(self: *Backend, data: []const types.VertexData) !void {
-    try self.upload_gui_data.append(self.allocator, .{
+    try self.upload_gui_data.append(self.ctx.allocator, .{
         .triangles = .{
             .begin = @intCast(self.upload_gui_vertices.items.len),
             .end = @intCast(self.upload_gui_vertices.items.len + data.len),
         },
     });
-    try self.upload_gui_vertices.appendSlice(self.allocator, data);
+    try self.upload_gui_vertices.appendSlice(self.ctx.allocator, data);
 }
 
 pub fn pushGuiTriangle(self: *Backend, data: []const types.VertexData) !void {
@@ -99,17 +99,17 @@ pub fn pushGuiTriangle(self: *Backend, data: []const types.VertexData) !void {
 
 fn pushGuiLineEdit(self: *Backend, data: []const types.VertexData) !void {
     self.upload_gui_data.items[self.upload_gui_data.items.len - 1].lines.end += @intCast(data.len);
-    try self.upload_gui_vertices.appendSlice(self.allocator, data);
+    try self.upload_gui_vertices.appendSlice(self.ctx.allocator, data);
 }
 
 fn pushGuiLineAppend(self: *Backend, data: []const types.VertexData) !void {
-    try self.upload_gui_data.append(self.allocator, .{
+    try self.upload_gui_data.append(self.ctx.allocator, .{
         .lines = .{
             .begin = @intCast(self.upload_gui_vertices.items.len),
             .end = @intCast(self.upload_gui_vertices.items.len + data.len),
         },
     });
-    try self.upload_gui_vertices.appendSlice(self.allocator, data);
+    try self.upload_gui_vertices.appendSlice(self.ctx.allocator, data);
 }
 
 pub fn pushGuiLine(self: *Backend, data: []const types.VertexData) !void {

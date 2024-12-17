@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const Backend = @import("Vulkan/Backend.zig");
-const types = @import("Vulkan/types.zig");
+const types = @import("Vulkan/Ctx/types.zig");
 
 const lifetime = @import("lifetime");
 const tracy = @import("tracy");

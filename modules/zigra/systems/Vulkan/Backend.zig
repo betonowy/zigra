@@ -3,15 +3,17 @@ const builtin = @import("builtin");
 
 const tracy = @import("tracy");
 const vk = @import("vk");
-const types = @import("types.zig");
-const initialization = @import("init.zig");
-const builder = @import("builder.zig");
+const types = @import("Ctx/types.zig");
+const initialization = @import("Ctx/init.zig");
+const builder = @import("Ctx/builder.zig");
 const utils = @import("util");
 const push_commands = @import("push_commands.zig");
-const VkAllocator = @import("VkAllocator.zig");
+const VkAllocator = @import("Ctx/VkAllocator.zig");
 pub const Atlas = @import("Atlas.zig");
 pub const Landscape = @import("Landscape.zig");
 pub const SandSim = @import("../World/SandSim.zig");
+const Ctx = @import("Ctx.zig");
+
 const spv = @import("spv");
 
 const stb = @cImport(@cInclude("stb/stb_image.h"));
@@ -29,27 +31,8 @@ pub const font_h_count = 16;
 pub const font_height = 8;
 pub const font_width = 8;
 
-allocator: std.mem.Allocator,
-vka: VkAllocator,
+ctx: *Ctx,
 
-vkb: types.BaseDispatch,
-vki: types.InstanceDispatch,
-vkd: types.DeviceDispatch,
-window_callbacks: *const types.WindowCallbacks,
-
-instance: vk.Instance,
-physical_device: vk.PhysicalDevice,
-device: vk.Device,
-queue_families: types.QueueFamilyIndicesComplete,
-debug_messenger: ?vk.DebugUtilsMessengerEXT,
-surface: vk.SurfaceKHR,
-
-graphic_queue: vk.Queue,
-present_queue: vk.Queue,
-graphic_command_pool: vk.CommandPool,
-
-swapchain: types.SwapchainData,
-descriptor_pool: vk.DescriptorPool,
 frames: [frame_data_count]FrameData,
 frame_index: @TypeOf(frame_data_count) = 0,
 pipelines: types.Pipelines,
@@ -106,47 +89,14 @@ pub fn init(
 ) !@This() {
     var self: @This() = undefined;
 
-    self.allocator = allocator;
-    self.vka = try VkAllocator.init(allocator);
-    errdefer self.vka.deinit();
-
-    self.vkb = try types.BaseDispatch.load(get_proc_addr);
-    self.instance = try initialization.createVulkanInstance(self.vkb, self.allocator, window_callbacks, self.vka);
-    self.vki = try types.InstanceDispatch.load(self.instance, get_proc_addr);
-    errdefer self.vki.destroyInstance(self.instance, null);
-
-    self.debug_messenger = try initialization.createDebugMessenger(self.vki, self.instance);
-    errdefer if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
-        if (self.debug_messenger) |handle| self.vki.destroyDebugUtilsMessengerEXT(self.instance, handle, null);
-    };
-
-    self.window_callbacks = window_callbacks;
-    self.surface = try self.window_callbacks.createWindowSurface(self.instance);
-    errdefer self.vki.destroySurfaceKHR(self.instance, self.surface, null);
-
-    self.physical_device = try initialization.pickPhysicalDevice(self.vki, self.instance, self.surface, allocator);
-    {
-        var p: vk.PhysicalDeviceProperties2 = .{ .properties = undefined };
-        self.vki.getPhysicalDeviceProperties2(self.physical_device, &p);
-        log.info("Selected: {s}, vendor ID: 0x{x}", .{ p.properties.device_name, p.properties.vendor_id });
-    }
-
-    self.queue_families = try initialization.findQueueFamilies(self.vki, self.physical_device, self.surface, allocator);
-    self.device = try initialization.createLogicalDevice(self.vki, self.physical_device, self.queue_families);
-    self.vkd = try types.DeviceDispatch.load(self.device, self.vki.dispatch.vkGetDeviceProcAddr);
-    errdefer self.vkd.destroyDevice(self.device, null);
-
-    try self.createSwapchain(.first_time);
-    errdefer self.destroySwapchain();
-
-    self.descriptor_pool = try self.createDescriptorPool();
-    errdefer self.vkd.destroyDescriptorPool(self.device, self.descriptor_pool, null);
+    self.ctx = try Ctx.init(allocator, get_proc_addr, window_callbacks);
+    errdefer self.ctx.deinit();
 
     try self.createPipelines();
     errdefer self.destroyPipelines();
 
-    self.graphic_queue = self.vkd.getDeviceQueue(self.device, self.queue_families.graphics, 0);
-    self.present_queue = self.vkd.getDeviceQueue(self.device, self.queue_families.present, 0);
+    self.ctx.graphic_queue = self.ctx.vkd.getDeviceQueue(self.ctx.device, self.ctx.queue_families.graphics, 0);
+    self.ctx.present_queue = self.ctx.vkd.getDeviceQueue(self.ctx.device, self.ctx.queue_families.present, 0);
 
     try self.createCommandPools();
     errdefer self.destroyCommandPools();
@@ -186,32 +136,22 @@ pub fn init(
 }
 
 pub fn deinit(self: *@This()) void {
-    self.vkd.deviceWaitIdle(self.device) catch unreachable;
+    self.ctx.waitIdle();
 
     tracy.message("deviceWaitIdle release");
 
-    self.upload_gui_data.deinit(self.allocator);
-    self.upload_gui_vertices.deinit(self.allocator);
-    self.upload_text_data.deinit(self.allocator);
-    self.upload_triangle_data.deinit(self.allocator);
-    self.upload_line_data.deinit(self.allocator);
+    self.upload_gui_data.deinit(self.ctx.allocator);
+    self.upload_gui_vertices.deinit(self.ctx.allocator);
+    self.upload_text_data.deinit(self.ctx.allocator);
+    self.upload_triangle_data.deinit(self.ctx.allocator);
+    self.upload_line_data.deinit(self.ctx.allocator);
 
     self.atlas.deinit(self);
     self.destroyFrameData();
     self.destroyCommandPools();
     self.destroyPipelines();
-    self.vkd.destroyDescriptorPool(self.device, self.descriptor_pool, null);
 
-    self.destroySwapchain();
-    self.vkd.destroyDevice(self.device, null);
-    self.vki.destroySurfaceKHR(self.instance, self.surface, null);
-
-    if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
-        if (self.debug_messenger) |handle| self.vki.destroyDebugUtilsMessengerEXT(self.instance, handle, null);
-    }
-
-    self.vki.destroyInstance(self.instance, &self.vka.cbs);
-    self.vka.deinit();
+    self.ctx.deinit();
 }
 
 pub fn currentFrameData(self: *@This()) *FrameData {
@@ -219,8 +159,8 @@ pub fn currentFrameData(self: *@This()) *FrameData {
 }
 
 pub fn waitForFreeFrame(self: *@This()) !void {
-    if (try self.vkd.waitForFences(
-        self.device,
+    if (try self.ctx.vkd.waitForFences(
+        self.ctx.device,
         1,
         utils.meta.asConstArray(&self.frames[self.frame_index].fence_busy),
         vk.TRUE,
@@ -229,8 +169,8 @@ pub fn waitForFreeFrame(self: *@This()) !void {
 }
 
 pub fn process(self: *@This()) !void {
-    try self.vkd.resetCommandBuffer(self.frames[self.frame_index].command_buffer, .{});
-    try self.vkd.beginCommandBuffer(self.frames[self.frame_index].command_buffer, &.{ .flags = .{ .one_time_submit_bit = true } });
+    try self.ctx.vkd.resetCommandBuffer(self.frames[self.frame_index].command_buffer, .{});
+    try self.ctx.vkd.beginCommandBuffer(self.frames[self.frame_index].command_buffer, &.{ .flags = .{ .one_time_submit_bit = true } });
 
     try self.frames[self.frame_index].landscape.recordUploadData(
         self,
@@ -243,7 +183,7 @@ pub fn process(self: *@This()) !void {
     const next_image = try self.acquireNextSwapchainImage();
 
     if (next_image.result == .error_out_of_date_khr) {
-        try self.createSwapchain(.recreate);
+        try self.ctx.recreateSwapchain();
         return;
     }
 
@@ -255,7 +195,7 @@ pub fn process(self: *@This()) !void {
     const trace_finalize = tracy.traceNamed(@src(), "finalize");
     defer trace_finalize.end();
 
-    try self.vkd.endCommandBuffer(self.frames[self.frame_index].command_buffer);
+    try self.ctx.vkd.endCommandBuffer(self.frames[self.frame_index].command_buffer);
 
     var wait_semaphores = std.BoundedArray(vk.Semaphore, 4){};
     var wait_dst_stage_mask = std.BoundedArray(vk.PipelineStageFlags, 4){};
@@ -275,8 +215,8 @@ pub fn process(self: *@This()) !void {
         .p_signal_semaphores = utils.meta.asConstArray(&self.frames[self.frame_index].semaphore_finished),
     };
 
-    try self.vkd.resetFences(self.device, 1, utils.meta.asConstArray(&self.frames[self.frame_index].fence_busy));
-    try self.vkd.queueSubmit(self.graphic_queue, 1, utils.meta.asConstArray(&submit_info), self.frames[self.frame_index].fence_busy);
+    try self.ctx.vkd.resetFences(self.ctx.device, 1, utils.meta.asConstArray(&self.frames[self.frame_index].fence_busy));
+    try self.ctx.vkd.queueSubmit(self.ctx.graphic_queue, 1, utils.meta.asConstArray(&submit_info), self.frames[self.frame_index].fence_busy);
 
     const present_result = try self.presentSwapchainImage(
         self.frames[self.frame_index],
@@ -294,63 +234,63 @@ const CreateSwapchainMode = enum { first_time, recreate };
 
 pub fn createSwapchain(self: *@This(), comptime mode: CreateSwapchainMode) !void {
     if (comptime mode == .recreate) {
-        try self.vkd.deviceWaitIdle(self.device);
+        try self.ctx.vkd.deviceWaitIdle(self.ctx.device);
 
-        for (self.swapchain.views.slice()) |view| {
-            self.vkd.destroyImageView(self.device, view, null);
+        for (self.ctx.swapchain.views.slice()) |view| {
+            self.ctx.vkd.destroyImageView(self.ctx.device, view, null);
         }
 
-        try self.swapchain.images.resize(0);
-        try self.swapchain.views.resize(0);
+        try self.ctx.swapchain.images.resize(0);
+        try self.ctx.swapchain.views.resize(0);
 
-        if (self.swapchain.handle != .null_handle) {
-            self.vkd.destroySwapchainKHR(self.device, self.swapchain.handle, null);
+        if (self.ctx.swapchain.handle != .null_handle) {
+            self.ctx.vkd.destroySwapchainKHR(self.ctx.device, self.ctx.swapchain.handle, null);
         }
     }
 
     const basic_data = try initialization.createSwapChain(
-        self.vki,
-        self.vkd,
-        self.physical_device,
-        self.device,
-        self.surface,
-        self.window_callbacks,
-        self.allocator,
+        self.ctx.vki,
+        self.ctx.vkd,
+        self.ctx.physical_device,
+        self.ctx.device,
+        self.ctx.surface,
+        self.ctx.window_callbacks,
+        self.ctx.allocator,
     );
-    self.swapchain = types.SwapchainData.init(basic_data);
-    errdefer self.vkd.destroySwapchainKHR(self.device, self.swapchain.handle, null);
+    self.ctx.swapchain = types.SwapchainData.init(basic_data);
+    errdefer self.ctx.vkd.destroySwapchainKHR(self.ctx.device, self.ctx.swapchain.handle, null);
 
     var queried_image_count: u32 = undefined;
 
-    if (try self.vkd.getSwapchainImagesKHR(self.device, self.swapchain.handle, &queried_image_count, null) != .success) {
+    if (try self.ctx.vkd.getSwapchainImagesKHR(self.ctx.device, self.ctx.swapchain.handle, &queried_image_count, null) != .success) {
         return error.InitializationFailed;
     }
 
-    try self.swapchain.images.resize(queried_image_count);
-    try self.swapchain.views.resize(queried_image_count);
+    try self.ctx.swapchain.images.resize(queried_image_count);
+    try self.ctx.swapchain.views.resize(queried_image_count);
 
-    if (try self.vkd.getSwapchainImagesKHR(
-        self.device,
-        self.swapchain.handle,
+    if (try self.ctx.vkd.getSwapchainImagesKHR(
+        self.ctx.device,
+        self.ctx.swapchain.handle,
         &queried_image_count,
-        &self.swapchain.images.buffer,
+        &self.ctx.swapchain.images.buffer,
     ) != .success) {
         return error.InitializationFailed;
     }
 
-    for (self.swapchain.images.slice(), self.swapchain.views.slice(), 0..) |image, *view, i| {
+    for (self.ctx.swapchain.images.slice(), self.ctx.swapchain.views.slice(), 0..) |image, *view, i| {
         errdefer {
-            for (self.swapchain.views.buffer[0..i]) |view_to_destroy| {
-                self.vkd.destroyImageView(self.device, view_to_destroy, null);
+            for (self.ctx.swapchain.views.buffer[0..i]) |view_to_destroy| {
+                self.ctx.vkd.destroyImageView(self.ctx.device, view_to_destroy, null);
             }
 
-            self.swapchain.views.resize(0) catch unreachable;
+            self.ctx.swapchain.views.resize(0) catch unreachable;
         }
 
-        view.* = try self.vkd.createImageView(self.device, &.{
+        view.* = try self.ctx.vkd.createImageView(self.ctx.device, &.{
             .image = image,
             .view_type = .@"2d",
-            .format = self.swapchain.format,
+            .format = self.ctx.swapchain.format,
             .components = builder.compIdentity,
             .subresource_range = builder.defaultSubrange(.{ .color_bit = true }, 1),
         }, null);
@@ -358,15 +298,15 @@ pub fn createSwapchain(self: *@This(), comptime mode: CreateSwapchainMode) !void
 }
 
 pub fn destroySwapchain(self: *@This()) void {
-    for (self.swapchain.views.slice()) |view| {
-        self.vkd.destroyImageView(self.device, view, null);
+    for (self.ctx.swapchain.views.slice()) |view| {
+        self.ctx.vkd.destroyImageView(self.ctx.device, view, null);
     }
 
-    self.vkd.destroySwapchainKHR(self.device, self.swapchain.handle, null);
+    self.ctx.vkd.destroySwapchainKHR(self.ctx.device, self.ctx.swapchain.handle, null);
 }
 
 fn findMemoryType(self: *@This(), type_filter: u32, properties: vk.MemoryPropertyFlags) !u32 {
-    const props = self.vki.getPhysicalDeviceMemoryProperties(self.physical_device);
+    const props = self.ctx.vki.getPhysicalDeviceMemoryProperties(self.ctx.physical_device);
 
     for (0..props.memory_type_count) |i| {
         const properties_match = vk.MemoryPropertyFlags.contains(props.memory_types[i].property_flags, properties);
@@ -388,23 +328,23 @@ const CreateBufferInfo = struct {
 fn createBuffer(self: *@This(), comptime T: type, info: CreateBufferInfo) !types.BufferVisible(T) {
     const size_in_bytes = info.size * @sizeOf(T);
 
-    const buffer = try self.vkd.createBuffer(self.device, &.{
+    const buffer = try self.ctx.vkd.createBuffer(self.ctx.device, &.{
         .size = size_in_bytes,
         .usage = info.usage,
         .sharing_mode = info.sharing_mode,
     }, null);
-    errdefer self.vkd.destroyBuffer(self.device, buffer, null);
+    errdefer self.ctx.vkd.destroyBuffer(self.ctx.device, buffer, null);
 
-    const memory_requirements = self.vkd.getBufferMemoryRequirements(self.device, buffer);
+    const memory_requirements = self.ctx.vkd.getBufferMemoryRequirements(self.ctx.device, buffer);
 
-    const memory = try self.vkd.allocateMemory(self.device, &.{
+    const memory = try self.ctx.vkd.allocateMemory(self.ctx.device, &.{
         .allocation_size = memory_requirements.size,
         .memory_type_index = try self.findMemoryType(memory_requirements.memory_type_bits, info.properties),
     }, null);
-    errdefer self.vkd.freeMemory(self.device, memory, null);
+    errdefer self.ctx.vkd.freeMemory(self.ctx.device, memory, null);
 
-    try self.vkd.bindBufferMemory(self.device, buffer, memory, 0);
-    const ptr = try self.vkd.mapMemory(self.device, memory, 0, size_in_bytes, .{}) orelse return error.NullMemory;
+    try self.ctx.vkd.bindBufferMemory(self.ctx.device, buffer, memory, 0);
+    const ptr = try self.ctx.vkd.mapMemory(self.ctx.device, memory, 0, size_in_bytes, .{}) orelse return error.NullMemory;
 
     return types.BufferVisible(T){
         .handle = buffer,
@@ -415,8 +355,8 @@ fn createBuffer(self: *@This(), comptime T: type, info: CreateBufferInfo) !types
 }
 
 fn destroyBuffer(self: *@This(), typed_buffer: anytype) void {
-    self.vkd.freeMemory(self.device, typed_buffer.memory, null);
-    self.vkd.destroyBuffer(self.device, typed_buffer.handle, null);
+    self.ctx.vkd.freeMemory(self.ctx.device, typed_buffer.memory, null);
+    self.ctx.vkd.destroyBuffer(self.ctx.device, typed_buffer.handle, null);
 }
 
 const possible_depth_image_formats = [_]vk.Format{
@@ -429,7 +369,7 @@ const possible_depth_image_formats = [_]vk.Format{
 
 fn findDepthImageFormat(self: @This()) !vk.Format {
     for (possible_depth_image_formats) |format| {
-        const props = self.vki.getPhysicalDeviceFormatProperties(self.physical_device, format);
+        const props = self.ctx.vki.getPhysicalDeviceFormatProperties(self.ctx.physical_device, format);
         if (props.optimal_tiling_features.depth_stencil_attachment_bit) {
             return format;
         }
@@ -466,7 +406,7 @@ const ImageDataCreateInfo = struct {
 };
 
 pub fn createImage(self: *@This(), info: ImageDataCreateInfo) !types.ImageData {
-    const image = try self.vkd.createImage(self.device, &.{
+    const image = try self.ctx.vkd.createImage(self.ctx.device, &.{
         .image_type = .@"2d",
         .extent = .{
             .width = info.extent.width,
@@ -483,19 +423,19 @@ pub fn createImage(self: *@This(), info: ImageDataCreateInfo) !types.ImageData {
         .samples = .{ .@"1_bit" = true },
         .flags = info.flags,
     }, null);
-    errdefer self.vkd.destroyImage(self.device, image, null);
+    errdefer self.ctx.vkd.destroyImage(self.ctx.device, image, null);
 
-    const memory_requirements = self.vkd.getImageMemoryRequirements(self.device, image);
+    const memory_requirements = self.ctx.vkd.getImageMemoryRequirements(self.ctx.device, image);
 
-    const memory = try self.vkd.allocateMemory(self.device, &.{
+    const memory = try self.ctx.vkd.allocateMemory(self.ctx.device, &.{
         .allocation_size = memory_requirements.size,
         .memory_type_index = try self.findMemoryType(memory_requirements.memory_type_bits, info.property),
     }, null);
-    errdefer self.vkd.freeMemory(self.device, memory, null);
+    errdefer self.ctx.vkd.freeMemory(self.ctx.device, memory, null);
 
-    const map = if (info.map_memory) try self.vkd.mapMemory(self.device, memory, 0, memory_requirements.size, .{}) else null;
+    const map = if (info.map_memory) try self.ctx.vkd.mapMemory(self.ctx.device, memory, 0, memory_requirements.size, .{}) else null;
 
-    try self.vkd.bindImageMemory(self.device, image, memory, 0);
+    try self.ctx.vkd.bindImageMemory(self.ctx.device, image, memory, 0);
 
     if (!info.has_view) return .{
         .handle = image,
@@ -508,7 +448,7 @@ pub fn createImage(self: *@This(), info: ImageDataCreateInfo) !types.ImageData {
         .map = map,
     };
 
-    const view = try self.vkd.createImageView(self.device, &.{
+    const view = try self.ctx.vkd.createImageView(self.ctx.device, &.{
         .image = image,
         .view_type = if (info.array_layers > 1) .@"2d_array" else .@"2d",
         .format = info.format,
@@ -529,13 +469,13 @@ pub fn createImage(self: *@This(), info: ImageDataCreateInfo) !types.ImageData {
 }
 
 pub fn destroyImage(self: *@This(), image_data: types.ImageData) void {
-    if (image_data.view != .null_handle) self.vkd.destroyImageView(self.device, image_data.view, null);
-    self.vkd.freeMemory(self.device, image_data.memory, null);
-    self.vkd.destroyImage(self.device, image_data.handle, null);
+    if (image_data.view != .null_handle) self.ctx.vkd.destroyImageView(self.ctx.device, image_data.view, null);
+    self.ctx.vkd.freeMemory(self.ctx.device, image_data.memory, null);
+    self.ctx.vkd.destroyImage(self.ctx.device, image_data.handle, null);
 }
 
 fn createDescriptorPool(self: *@This()) !vk.DescriptorPool {
-    return try self.vkd.createDescriptorPool(self.device, &.{
+    return try self.ctx.vkd.createDescriptorPool(self.ctx.device, &.{
         .pool_size_count = builder.pipeline.descriptor_pool_sizes.len,
         .p_pool_sizes = &builder.pipeline.descriptor_pool_sizes,
         .max_sets = 2,
@@ -544,7 +484,7 @@ fn createDescriptorPool(self: *@This()) !vk.DescriptorPool {
 }
 
 fn createShaderModule(self: *@This(), byte_code: []const u32) !vk.ShaderModule {
-    return try self.vkd.createShaderModule(self.device, &.{
+    return try self.ctx.vkd.createShaderModule(self.ctx.device, &.{
         .code_size = byte_code.len * @sizeOf(std.meta.Child(@TypeOf(byte_code))),
         .p_code = @alignCast(@ptrCast(byte_code)),
     }, null);
@@ -552,33 +492,33 @@ fn createShaderModule(self: *@This(), byte_code: []const u32) !vk.ShaderModule {
 
 fn createPipelines(self: *@This()) !void {
     const sprite_vs = try self.createShaderModule(&spv.sprite_vert);
-    defer self.vkd.destroyShaderModule(self.device, sprite_vs, null);
+    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, sprite_vs, null);
     const sprite_opaque_fs = try self.createShaderModule(&spv.sprite_opaque_frag);
-    defer self.vkd.destroyShaderModule(self.device, sprite_opaque_fs, null);
+    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, sprite_opaque_fs, null);
     const fullscreen_vs = try self.createShaderModule(&spv.fullscreen_vert);
-    defer self.vkd.destroyShaderModule(self.device, fullscreen_vs, null);
+    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, fullscreen_vs, null);
     const present_fs = try self.createShaderModule(&spv.final_frag);
-    defer self.vkd.destroyShaderModule(self.device, present_fs, null);
+    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, present_fs, null);
     const landscape_vs = try self.createShaderModule(&spv.landscape_vert);
-    defer self.vkd.destroyShaderModule(self.device, landscape_vs, null);
+    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, landscape_vs, null);
     const landscape_fs = try self.createShaderModule(&spv.landscape_frag);
-    defer self.vkd.destroyShaderModule(self.device, landscape_fs, null);
+    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, landscape_fs, null);
     const line_vs = try self.createShaderModule(&spv.line_vert);
-    defer self.vkd.destroyShaderModule(self.device, line_vs, null);
+    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, line_vs, null);
     const line_opaque_fs = try self.createShaderModule(&spv.line_opaque_frag);
-    defer self.vkd.destroyShaderModule(self.device, line_opaque_fs, null);
+    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, line_opaque_fs, null);
     const point_vs = try self.createShaderModule(&spv.point_vert);
-    defer self.vkd.destroyShaderModule(self.device, point_vs, null);
+    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, point_vs, null);
     const point_fs = try self.createShaderModule(&spv.point_frag);
-    defer self.vkd.destroyShaderModule(self.device, point_fs, null);
+    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, point_fs, null);
     const vertex_vs = try self.createShaderModule(&spv.vertex_vert);
-    defer self.vkd.destroyShaderModule(self.device, vertex_vs, null);
+    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, vertex_vs, null);
     const vertex_fs = try self.createShaderModule(&spv.vertex_frag);
-    defer self.vkd.destroyShaderModule(self.device, vertex_fs, null);
+    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, vertex_fs, null);
     const text_vs = try self.createShaderModule(&spv.text_vert);
-    defer self.vkd.destroyShaderModule(self.device, text_vs, null);
+    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, text_vs, null);
     const text_fs = try self.createShaderModule(&spv.text_frag);
-    defer self.vkd.destroyShaderModule(self.device, text_fs, null);
+    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, text_fs, null);
 
     self.pipelines.resolved_depth_format = try self.findDepthImageFormat();
     self.pipelines.resolved_depth_aspect = builder.depthImageAspect(self.pipelines.resolved_depth_format);
@@ -597,78 +537,78 @@ fn createPipelines(self: *@This()) !void {
     const line_assembly_stage_create_info = builder.pipeline.assemblyState(.line_list);
     const point_assembly_stage_create_info = builder.pipeline.assemblyState(.point_list);
 
-    self.pipelines.descriptor_set_layout = try self.vkd.createDescriptorSetLayout(self.device, &.{
+    self.pipelines.descriptor_set_layout = try self.ctx.vkd.createDescriptorSetLayout(self.ctx.device, &.{
         .binding_count = builder.pipeline.dslb_bindings.len,
         .p_bindings = &builder.pipeline.dslb_bindings,
     }, null);
-    errdefer self.vkd.destroyDescriptorSetLayout(self.device, self.pipelines.descriptor_set_layout, null);
+    errdefer self.ctx.vkd.destroyDescriptorSetLayout(self.ctx.device, self.pipelines.descriptor_set_layout, null);
 
     const push_constant = builder.pipeline.pushConstantVsFs(@sizeOf(types.BasicPushConstant));
     const push_constant_text = builder.pipeline.pushConstantVsFs(@sizeOf(types.TextPushConstant));
 
-    self.pipelines.pipeline_point.layout = try self.vkd.createPipelineLayout(self.device, &.{
+    self.pipelines.pipeline_point.layout = try self.ctx.vkd.createPipelineLayout(self.ctx.device, &.{
         .set_layout_count = 1,
         .p_set_layouts = utils.meta.asConstArray(&self.pipelines.descriptor_set_layout),
         .push_constant_range_count = 1,
         .p_push_constant_ranges = utils.meta.asConstArray(&push_constant),
     }, null);
-    errdefer self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_point.layout, null);
+    errdefer self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_point.layout, null);
 
-    self.pipelines.pipeline_line.layout = try self.vkd.createPipelineLayout(self.device, &.{
+    self.pipelines.pipeline_line.layout = try self.ctx.vkd.createPipelineLayout(self.ctx.device, &.{
         .set_layout_count = 1,
         .p_set_layouts = utils.meta.asConstArray(&self.pipelines.descriptor_set_layout),
         .push_constant_range_count = 1,
         .p_push_constant_ranges = utils.meta.asConstArray(&push_constant),
     }, null);
-    errdefer self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_line.layout, null);
+    errdefer self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_line.layout, null);
 
-    self.pipelines.pipeline_landscape.layout = try self.vkd.createPipelineLayout(self.device, &.{
+    self.pipelines.pipeline_landscape.layout = try self.ctx.vkd.createPipelineLayout(self.ctx.device, &.{
         .set_layout_count = 1,
         .p_set_layouts = utils.meta.asConstArray(&self.pipelines.descriptor_set_layout),
         .push_constant_range_count = 1,
         .p_push_constant_ranges = utils.meta.asConstArray(&push_constant),
     }, null);
-    errdefer self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_landscape.layout, null);
+    errdefer self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_landscape.layout, null);
 
-    self.pipelines.pipeline_triangles.layout = try self.vkd.createPipelineLayout(self.device, &.{
+    self.pipelines.pipeline_triangles.layout = try self.ctx.vkd.createPipelineLayout(self.ctx.device, &.{
         .set_layout_count = 1,
         .p_set_layouts = utils.meta.asConstArray(&self.pipelines.descriptor_set_layout),
         .push_constant_range_count = 1,
         .p_push_constant_ranges = utils.meta.asConstArray(&push_constant),
     }, null);
-    errdefer self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_triangles.layout, null);
+    errdefer self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_triangles.layout, null);
 
-    self.pipelines.pipeline_text.layout = try self.vkd.createPipelineLayout(self.device, &.{
+    self.pipelines.pipeline_text.layout = try self.ctx.vkd.createPipelineLayout(self.ctx.device, &.{
         .set_layout_count = 1,
         .p_set_layouts = utils.meta.asConstArray(&self.pipelines.descriptor_set_layout),
         .push_constant_range_count = 1,
         .p_push_constant_ranges = utils.meta.asConstArray(&push_constant_text),
     }, null);
-    errdefer self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_text.layout, null);
+    errdefer self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_text.layout, null);
 
-    self.pipelines.pipeline_sprite_opaque.layout = try self.vkd.createPipelineLayout(self.device, &.{
+    self.pipelines.pipeline_sprite_opaque.layout = try self.ctx.vkd.createPipelineLayout(self.ctx.device, &.{
         .set_layout_count = 1,
         .p_set_layouts = utils.meta.asConstArray(&self.pipelines.descriptor_set_layout),
         .push_constant_range_count = 1,
         .p_push_constant_ranges = utils.meta.asConstArray(&push_constant),
     }, null);
-    errdefer self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_sprite_opaque.layout, null);
+    errdefer self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_sprite_opaque.layout, null);
 
-    self.pipelines.pipeline_gui.layout = try self.vkd.createPipelineLayout(self.device, &.{
+    self.pipelines.pipeline_gui.layout = try self.ctx.vkd.createPipelineLayout(self.ctx.device, &.{
         .set_layout_count = 1,
         .p_set_layouts = utils.meta.asConstArray(&self.pipelines.descriptor_set_layout),
         .push_constant_range_count = 1,
         .p_push_constant_ranges = utils.meta.asConstArray(&push_constant),
     }, null);
-    errdefer self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_gui.layout, null);
+    errdefer self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_gui.layout, null);
 
-    self.pipelines.pipeline_present.layout = try self.vkd.createPipelineLayout(self.device, &.{
+    self.pipelines.pipeline_present.layout = try self.ctx.vkd.createPipelineLayout(self.ctx.device, &.{
         .set_layout_count = 1,
         .p_set_layouts = utils.meta.asConstArray(&self.pipelines.descriptor_set_layout),
         .push_constant_range_count = 0,
         .p_push_constant_ranges = null,
     }, null);
-    errdefer self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_present.layout, null);
+    errdefer self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_present.layout, null);
 
     const target_render_info = vk.PipelineRenderingCreateInfo{
         .color_attachment_count = 1,
@@ -680,7 +620,7 @@ fn createPipelines(self: *@This()) !void {
 
     const present_render_info = vk.PipelineRenderingCreateInfo{
         .color_attachment_count = 1,
-        .p_color_attachment_formats = utils.meta.asConstArray(&self.swapchain.format),
+        .p_color_attachment_formats = utils.meta.asConstArray(&self.ctx.swapchain.format),
         .depth_attachment_format = .undefined,
         .view_mask = 0,
         .stencil_attachment_format = .undefined,
@@ -822,78 +762,78 @@ fn createPipelines(self: *@This()) !void {
         .base_pipeline_index = 0,
     };
 
-    if (try self.vkd.createGraphicsPipelines(
-        self.device,
+    if (try self.ctx.vkd.createGraphicsPipelines(
+        self.ctx.device,
         .null_handle,
         1,
         utils.meta.asConstArray(&pipeline_point_opaque_info),
         null,
         utils.meta.asArray(&self.pipelines.pipeline_point.handle),
     ) != .success) return error.InitializationFailed;
-    errdefer self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_point.handle, null);
+    errdefer self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_point.handle, null);
 
-    if (try self.vkd.createGraphicsPipelines(
-        self.device,
+    if (try self.ctx.vkd.createGraphicsPipelines(
+        self.ctx.device,
         .null_handle,
         1,
         utils.meta.asConstArray(&pipeline_line_opaque_info),
         null,
         utils.meta.asArray(&self.pipelines.pipeline_line.handle),
     ) != .success) return error.InitializationFailed;
-    errdefer self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_line.handle, null);
+    errdefer self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_line.handle, null);
 
-    if (try self.vkd.createGraphicsPipelines(
-        self.device,
+    if (try self.ctx.vkd.createGraphicsPipelines(
+        self.ctx.device,
         .null_handle,
         1,
         utils.meta.asConstArray(&pipeline_landscape_info),
         null,
         utils.meta.asArray(&self.pipelines.pipeline_landscape.handle),
     ) != .success) return error.InitializationFailed;
-    errdefer self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_landscape.handle, null);
+    errdefer self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_landscape.handle, null);
 
-    if (try self.vkd.createGraphicsPipelines(
-        self.device,
+    if (try self.ctx.vkd.createGraphicsPipelines(
+        self.ctx.device,
         .null_handle,
         1,
         utils.meta.asConstArray(&pipeline_triangle_info),
         null,
         utils.meta.asArray(&self.pipelines.pipeline_triangles.handle),
     ) != .success) return error.InitializationFailed;
-    errdefer self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_triangles.handle, null);
+    errdefer self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_triangles.handle, null);
 
-    if (try self.vkd.createGraphicsPipelines(
-        self.device,
+    if (try self.ctx.vkd.createGraphicsPipelines(
+        self.ctx.device,
         .null_handle,
         1,
         utils.meta.asConstArray(&pipeline_text_info),
         null,
         utils.meta.asArray(&self.pipelines.pipeline_text.handle),
     ) != .success) return error.InitializationFailed;
-    errdefer self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_text.handle, null);
+    errdefer self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_text.handle, null);
 
-    if (try self.vkd.createGraphicsPipelines(
-        self.device,
+    if (try self.ctx.vkd.createGraphicsPipelines(
+        self.ctx.device,
         .null_handle,
         1,
         utils.meta.asConstArray(&pipeline_sprite_opaque_info),
         null,
         utils.meta.asArray(&self.pipelines.pipeline_sprite_opaque.handle),
     ) != .success) return error.InitializationFailed;
-    errdefer self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_sprite_opaque.handle, null);
+    errdefer self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_sprite_opaque.handle, null);
 
-    if (try self.vkd.createGraphicsPipelines(
-        self.device,
+    if (try self.ctx.vkd.createGraphicsPipelines(
+        self.ctx.device,
         .null_handle,
         1,
         utils.meta.asConstArray(&pipeline_gui_info),
         null,
         utils.meta.asArray(&self.pipelines.pipeline_gui.handle),
     ) != .success) return error.InitializationFailed;
-    errdefer self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_gui.handle, null);
+    errdefer self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_gui.handle, null);
 
-    if (try self.vkd.createGraphicsPipelines(
-        self.device,
+    if (try self.ctx.vkd.createGraphicsPipelines(
+        self.ctx.device,
         .null_handle,
         1,
         utils.meta.asConstArray(&pipeline_present_info),
@@ -903,34 +843,34 @@ fn createPipelines(self: *@This()) !void {
 }
 
 fn destroyPipelines(self: *@This()) void {
-    self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_present.handle, null);
-    self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_gui.handle, null);
-    self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_sprite_opaque.handle, null);
-    self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_text.handle, null);
-    self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_triangles.handle, null);
-    self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_landscape.handle, null);
-    self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_line.handle, null);
-    self.vkd.destroyPipeline(self.device, self.pipelines.pipeline_point.handle, null);
-    self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_present.layout, null);
-    self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_gui.layout, null);
-    self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_sprite_opaque.layout, null);
-    self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_text.layout, null);
-    self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_triangles.layout, null);
-    self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_landscape.layout, null);
-    self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_line.layout, null);
-    self.vkd.destroyPipelineLayout(self.device, self.pipelines.pipeline_point.layout, null);
-    self.vkd.destroyDescriptorSetLayout(self.device, self.pipelines.descriptor_set_layout, null);
+    self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_present.handle, null);
+    self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_gui.handle, null);
+    self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_sprite_opaque.handle, null);
+    self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_text.handle, null);
+    self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_triangles.handle, null);
+    self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_landscape.handle, null);
+    self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_line.handle, null);
+    self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_point.handle, null);
+    self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_present.layout, null);
+    self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_gui.layout, null);
+    self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_sprite_opaque.layout, null);
+    self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_text.layout, null);
+    self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_triangles.layout, null);
+    self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_landscape.layout, null);
+    self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_line.layout, null);
+    self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_point.layout, null);
+    self.ctx.vkd.destroyDescriptorSetLayout(self.ctx.device, self.pipelines.descriptor_set_layout, null);
 }
 
 fn createCommandPools(self: *@This()) !void {
-    self.graphic_command_pool = try self.vkd.createCommandPool(self.device, &.{
-        .queue_family_index = self.queue_families.graphics,
+    self.ctx.graphic_command_pool = try self.ctx.vkd.createCommandPool(self.ctx.device, &.{
+        .queue_family_index = self.ctx.queue_families.graphics,
         .flags = .{ .reset_command_buffer_bit = true },
     }, null);
 }
 
 fn destroyCommandPools(self: *@This()) void {
-    self.vkd.destroyCommandPool(self.device, self.graphic_command_pool, null);
+    self.ctx.vkd.destroyCommandPool(self.ctx.device, self.ctx.graphic_command_pool, null);
 }
 
 fn createFrameData(self: *@This()) !void {
@@ -963,7 +903,7 @@ fn createFrameData(self: *@This()) !void {
             .aspect_mask = self.pipelines.resolved_depth_aspect,
         });
 
-        frame.image_color_sampler = try self.vkd.createSampler(self.device, &.{
+        frame.image_color_sampler = try self.ctx.vkd.createSampler(self.ctx.device, &.{
             .mag_filter = .nearest,
             .min_filter = .nearest,
             .address_mode_u = .clamp_to_border,
@@ -984,20 +924,20 @@ fn createFrameData(self: *@This()) !void {
         frame.landscape = try Landscape.init(self);
         frame.landscape_upload.resize(0) catch unreachable;
 
-        frame.fence_busy = try self.vkd.createFence(self.device, &.{ .flags = .{ .signaled_bit = true } }, null);
-        frame.semaphore_finished = try self.vkd.createSemaphore(self.device, &.{}, null);
-        frame.semaphore_swapchain_image_acquired = try self.vkd.createSemaphore(self.device, &.{}, null);
+        frame.fence_busy = try self.ctx.vkd.createFence(self.ctx.device, &.{ .flags = .{ .signaled_bit = true } }, null);
+        frame.semaphore_finished = try self.ctx.vkd.createSemaphore(self.ctx.device, &.{}, null);
+        frame.semaphore_swapchain_image_acquired = try self.ctx.vkd.createSemaphore(self.ctx.device, &.{}, null);
 
-        try self.vkd.allocateDescriptorSets(self.device, &.{
-            .descriptor_pool = self.descriptor_pool,
+        try self.ctx.vkd.allocateDescriptorSets(self.ctx.device, &.{
+            .descriptor_pool = self.ctx.descriptor_pool,
             .descriptor_set_count = 1,
             .p_set_layouts = utils.meta.asConstArray(&self.pipelines.descriptor_set_layout),
         }, utils.meta.asArray(&frame.descriptor_set));
 
-        try self.vkd.allocateCommandBuffers(self.device, &.{
+        try self.ctx.vkd.allocateCommandBuffers(self.ctx.device, &.{
             .command_buffer_count = 1,
             .level = .primary,
-            .command_pool = self.graphic_command_pool,
+            .command_pool = self.ctx.graphic_command_pool,
         }, utils.meta.asArray(&frame.command_buffer));
 
         const ds_ssb_info = vk.DescriptorBufferInfo{
@@ -1072,16 +1012,16 @@ fn createFrameData(self: *@This()) !void {
 
         const writes = [_]vk.WriteDescriptorSet{ write_ssb, write_atlas, write_img, write_landscape };
 
-        self.vkd.updateDescriptorSets(self.device, writes.len, &writes, 0, null);
+        self.ctx.vkd.updateDescriptorSets(self.ctx.device, writes.len, &writes, 0, null);
     }
 }
 
 fn destroyFrameData(self: *@This()) void {
     for (self.frames[0..]) |*frame| {
         if (frame.command_buffer != .null_handle) {
-            self.vkd.freeCommandBuffers(
-                self.device,
-                self.graphic_command_pool,
+            self.ctx.vkd.freeCommandBuffers(
+                self.ctx.device,
+                self.ctx.graphic_command_pool,
                 1,
                 utils.meta.asConstArray(&frame.command_buffer),
             );
@@ -1089,18 +1029,18 @@ fn destroyFrameData(self: *@This()) void {
 
         frame.landscape.deinit(self);
 
-        if (frame.image_color_sampler != .null_handle) self.vkd.destroySampler(self.device, frame.image_color_sampler, null);
+        if (frame.image_color_sampler != .null_handle) self.ctx.vkd.destroySampler(self.ctx.device, frame.image_color_sampler, null);
         if (frame.draw_buffer.handle != .null_handle) self.destroyBuffer(frame.draw_buffer);
         if (frame.image_color.handle != .null_handle) self.destroyImage(frame.image_color);
         if (frame.image_depth.handle != .null_handle) self.destroyImage(frame.image_depth);
-        if (frame.fence_busy != .null_handle) self.vkd.destroyFence(self.device, frame.fence_busy, null);
+        if (frame.fence_busy != .null_handle) self.ctx.vkd.destroyFence(self.ctx.device, frame.fence_busy, null);
 
         if (frame.semaphore_swapchain_image_acquired != .null_handle) {
-            self.vkd.destroySemaphore(self.device, frame.semaphore_swapchain_image_acquired, null);
+            self.ctx.vkd.destroySemaphore(self.ctx.device, frame.semaphore_swapchain_image_acquired, null);
         }
 
         if (frame.semaphore_finished != .null_handle) {
-            self.vkd.destroySemaphore(self.device, frame.semaphore_finished, null);
+            self.ctx.vkd.destroySemaphore(self.ctx.device, frame.semaphore_finished, null);
         }
     }
 }
@@ -1111,9 +1051,9 @@ fn advanceFrame(self: *@This()) void {
 }
 
 fn acquireNextSwapchainImage(self: *@This()) !types.DeviceDispatch.AcquireNextImageKHRResult {
-    const next_image_result = self.vkd.acquireNextImageKHR(
-        self.device,
-        self.swapchain.handle,
+    const next_image_result = self.ctx.vkd.acquireNextImageKHR(
+        self.ctx.device,
+        self.ctx.swapchain.handle,
         std.math.maxInt(u64),
         self.frames[self.frame_index].semaphore_swapchain_image_acquired,
         .null_handle,
@@ -1130,11 +1070,11 @@ fn acquireNextSwapchainImage(self: *@This()) !types.DeviceDispatch.AcquireNextIm
 }
 
 fn presentSwapchainImage(self: *@This(), frame: FrameData, swapchain_image_index: u32) !vk.Result {
-    return self.vkd.queuePresentKHR(self.present_queue, &.{
+    return self.ctx.vkd.queuePresentKHR(self.ctx.present_queue, &.{
         .wait_semaphore_count = 1,
         .p_wait_semaphores = utils.meta.asConstArray(&frame.semaphore_finished),
         .swapchain_count = 1,
-        .p_swapchains = utils.meta.asConstArray(&self.swapchain.handle),
+        .p_swapchains = utils.meta.asConstArray(&self.ctx.swapchain.handle),
         .p_image_indices = utils.meta.asConstArray(&swapchain_image_index),
         .p_results = null,
     }) catch |err| {
@@ -1182,12 +1122,12 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             self.atlas.image.extent.height,
         },
         .target_size = .{
-            self.swapchain.extent.width,
-            self.swapchain.extent.height,
+            self.ctx.swapchain.extent.width,
+            self.ctx.swapchain.extent.height,
         },
         .camera_pos = .{
-            @as(i32, @intCast(self.swapchain.extent.width / 2)),
-            @as(i32, @intCast(self.swapchain.extent.height / 2)),
+            @as(i32, @intCast(self.ctx.swapchain.extent.width / 2)),
+            @as(i32, @intCast(self.ctx.swapchain.extent.height / 2)),
         },
     };
 
@@ -1195,9 +1135,9 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         const subtrace = tracy.traceNamed(@src(), "Sprite opaque");
         defer subtrace.end();
 
-        self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_sprite_opaque.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_sprite_opaque.handle);
 
-        self.vkd.cmdBindDescriptorSets(
+        self.ctx.vkd.cmdBindDescriptorSets(
             frame.command_buffer,
             .graphics,
             self.pipelines.pipeline_sprite_opaque.layout,
@@ -1208,7 +1148,7 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             null,
         );
 
-        self.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
+        self.ctx.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
             .x = 0,
             .y = 0,
             .width = @floatFromInt(frame.image_color.extent.width),
@@ -1217,12 +1157,12 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             .max_depth = 1,
         }));
 
-        self.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
+        self.ctx.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
             .offset = .{ .x = 0, .y = 0 },
             .extent = frame.image_color.extent,
         }));
 
-        self.vkd.cmdPushConstants(
+        self.ctx.vkd.cmdPushConstants(
             frame.command_buffer,
             self.pipelines.pipeline_sprite_opaque.layout,
             .{ .vertex_bit = true, .fragment_bit = true },
@@ -1231,7 +1171,7 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             &push,
         );
 
-        self.vkd.cmdDraw(
+        self.ctx.vkd.cmdDraw(
             frame.command_buffer,
             4,
             frame.draw_sprite_opaque_range,
@@ -1243,9 +1183,9 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         const subtrace = tracy.traceNamed(@src(), "Line");
         defer subtrace.end();
 
-        self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_line.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_line.handle);
 
-        self.vkd.cmdBindDescriptorSets(
+        self.ctx.vkd.cmdBindDescriptorSets(
             frame.command_buffer,
             .graphics,
             self.pipelines.pipeline_line.layout,
@@ -1256,7 +1196,7 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             null,
         );
 
-        self.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
+        self.ctx.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
             .x = 0,
             .y = 0,
             .width = @floatFromInt(frame.image_color.extent.width),
@@ -1265,12 +1205,12 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             .max_depth = 1,
         }));
 
-        self.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
+        self.ctx.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
             .offset = .{ .x = 0, .y = 0 },
             .extent = frame.image_color.extent,
         }));
 
-        self.vkd.cmdPushConstants(
+        self.ctx.vkd.cmdPushConstants(
             frame.command_buffer,
             self.pipelines.pipeline_line.layout,
             .{ .vertex_bit = true, .fragment_bit = true },
@@ -1279,7 +1219,7 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             &push,
         );
 
-        self.vkd.cmdDraw(
+        self.ctx.vkd.cmdDraw(
             frame.command_buffer,
             2,
             frame.draw_line_range,
@@ -1291,9 +1231,9 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         const subtrace = tracy.traceNamed(@src(), "Point");
         defer subtrace.end();
 
-        self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_point.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_point.handle);
 
-        self.vkd.cmdBindDescriptorSets(
+        self.ctx.vkd.cmdBindDescriptorSets(
             frame.command_buffer,
             .graphics,
             self.pipelines.pipeline_point.layout,
@@ -1304,7 +1244,7 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             null,
         );
 
-        self.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
+        self.ctx.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
             .x = 0,
             .y = 0,
             .width = @floatFromInt(frame.image_color.extent.width),
@@ -1313,12 +1253,12 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             .max_depth = 1,
         }));
 
-        self.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
+        self.ctx.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
             .offset = .{ .x = 0, .y = 0 },
             .extent = frame.image_color.extent,
         }));
 
-        self.vkd.cmdPushConstants(
+        self.ctx.vkd.cmdPushConstants(
             frame.command_buffer,
             self.pipelines.pipeline_point.layout,
             .{ .vertex_bit = true, .fragment_bit = true },
@@ -1327,7 +1267,7 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             &push,
         );
 
-        self.vkd.cmdDraw(
+        self.ctx.vkd.cmdDraw(
             frame.command_buffer,
             frame.draw_point_range,
             1,
@@ -1339,9 +1279,9 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         const subtrace = tracy.traceNamed(@src(), "Landscape");
         defer subtrace.end();
 
-        self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_landscape.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_landscape.handle);
 
-        self.vkd.cmdBindDescriptorSets(
+        self.ctx.vkd.cmdBindDescriptorSets(
             frame.command_buffer,
             .graphics,
             self.pipelines.pipeline_landscape.layout,
@@ -1352,7 +1292,7 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             null,
         );
 
-        self.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
+        self.ctx.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
             .x = 0,
             .y = 0,
             .width = @floatFromInt(frame.image_color.extent.width),
@@ -1361,12 +1301,12 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             .max_depth = 1,
         }));
 
-        self.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
+        self.ctx.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
             .offset = .{ .x = 0, .y = 0 },
             .extent = frame.image_color.extent,
         }));
 
-        self.vkd.cmdPushConstants(
+        self.ctx.vkd.cmdPushConstants(
             frame.command_buffer,
             self.pipelines.pipeline_sprite_opaque.layout,
             .{ .vertex_bit = true, .fragment_bit = true },
@@ -1375,15 +1315,15 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             &push,
         );
 
-        self.vkd.cmdDraw(frame.command_buffer, 4, frame.draw_landscape_range, 0, frame.draw_landscape_index);
+        self.ctx.vkd.cmdDraw(frame.command_buffer, 4, frame.draw_landscape_range, 0, frame.draw_landscape_index);
     }
     {
         const subtrace = tracy.traceNamed(@src(), "Triangles");
         defer subtrace.end();
 
-        self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_triangles.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_triangles.handle);
 
-        self.vkd.cmdBindDescriptorSets(
+        self.ctx.vkd.cmdBindDescriptorSets(
             frame.command_buffer,
             .graphics,
             self.pipelines.pipeline_triangles.layout,
@@ -1394,7 +1334,7 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             null,
         );
 
-        self.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
+        self.ctx.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
             .x = 0,
             .y = 0,
             .width = @floatFromInt(frame.image_color.extent.width),
@@ -1403,12 +1343,12 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             .max_depth = 1,
         }));
 
-        self.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
+        self.ctx.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
             .offset = .{ .x = 0, .y = 0 },
             .extent = frame.image_color.extent,
         }));
 
-        self.vkd.cmdPushConstants(
+        self.ctx.vkd.cmdPushConstants(
             frame.command_buffer,
             self.pipelines.pipeline_triangles.layout,
             .{ .vertex_bit = true, .fragment_bit = true },
@@ -1417,15 +1357,15 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             &push,
         );
 
-        self.vkd.cmdDraw(frame.command_buffer, frame.draw_triangles_range, 1, frame.draw_triangles_index, 0);
+        self.ctx.vkd.cmdDraw(frame.command_buffer, frame.draw_triangles_range, 1, frame.draw_triangles_index, 0);
     }
     {
         const subtrace = tracy.traceNamed(@src(), "Text");
         defer subtrace.end();
 
-        self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_text.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_text.handle);
 
-        self.vkd.cmdBindDescriptorSets(
+        self.ctx.vkd.cmdBindDescriptorSets(
             frame.command_buffer,
             .graphics,
             self.pipelines.pipeline_text.layout,
@@ -1436,7 +1376,7 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             null,
         );
 
-        self.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
+        self.ctx.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
             .x = 0,
             .y = 0,
             .width = @floatFromInt(frame.image_color.extent.width),
@@ -1445,12 +1385,12 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             .max_depth = 1,
         }));
 
-        self.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
+        self.ctx.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
             .offset = .{ .x = 0, .y = 0 },
             .extent = frame.image_color.extent,
         }));
 
-        self.vkd.cmdPushConstants(
+        self.ctx.vkd.cmdPushConstants(
             frame.command_buffer,
             self.pipelines.pipeline_text.layout,
             .{ .vertex_bit = true, .fragment_bit = true },
@@ -1459,19 +1399,19 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             &push_text,
         );
 
-        self.vkd.cmdDraw(frame.command_buffer, 4, frame.draw_text_range, 0, frame.draw_text_index);
+        self.ctx.vkd.cmdDraw(frame.command_buffer, 4, frame.draw_text_range, 0, frame.draw_text_index);
     }
 
-    self.vkd.cmdEndRendering(frame.command_buffer);
+    self.ctx.vkd.cmdEndRendering(frame.command_buffer);
     self.transitionFrameImagesFinal(frame, swapchain_image_index);
     self.beginRenderingFinal(frame, swapchain_image_index);
     {
         const subtrace = tracy.traceNamed(@src(), "Present");
         defer subtrace.end();
 
-        self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_present.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_present.handle);
 
-        self.vkd.cmdBindDescriptorSets(
+        self.ctx.vkd.cmdBindDescriptorSets(
             frame.command_buffer,
             .graphics,
             self.pipelines.pipeline_present.layout,
@@ -1482,9 +1422,9 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             null,
         );
 
-        const integer_scaling = integerScaling(self.swapchain.extent, frame.image_color.extent);
+        const integer_scaling = integerScaling(self.ctx.swapchain.extent, frame.image_color.extent);
 
-        self.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
+        self.ctx.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
             .x = @floatFromInt(integer_scaling.offset.x),
             .y = @floatFromInt(integer_scaling.offset.y),
             .width = @floatFromInt(integer_scaling.extent.width),
@@ -1493,17 +1433,17 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             .max_depth = 1,
         }));
 
-        self.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&integer_scaling));
+        self.ctx.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&integer_scaling));
 
-        self.vkd.cmdDraw(frame.command_buffer, 3, 1, 0, 0);
+        self.ctx.vkd.cmdDraw(frame.command_buffer, 3, 1, 0, 0);
     }
     {
         const subtrace = tracy.traceNamed(@src(), "GUI");
         defer subtrace.end();
 
-        self.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_gui.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_gui.handle);
 
-        self.vkd.cmdBindDescriptorSets(
+        self.ctx.vkd.cmdBindDescriptorSets(
             frame.command_buffer,
             .graphics,
             self.pipelines.pipeline_gui.layout,
@@ -1514,21 +1454,21 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             null,
         );
 
-        self.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
+        self.ctx.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
             .x = 0,
             .y = 0,
-            .width = @floatFromInt(self.swapchain.extent.width),
-            .height = @floatFromInt(self.swapchain.extent.height),
+            .width = @floatFromInt(self.ctx.swapchain.extent.width),
+            .height = @floatFromInt(self.ctx.swapchain.extent.height),
             .min_depth = 0,
             .max_depth = 1,
         }));
 
-        self.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
+        self.ctx.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
             .offset = .{ .x = 0, .y = 0 },
-            .extent = self.swapchain.extent,
+            .extent = self.ctx.swapchain.extent,
         }));
 
-        self.vkd.cmdPushConstants(
+        self.ctx.vkd.cmdPushConstants(
             frame.command_buffer,
             self.pipelines.pipeline_gui.layout,
             .{ .vertex_bit = true, .fragment_bit = true },
@@ -1547,13 +1487,13 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
                         s.offset[i] = 0;
                     };
 
-                    self.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
+                    self.ctx.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
                         .offset = .{ .x = s.offset[0], .y = s.offset[1] },
                         .extent = .{ .width = s.extent[0], .height = s.extent[1] },
                     }));
                 },
                 .triangles => |t| {
-                    self.vkd.cmdDraw(frame.command_buffer, t.end - t.begin, 1, t.begin, 0);
+                    self.ctx.vkd.cmdDraw(frame.command_buffer, t.end - t.begin, 1, t.begin, 0);
                 },
                 else => {
                     @panic("Unimplemented");
@@ -1562,7 +1502,7 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         }
     }
 
-    self.vkd.cmdEndRendering(frame.command_buffer);
+    self.ctx.vkd.cmdEndRendering(frame.command_buffer);
     self.transitionFrameImagesPresent(frame, swapchain_image_index);
 }
 
@@ -1607,7 +1547,7 @@ fn transitionFrameImagesBegin(self: *@This(), frame: FrameData) void {
 
     const barriers = [_]vk.ImageMemoryBarrier2{ depth_image_barrier, color_image_barrier };
 
-    self.vkd.cmdPipelineBarrier2(frame.command_buffer, &.{
+    self.ctx.vkd.cmdPipelineBarrier2(frame.command_buffer, &.{
         .image_memory_barrier_count = barriers.len,
         .p_image_memory_barriers = &barriers,
     });
@@ -1634,7 +1574,7 @@ fn beginRenderingOpaque(self: *@This(), frame: FrameData) void {
         .clear_value = .{ .depth_stencil = .{ .depth = 1, .stencil = 0 } },
     };
 
-    self.vkd.cmdBeginRendering(frame.command_buffer, &.{
+    self.ctx.vkd.cmdBeginRendering(frame.command_buffer, &.{
         .color_attachment_count = 1,
         .p_color_attachments = utils.meta.asConstArray(&color_attachment),
         .p_depth_attachment = &depth_attachment,
@@ -1652,7 +1592,7 @@ fn transitionFrameImagesFinal(self: *@This(), frame: FrameData, swapchain_image_
         .dst_access_mask = .{ .shader_write_bit = true },
         .old_layout = .undefined,
         .new_layout = .color_attachment_optimal,
-        .image = self.swapchain.images.get(swapchain_image_index),
+        .image = self.ctx.swapchain.images.get(swapchain_image_index),
         .subresource_range = .{
             .aspect_mask = frame.image_color.aspect_mask,
             .base_mip_level = 0,
@@ -1685,7 +1625,7 @@ fn transitionFrameImagesFinal(self: *@This(), frame: FrameData, swapchain_image_
 
     const barriers = [_]vk.ImageMemoryBarrier2{ swapchain_image_barrier, color_image_barrier };
 
-    self.vkd.cmdPipelineBarrier2(frame.command_buffer, &.{
+    self.ctx.vkd.cmdPipelineBarrier2(frame.command_buffer, &.{
         .image_memory_barrier_count = barriers.len,
         .p_image_memory_barriers = &barriers,
     });
@@ -1693,7 +1633,7 @@ fn transitionFrameImagesFinal(self: *@This(), frame: FrameData, swapchain_image_
 
 fn beginRenderingFinal(self: *@This(), frame: FrameData, swapchain_image_index: u32) void {
     const color_attachment = vk.RenderingAttachmentInfo{
-        .image_view = self.swapchain.views.get(swapchain_image_index),
+        .image_view = self.ctx.swapchain.views.get(swapchain_image_index),
         .image_layout = .color_attachment_optimal,
         .load_op = .clear,
         .store_op = .store,
@@ -1702,11 +1642,11 @@ fn beginRenderingFinal(self: *@This(), frame: FrameData, swapchain_image_index: 
         .clear_value = .{ .color = .{ .float_32 = .{ 0.1, 0.1, 0.1, 0.1 } } },
     };
 
-    self.vkd.cmdBeginRendering(frame.command_buffer, &.{
+    self.ctx.vkd.cmdBeginRendering(frame.command_buffer, &.{
         .color_attachment_count = 1,
         .p_color_attachments = utils.meta.asConstArray(&color_attachment),
         .p_depth_attachment = null,
-        .render_area = .{ .offset = .{ .x = 0, .y = 0 }, .extent = self.swapchain.extent },
+        .render_area = .{ .offset = .{ .x = 0, .y = 0 }, .extent = self.ctx.swapchain.extent },
         .layer_count = 1,
         .view_mask = 0,
     });
@@ -1720,7 +1660,7 @@ fn transitionFrameImagesPresent(self: *@This(), frame: FrameData, swapchain_imag
         .dst_access_mask = .{ .memory_read_bit = true },
         .old_layout = .color_attachment_optimal,
         .new_layout = .present_src_khr,
-        .image = self.swapchain.images.get(swapchain_image_index),
+        .image = self.ctx.swapchain.images.get(swapchain_image_index),
         .subresource_range = .{
             .aspect_mask = frame.image_color.aspect_mask,
             .base_mip_level = 0,
@@ -1732,7 +1672,7 @@ fn transitionFrameImagesPresent(self: *@This(), frame: FrameData, swapchain_imag
         .dst_queue_family_index = 0,
     };
 
-    self.vkd.cmdPipelineBarrier2(frame.command_buffer, &.{
+    self.ctx.vkd.cmdPipelineBarrier2(frame.command_buffer, &.{
         .image_memory_barrier_count = 1,
         .p_image_memory_barriers = utils.meta.asConstArray(&swapchain_image_barrier),
     });
@@ -1761,7 +1701,7 @@ fn integerScaling(dst: vk.Extent2D, src: vk.Extent2D) vk.Rect2D {
 }
 
 pub fn scheduleLine(self: *@This(), points: [2]@Vector(2, f32), color: @Vector(4, f16), depth: f32, alpha: @Vector(2, f16)) !void {
-    try self.upload_line_data.append(self.allocator, .{
+    try self.upload_line_data.append(self.ctx.allocator, .{
         .points = points,
         .color = color,
         .depth = depth,
@@ -1770,11 +1710,11 @@ pub fn scheduleLine(self: *@This(), points: [2]@Vector(2, f32), color: @Vector(4
 }
 
 pub fn scheduleVertices(self: *@This(), vertices: []const types.VertexData) !void {
-    try self.upload_triangle_data.appendSlice(self.allocator, vertices);
+    try self.upload_triangle_data.appendSlice(self.ctx.allocator, vertices);
 }
 
 pub fn scheduleVertex(self: *@This(), vertex: types.VertexData) !void {
-    try self.upload_triangle_data.append(self.allocator, vertex);
+    try self.upload_triangle_data.append(self.ctx.allocator, vertex);
 }
 
 pub inline fn scheduleGuiChar(self: *@This(), data: types.TextData) !void {

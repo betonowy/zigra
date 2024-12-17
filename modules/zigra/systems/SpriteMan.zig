@@ -5,7 +5,7 @@ const tracy = @import("tracy");
 
 const root = @import("../root.zig");
 const systems = @import("../systems.zig");
-const vk_types = @import("Vulkan/types.zig");
+const vk_types = @import("Vulkan/Ctx/types.zig");
 const common = @import("common.zig");
 
 const SpriteRef = struct {

@@ -4,12 +4,13 @@ const tracy = @import("tracy");
 const utils = @import("util");
 const vk = @import("vk");
 
-const types = @import("types.zig");
+const types = @import("Ctx/types.zig");
 const stb = @cImport(@cInclude("stb/stb_image.h"));
 
 const Backend = @import("Backend.zig");
 
 pub const image_size = 128;
+const frame_margin = 256;
 const tiles_width_count = Backend.frame_target_width / image_size + 2;
 const tiles_height_count = Backend.frame_target_height / image_size + 2;
 pub const tile_count = tiles_width_count * tiles_height_count;
@@ -72,7 +73,7 @@ pub fn init(backend: *Backend) !@This() {
             .usage = .{ .transfer_dst_bit = true, .sampled_bit = true },
         });
 
-        tile.sampler = try backend.vkd.createSampler(backend.device, &.{
+        tile.sampler = try backend.ctx.vkd.createSampler(backend.ctx.device, &.{
             .mag_filter = .nearest,
             .min_filter = .nearest,
             .address_mode_u = .clamp_to_edge,
@@ -96,7 +97,7 @@ pub fn init(backend: *Backend) !@This() {
 
 pub fn deinit(self: *@This(), backend: *Backend) void {
     for (self.tiles[0..]) |*tile| {
-        if (tile.sampler != .null_handle) backend.vkd.destroySampler(backend.device, tile.sampler, null);
+        if (tile.sampler != .null_handle) backend.ctx.vkd.destroySampler(backend.ctx.device, tile.sampler, null);
         if (tile.upload_image.handle != .null_handle) backend.destroyImage(tile.upload_image);
         if (tile.device_image.handle != .null_handle) backend.destroyImage(tile.device_image);
     }
@@ -117,7 +118,7 @@ pub fn recordUploadData(_: *@This(), backend: *Backend, cmd: vk.CommandBuffer, u
             barrierUndefinedToTransferDst(set.tile.device_image.handle),
         };
 
-        backend.vkd.cmdPipelineBarrier2(cmd, &.{
+        backend.ctx.vkd.cmdPipelineBarrier2(cmd, &.{
             .image_memory_barrier_count = begin_barriers.len,
             .p_image_memory_barriers = &begin_barriers,
         });
@@ -146,7 +147,7 @@ pub fn recordUploadData(_: *@This(), backend: *Backend, cmd: vk.CommandBuffer, u
             },
         };
 
-        backend.vkd.cmdCopyImage2(cmd, &.{
+        backend.ctx.vkd.cmdCopyImage2(cmd, &.{
             .src_image = set.tile.upload_image.handle,
             .dst_image = set.tile.device_image.handle,
             .src_image_layout = .transfer_src_optimal,
@@ -161,7 +162,7 @@ pub fn recordUploadData(_: *@This(), backend: *Backend, cmd: vk.CommandBuffer, u
             barrierTransferDstToSampler(set.tile.device_image.handle),
         };
 
-        backend.vkd.cmdPipelineBarrier2(cmd, &.{
+        backend.ctx.vkd.cmdPipelineBarrier2(cmd, &.{
             .image_memory_barrier_count = finish_barriers.len,
             .p_image_memory_barriers = &finish_barriers,
         });

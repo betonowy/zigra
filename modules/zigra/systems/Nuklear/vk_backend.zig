@@ -1,6 +1,6 @@
 const nk = @import("nuklear");
 const root = @import("../../root.zig");
-const vk_types = @import("../Vulkan/types.zig");
+const vk_types = @import("../Vulkan/Ctx/types.zig");
 const std = @import("std");
 const la = @import("la");
 
