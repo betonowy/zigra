@@ -88,11 +88,14 @@ pub const pipeline = struct {
         return .{ .topology = topology, .primitive_restart_enable = vk.FALSE };
     }
 
+    pub const dummy_viewport = &[_]vk.Viewport{std.mem.zeroes(vk.Viewport)};
+    pub const dummy_scissor = &[_]vk.Rect2D{std.mem.zeroes(vk.Rect2D)};
+
     pub const dummy_viewport_state = vk.PipelineViewportStateCreateInfo{
         .viewport_count = 1,
-        .p_viewports = &[_]vk.Viewport{std.mem.zeroes(vk.Viewport)},
+        .p_viewports = dummy_viewport,
         .scissor_count = 1,
-        .p_scissors = &[_]vk.Rect2D{std.mem.zeroes(vk.Rect2D)},
+        .p_scissors = dummy_scissor,
     };
 
     pub const default_rasterization = vk.PipelineRasterizationStateCreateInfo{

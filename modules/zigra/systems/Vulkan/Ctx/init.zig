@@ -5,6 +5,7 @@ const builtin = @import("builtin");
 const VkAllocator = @import("VkAllocator.zig");
 
 const log = std.log.scoped(.Vulkan_init);
+const log_debug = std.log.scoped(.Vulkan_ValidationLayer);
 
 fn vulkanDebugCallback(
     _: vk.DebugUtilsMessageSeverityFlagsEXT,
@@ -14,7 +15,7 @@ fn vulkanDebugCallback(
 ) callconv(vk.vulkan_call_conv) vk.Bool32 {
     if (p_callback_data) |data| {
         if (data.p_message) |message| {
-            std.debug.print("Vulkan validation layer: {s}\n\n", .{message});
+            log_debug.err("\n{s}\n", .{message});
         }
     }
 

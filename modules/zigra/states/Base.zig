@@ -26,8 +26,13 @@ pub fn init(options: InitOptions) !*@This() {
     return self;
 }
 
-pub fn enter(self: @This(), _: *root.Sequencer, m: *root.Modules) !void {
+pub fn enter(self: *@This(), _: *root.Sequencer, m: *root.Modules) !void {
     util.meta.logFn(log, @src());
+
+    errdefer {
+        self.allocator.free(self.resource_dir);
+        self.allocator.destroy(self);
+    }
 
     m.thread_pool = try modules.ThreadPool.init(self.allocator);
     errdefer m.thread_pool.deinit();

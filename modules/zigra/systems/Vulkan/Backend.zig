@@ -13,6 +13,7 @@ pub const Atlas = @import("Atlas.zig");
 pub const Landscape = @import("Landscape.zig");
 pub const SandSim = @import("../World/SandSim.zig");
 const Ctx = @import("Ctx.zig");
+const Pipelines = @import("Pipelines.zig");
 
 const spv = @import("spv");
 
@@ -35,7 +36,7 @@ ctx: *Ctx,
 
 frames: [frame_data_count]FrameData,
 frame_index: @TypeOf(frame_data_count) = 0,
-pipelines: types.Pipelines,
+pipelines: Pipelines,
 atlas: Atlas,
 
 camera_pos: @Vector(2, i32),
@@ -92,14 +93,8 @@ pub fn init(
     self.ctx = try Ctx.init(allocator, get_proc_addr, window_callbacks);
     errdefer self.ctx.deinit();
 
-    try self.createPipelines();
-    errdefer self.destroyPipelines();
-
-    self.ctx.graphic_queue = self.ctx.vkd.getDeviceQueue(self.ctx.device, self.ctx.queue_families.graphics, 0);
-    self.ctx.present_queue = self.ctx.vkd.getDeviceQueue(self.ctx.device, self.ctx.queue_families.present, 0);
-
-    try self.createCommandPools();
-    errdefer self.destroyCommandPools();
+    self.pipelines = try Pipelines.init(self.ctx);
+    errdefer self.pipelines.deinit();
 
     self.atlas = try Atlas.init(&self, &.{
         "images/crate_16.png",
@@ -138,8 +133,6 @@ pub fn init(
 pub fn deinit(self: *@This()) void {
     self.ctx.waitIdle();
 
-    tracy.message("deviceWaitIdle release");
-
     self.upload_gui_data.deinit(self.ctx.allocator);
     self.upload_gui_vertices.deinit(self.ctx.allocator);
     self.upload_text_data.deinit(self.ctx.allocator);
@@ -148,8 +141,7 @@ pub fn deinit(self: *@This()) void {
 
     self.atlas.deinit(self);
     self.destroyFrameData();
-    self.destroyCommandPools();
-    self.destroyPipelines();
+    self.pipelines.deinit();
 
     self.ctx.deinit();
 }
@@ -224,85 +216,10 @@ pub fn process(self: *@This()) !void {
     );
 
     if (next_image.result != .success or present_result != .success) {
-        try self.createSwapchain(.recreate);
+        try self.ctx.recreateSwapchain();
     }
 
     self.advanceFrame();
-}
-
-const CreateSwapchainMode = enum { first_time, recreate };
-
-pub fn createSwapchain(self: *@This(), comptime mode: CreateSwapchainMode) !void {
-    if (comptime mode == .recreate) {
-        try self.ctx.vkd.deviceWaitIdle(self.ctx.device);
-
-        for (self.ctx.swapchain.views.slice()) |view| {
-            self.ctx.vkd.destroyImageView(self.ctx.device, view, null);
-        }
-
-        try self.ctx.swapchain.images.resize(0);
-        try self.ctx.swapchain.views.resize(0);
-
-        if (self.ctx.swapchain.handle != .null_handle) {
-            self.ctx.vkd.destroySwapchainKHR(self.ctx.device, self.ctx.swapchain.handle, null);
-        }
-    }
-
-    const basic_data = try initialization.createSwapChain(
-        self.ctx.vki,
-        self.ctx.vkd,
-        self.ctx.physical_device,
-        self.ctx.device,
-        self.ctx.surface,
-        self.ctx.window_callbacks,
-        self.ctx.allocator,
-    );
-    self.ctx.swapchain = types.SwapchainData.init(basic_data);
-    errdefer self.ctx.vkd.destroySwapchainKHR(self.ctx.device, self.ctx.swapchain.handle, null);
-
-    var queried_image_count: u32 = undefined;
-
-    if (try self.ctx.vkd.getSwapchainImagesKHR(self.ctx.device, self.ctx.swapchain.handle, &queried_image_count, null) != .success) {
-        return error.InitializationFailed;
-    }
-
-    try self.ctx.swapchain.images.resize(queried_image_count);
-    try self.ctx.swapchain.views.resize(queried_image_count);
-
-    if (try self.ctx.vkd.getSwapchainImagesKHR(
-        self.ctx.device,
-        self.ctx.swapchain.handle,
-        &queried_image_count,
-        &self.ctx.swapchain.images.buffer,
-    ) != .success) {
-        return error.InitializationFailed;
-    }
-
-    for (self.ctx.swapchain.images.slice(), self.ctx.swapchain.views.slice(), 0..) |image, *view, i| {
-        errdefer {
-            for (self.ctx.swapchain.views.buffer[0..i]) |view_to_destroy| {
-                self.ctx.vkd.destroyImageView(self.ctx.device, view_to_destroy, null);
-            }
-
-            self.ctx.swapchain.views.resize(0) catch unreachable;
-        }
-
-        view.* = try self.ctx.vkd.createImageView(self.ctx.device, &.{
-            .image = image,
-            .view_type = .@"2d",
-            .format = self.ctx.swapchain.format,
-            .components = builder.compIdentity,
-            .subresource_range = builder.defaultSubrange(.{ .color_bit = true }, 1),
-        }, null);
-    }
-}
-
-pub fn destroySwapchain(self: *@This()) void {
-    for (self.ctx.swapchain.views.slice()) |view| {
-        self.ctx.vkd.destroyImageView(self.ctx.device, view, null);
-    }
-
-    self.ctx.vkd.destroySwapchainKHR(self.ctx.device, self.ctx.swapchain.handle, null);
 }
 
 fn findMemoryType(self: *@This(), type_filter: u32, properties: vk.MemoryPropertyFlags) !u32 {
@@ -357,25 +274,6 @@ fn createBuffer(self: *@This(), comptime T: type, info: CreateBufferInfo) !types
 fn destroyBuffer(self: *@This(), typed_buffer: anytype) void {
     self.ctx.vkd.freeMemory(self.ctx.device, typed_buffer.memory, null);
     self.ctx.vkd.destroyBuffer(self.ctx.device, typed_buffer.handle, null);
-}
-
-const possible_depth_image_formats = [_]vk.Format{
-    .d16_unorm,
-    .d32_sfloat,
-    .d16_unorm_s8_uint,
-    .d24_unorm_s8_uint,
-    .d32_sfloat_s8_uint,
-};
-
-fn findDepthImageFormat(self: @This()) !vk.Format {
-    for (possible_depth_image_formats) |format| {
-        const props = self.ctx.vki.getPhysicalDeviceFormatProperties(self.ctx.physical_device, format);
-        if (props.optimal_tiling_features.depth_stencil_attachment_bit) {
-            return format;
-        }
-    }
-
-    return error.InitializationFailed;
 }
 
 const DepthImageType = enum {
@@ -474,405 +372,6 @@ pub fn destroyImage(self: *@This(), image_data: types.ImageData) void {
     self.ctx.vkd.destroyImage(self.ctx.device, image_data.handle, null);
 }
 
-fn createDescriptorPool(self: *@This()) !vk.DescriptorPool {
-    return try self.ctx.vkd.createDescriptorPool(self.ctx.device, &.{
-        .pool_size_count = builder.pipeline.descriptor_pool_sizes.len,
-        .p_pool_sizes = &builder.pipeline.descriptor_pool_sizes,
-        .max_sets = 2,
-        .flags = .{ .free_descriptor_set_bit = true },
-    }, null);
-}
-
-fn createShaderModule(self: *@This(), byte_code: []const u32) !vk.ShaderModule {
-    return try self.ctx.vkd.createShaderModule(self.ctx.device, &.{
-        .code_size = byte_code.len * @sizeOf(std.meta.Child(@TypeOf(byte_code))),
-        .p_code = @alignCast(@ptrCast(byte_code)),
-    }, null);
-}
-
-fn createPipelines(self: *@This()) !void {
-    const sprite_vs = try self.createShaderModule(&spv.sprite_vert);
-    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, sprite_vs, null);
-    const sprite_opaque_fs = try self.createShaderModule(&spv.sprite_opaque_frag);
-    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, sprite_opaque_fs, null);
-    const fullscreen_vs = try self.createShaderModule(&spv.fullscreen_vert);
-    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, fullscreen_vs, null);
-    const present_fs = try self.createShaderModule(&spv.final_frag);
-    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, present_fs, null);
-    const landscape_vs = try self.createShaderModule(&spv.landscape_vert);
-    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, landscape_vs, null);
-    const landscape_fs = try self.createShaderModule(&spv.landscape_frag);
-    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, landscape_fs, null);
-    const line_vs = try self.createShaderModule(&spv.line_vert);
-    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, line_vs, null);
-    const line_opaque_fs = try self.createShaderModule(&spv.line_opaque_frag);
-    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, line_opaque_fs, null);
-    const point_vs = try self.createShaderModule(&spv.point_vert);
-    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, point_vs, null);
-    const point_fs = try self.createShaderModule(&spv.point_frag);
-    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, point_fs, null);
-    const vertex_vs = try self.createShaderModule(&spv.vertex_vert);
-    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, vertex_vs, null);
-    const vertex_fs = try self.createShaderModule(&spv.vertex_frag);
-    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, vertex_fs, null);
-    const text_vs = try self.createShaderModule(&spv.text_vert);
-    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, text_vs, null);
-    const text_fs = try self.createShaderModule(&spv.text_frag);
-    defer self.ctx.vkd.destroyShaderModule(self.ctx.device, text_fs, null);
-
-    self.pipelines.resolved_depth_format = try self.findDepthImageFormat();
-    self.pipelines.resolved_depth_aspect = builder.depthImageAspect(self.pipelines.resolved_depth_format);
-    self.pipelines.resolved_depth_layout = builder.depthImageLayout(self.pipelines.resolved_depth_format);
-
-    const point_opaque_stage_create_info = builder.pipeline.shader_stage.vsFs(point_vs, point_fs, .{});
-    const line_opaque_stage_create_info = builder.pipeline.shader_stage.vsFs(line_vs, line_opaque_fs, .{});
-    const landscape_stage_create_info = builder.pipeline.shader_stage.vsFs(landscape_vs, landscape_fs, .{});
-    const triangle_stage_create_info = builder.pipeline.shader_stage.vsFs(vertex_vs, vertex_fs, .{});
-    const text_stage_create_info = builder.pipeline.shader_stage.vsFs(text_vs, text_fs, .{});
-    const sprite_opaque_stage_create_info = builder.pipeline.shader_stage.vsFs(sprite_vs, sprite_opaque_fs, .{});
-    const present_shader_stage_create_info = builder.pipeline.shader_stage.vsFs(fullscreen_vs, present_fs, .{});
-    const dynamic_state_minimal_create_info = builder.pipeline.dynamicState(.minimal);
-    const triangle_assembly_stage_create_info = builder.pipeline.assemblyState(.triangle_list);
-    const triangle_strip_assembly_stage_create_info = builder.pipeline.assemblyState(.triangle_strip);
-    const line_assembly_stage_create_info = builder.pipeline.assemblyState(.line_list);
-    const point_assembly_stage_create_info = builder.pipeline.assemblyState(.point_list);
-
-    self.pipelines.descriptor_set_layout = try self.ctx.vkd.createDescriptorSetLayout(self.ctx.device, &.{
-        .binding_count = builder.pipeline.dslb_bindings.len,
-        .p_bindings = &builder.pipeline.dslb_bindings,
-    }, null);
-    errdefer self.ctx.vkd.destroyDescriptorSetLayout(self.ctx.device, self.pipelines.descriptor_set_layout, null);
-
-    const push_constant = builder.pipeline.pushConstantVsFs(@sizeOf(types.BasicPushConstant));
-    const push_constant_text = builder.pipeline.pushConstantVsFs(@sizeOf(types.TextPushConstant));
-
-    self.pipelines.pipeline_point.layout = try self.ctx.vkd.createPipelineLayout(self.ctx.device, &.{
-        .set_layout_count = 1,
-        .p_set_layouts = utils.meta.asConstArray(&self.pipelines.descriptor_set_layout),
-        .push_constant_range_count = 1,
-        .p_push_constant_ranges = utils.meta.asConstArray(&push_constant),
-    }, null);
-    errdefer self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_point.layout, null);
-
-    self.pipelines.pipeline_line.layout = try self.ctx.vkd.createPipelineLayout(self.ctx.device, &.{
-        .set_layout_count = 1,
-        .p_set_layouts = utils.meta.asConstArray(&self.pipelines.descriptor_set_layout),
-        .push_constant_range_count = 1,
-        .p_push_constant_ranges = utils.meta.asConstArray(&push_constant),
-    }, null);
-    errdefer self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_line.layout, null);
-
-    self.pipelines.pipeline_landscape.layout = try self.ctx.vkd.createPipelineLayout(self.ctx.device, &.{
-        .set_layout_count = 1,
-        .p_set_layouts = utils.meta.asConstArray(&self.pipelines.descriptor_set_layout),
-        .push_constant_range_count = 1,
-        .p_push_constant_ranges = utils.meta.asConstArray(&push_constant),
-    }, null);
-    errdefer self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_landscape.layout, null);
-
-    self.pipelines.pipeline_triangles.layout = try self.ctx.vkd.createPipelineLayout(self.ctx.device, &.{
-        .set_layout_count = 1,
-        .p_set_layouts = utils.meta.asConstArray(&self.pipelines.descriptor_set_layout),
-        .push_constant_range_count = 1,
-        .p_push_constant_ranges = utils.meta.asConstArray(&push_constant),
-    }, null);
-    errdefer self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_triangles.layout, null);
-
-    self.pipelines.pipeline_text.layout = try self.ctx.vkd.createPipelineLayout(self.ctx.device, &.{
-        .set_layout_count = 1,
-        .p_set_layouts = utils.meta.asConstArray(&self.pipelines.descriptor_set_layout),
-        .push_constant_range_count = 1,
-        .p_push_constant_ranges = utils.meta.asConstArray(&push_constant_text),
-    }, null);
-    errdefer self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_text.layout, null);
-
-    self.pipelines.pipeline_sprite_opaque.layout = try self.ctx.vkd.createPipelineLayout(self.ctx.device, &.{
-        .set_layout_count = 1,
-        .p_set_layouts = utils.meta.asConstArray(&self.pipelines.descriptor_set_layout),
-        .push_constant_range_count = 1,
-        .p_push_constant_ranges = utils.meta.asConstArray(&push_constant),
-    }, null);
-    errdefer self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_sprite_opaque.layout, null);
-
-    self.pipelines.pipeline_gui.layout = try self.ctx.vkd.createPipelineLayout(self.ctx.device, &.{
-        .set_layout_count = 1,
-        .p_set_layouts = utils.meta.asConstArray(&self.pipelines.descriptor_set_layout),
-        .push_constant_range_count = 1,
-        .p_push_constant_ranges = utils.meta.asConstArray(&push_constant),
-    }, null);
-    errdefer self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_gui.layout, null);
-
-    self.pipelines.pipeline_present.layout = try self.ctx.vkd.createPipelineLayout(self.ctx.device, &.{
-        .set_layout_count = 1,
-        .p_set_layouts = utils.meta.asConstArray(&self.pipelines.descriptor_set_layout),
-        .push_constant_range_count = 0,
-        .p_push_constant_ranges = null,
-    }, null);
-    errdefer self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_present.layout, null);
-
-    const target_render_info = vk.PipelineRenderingCreateInfo{
-        .color_attachment_count = 1,
-        .p_color_attachment_formats = utils.meta.asConstArray(&frame_format),
-        .depth_attachment_format = self.pipelines.resolved_depth_format,
-        .view_mask = 0,
-        .stencil_attachment_format = .undefined,
-    };
-
-    const present_render_info = vk.PipelineRenderingCreateInfo{
-        .color_attachment_count = 1,
-        .p_color_attachment_formats = utils.meta.asConstArray(&self.ctx.swapchain.format),
-        .depth_attachment_format = .undefined,
-        .view_mask = 0,
-        .stencil_attachment_format = .undefined,
-    };
-
-    const pipeline_point_opaque_info = vk.GraphicsPipelineCreateInfo{
-        .stage_count = 2,
-        .p_dynamic_state = &dynamic_state_minimal_create_info,
-        .p_stages = &point_opaque_stage_create_info,
-        .p_vertex_input_state = &.{},
-        .p_input_assembly_state = &point_assembly_stage_create_info,
-        .p_viewport_state = &builder.pipeline.dummy_viewport_state,
-        .p_rasterization_state = &builder.pipeline.default_rasterization,
-        .p_multisample_state = &builder.pipeline.disabled_multisampling,
-        .p_depth_stencil_state = &builder.pipeline.enabled_depth_attachment,
-        .p_color_blend_state = &builder.pipeline.disabled_color_blending,
-        .layout = self.pipelines.pipeline_line.layout,
-        .p_next = &target_render_info,
-        .subpass = 0,
-        .base_pipeline_index = 0,
-    };
-
-    const pipeline_line_opaque_info = vk.GraphicsPipelineCreateInfo{
-        .stage_count = 2,
-        .p_dynamic_state = &dynamic_state_minimal_create_info,
-        .p_stages = &line_opaque_stage_create_info,
-        .p_vertex_input_state = &.{},
-        .p_input_assembly_state = &line_assembly_stage_create_info,
-        .p_viewport_state = &builder.pipeline.dummy_viewport_state,
-        .p_rasterization_state = &builder.pipeline.default_rasterization,
-        .p_multisample_state = &builder.pipeline.disabled_multisampling,
-        .p_depth_stencil_state = &builder.pipeline.enabled_depth_attachment,
-        .p_color_blend_state = &builder.pipeline.disabled_color_blending,
-        .layout = self.pipelines.pipeline_line.layout,
-        .p_next = &target_render_info,
-        .subpass = 0,
-        .base_pipeline_index = 0,
-    };
-
-    const pipeline_landscape_info = vk.GraphicsPipelineCreateInfo{
-        .stage_count = 2,
-        .p_dynamic_state = &dynamic_state_minimal_create_info,
-        .p_stages = &landscape_stage_create_info,
-        .p_vertex_input_state = &.{},
-        .p_input_assembly_state = &triangle_strip_assembly_stage_create_info,
-        .p_viewport_state = &builder.pipeline.dummy_viewport_state,
-        .p_rasterization_state = &builder.pipeline.default_rasterization,
-        .p_multisample_state = &builder.pipeline.disabled_multisampling,
-        .p_depth_stencil_state = &builder.pipeline.enabled_depth_attachment,
-        .p_color_blend_state = &builder.pipeline.disabled_color_blending,
-        .layout = self.pipelines.pipeline_landscape.layout,
-        .p_next = &target_render_info,
-        .subpass = 0,
-        .base_pipeline_index = 0,
-    };
-
-    const pipeline_triangle_info = vk.GraphicsPipelineCreateInfo{
-        .stage_count = 2,
-        .p_dynamic_state = &dynamic_state_minimal_create_info,
-        .p_stages = &triangle_stage_create_info,
-        .p_vertex_input_state = &.{},
-        .p_input_assembly_state = &triangle_assembly_stage_create_info,
-        .p_viewport_state = &builder.pipeline.dummy_viewport_state,
-        .p_rasterization_state = &builder.pipeline.default_rasterization,
-        .p_multisample_state = &builder.pipeline.disabled_multisampling,
-        .p_depth_stencil_state = &builder.pipeline.enabled_depth_attachment,
-        .p_color_blend_state = &builder.pipeline.disabled_color_blending,
-        .layout = self.pipelines.pipeline_triangles.layout,
-        .p_next = &target_render_info,
-        .subpass = 0,
-        .base_pipeline_index = 0,
-    };
-
-    const pipeline_text_info = vk.GraphicsPipelineCreateInfo{
-        .stage_count = 2,
-        .p_dynamic_state = &dynamic_state_minimal_create_info,
-        .p_stages = &text_stage_create_info,
-        .p_vertex_input_state = &.{},
-        .p_input_assembly_state = &triangle_strip_assembly_stage_create_info,
-        .p_viewport_state = &builder.pipeline.dummy_viewport_state,
-        .p_rasterization_state = &builder.pipeline.default_rasterization,
-        .p_multisample_state = &builder.pipeline.disabled_multisampling,
-        .p_depth_stencil_state = &builder.pipeline.enabled_depth_attachment,
-        .p_color_blend_state = &builder.pipeline.disabled_color_blending,
-        .layout = self.pipelines.pipeline_text.layout,
-        .p_next = &target_render_info,
-        .subpass = 0,
-        .base_pipeline_index = 0,
-    };
-
-    const pipeline_sprite_opaque_info = vk.GraphicsPipelineCreateInfo{
-        .stage_count = 2,
-        .p_dynamic_state = &dynamic_state_minimal_create_info,
-        .p_stages = &sprite_opaque_stage_create_info,
-        .p_vertex_input_state = &.{},
-        .p_input_assembly_state = &triangle_strip_assembly_stage_create_info,
-        .p_viewport_state = &builder.pipeline.dummy_viewport_state,
-        .p_rasterization_state = &builder.pipeline.default_rasterization,
-        .p_multisample_state = &builder.pipeline.disabled_multisampling,
-        .p_depth_stencil_state = &builder.pipeline.enabled_depth_attachment,
-        .p_color_blend_state = &builder.pipeline.disabled_color_blending,
-        .layout = self.pipelines.pipeline_sprite_opaque.layout,
-        .p_next = &target_render_info,
-        .subpass = 0,
-        .base_pipeline_index = 0,
-    };
-
-    const pipeline_gui_info = vk.GraphicsPipelineCreateInfo{
-        .stage_count = 2,
-        .p_dynamic_state = &dynamic_state_minimal_create_info,
-        .p_stages = &triangle_stage_create_info,
-        .p_vertex_input_state = &.{},
-        .p_input_assembly_state = &triangle_assembly_stage_create_info,
-        .p_viewport_state = &builder.pipeline.dummy_viewport_state,
-        .p_rasterization_state = &builder.pipeline.default_rasterization,
-        .p_multisample_state = &builder.pipeline.disabled_multisampling,
-        .p_depth_stencil_state = &builder.pipeline.disabled_depth_attachment,
-        .p_color_blend_state = &builder.pipeline.disabled_color_blending,
-        .layout = self.pipelines.pipeline_gui.layout,
-        .p_next = &present_render_info,
-        .subpass = 0,
-        .base_pipeline_index = 0,
-    };
-
-    const pipeline_present_info = vk.GraphicsPipelineCreateInfo{
-        .stage_count = 2,
-        .p_dynamic_state = &dynamic_state_minimal_create_info,
-        .p_stages = &present_shader_stage_create_info,
-        .p_vertex_input_state = &.{},
-        .p_input_assembly_state = &triangle_strip_assembly_stage_create_info,
-        .p_viewport_state = &builder.pipeline.dummy_viewport_state,
-        .p_rasterization_state = &builder.pipeline.default_rasterization,
-        .p_multisample_state = &builder.pipeline.disabled_multisampling,
-        .p_depth_stencil_state = &builder.pipeline.disabled_depth_attachment,
-        .p_color_blend_state = &builder.pipeline.disabled_color_blending,
-        .layout = self.pipelines.pipeline_present.layout,
-        .p_next = &present_render_info,
-        .subpass = 0,
-        .base_pipeline_index = 0,
-    };
-
-    if (try self.ctx.vkd.createGraphicsPipelines(
-        self.ctx.device,
-        .null_handle,
-        1,
-        utils.meta.asConstArray(&pipeline_point_opaque_info),
-        null,
-        utils.meta.asArray(&self.pipelines.pipeline_point.handle),
-    ) != .success) return error.InitializationFailed;
-    errdefer self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_point.handle, null);
-
-    if (try self.ctx.vkd.createGraphicsPipelines(
-        self.ctx.device,
-        .null_handle,
-        1,
-        utils.meta.asConstArray(&pipeline_line_opaque_info),
-        null,
-        utils.meta.asArray(&self.pipelines.pipeline_line.handle),
-    ) != .success) return error.InitializationFailed;
-    errdefer self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_line.handle, null);
-
-    if (try self.ctx.vkd.createGraphicsPipelines(
-        self.ctx.device,
-        .null_handle,
-        1,
-        utils.meta.asConstArray(&pipeline_landscape_info),
-        null,
-        utils.meta.asArray(&self.pipelines.pipeline_landscape.handle),
-    ) != .success) return error.InitializationFailed;
-    errdefer self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_landscape.handle, null);
-
-    if (try self.ctx.vkd.createGraphicsPipelines(
-        self.ctx.device,
-        .null_handle,
-        1,
-        utils.meta.asConstArray(&pipeline_triangle_info),
-        null,
-        utils.meta.asArray(&self.pipelines.pipeline_triangles.handle),
-    ) != .success) return error.InitializationFailed;
-    errdefer self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_triangles.handle, null);
-
-    if (try self.ctx.vkd.createGraphicsPipelines(
-        self.ctx.device,
-        .null_handle,
-        1,
-        utils.meta.asConstArray(&pipeline_text_info),
-        null,
-        utils.meta.asArray(&self.pipelines.pipeline_text.handle),
-    ) != .success) return error.InitializationFailed;
-    errdefer self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_text.handle, null);
-
-    if (try self.ctx.vkd.createGraphicsPipelines(
-        self.ctx.device,
-        .null_handle,
-        1,
-        utils.meta.asConstArray(&pipeline_sprite_opaque_info),
-        null,
-        utils.meta.asArray(&self.pipelines.pipeline_sprite_opaque.handle),
-    ) != .success) return error.InitializationFailed;
-    errdefer self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_sprite_opaque.handle, null);
-
-    if (try self.ctx.vkd.createGraphicsPipelines(
-        self.ctx.device,
-        .null_handle,
-        1,
-        utils.meta.asConstArray(&pipeline_gui_info),
-        null,
-        utils.meta.asArray(&self.pipelines.pipeline_gui.handle),
-    ) != .success) return error.InitializationFailed;
-    errdefer self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_gui.handle, null);
-
-    if (try self.ctx.vkd.createGraphicsPipelines(
-        self.ctx.device,
-        .null_handle,
-        1,
-        utils.meta.asConstArray(&pipeline_present_info),
-        null,
-        utils.meta.asArray(&self.pipelines.pipeline_present.handle),
-    ) != .success) return error.InitializationFailed;
-}
-
-fn destroyPipelines(self: *@This()) void {
-    self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_present.handle, null);
-    self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_gui.handle, null);
-    self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_sprite_opaque.handle, null);
-    self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_text.handle, null);
-    self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_triangles.handle, null);
-    self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_landscape.handle, null);
-    self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_line.handle, null);
-    self.ctx.vkd.destroyPipeline(self.ctx.device, self.pipelines.pipeline_point.handle, null);
-    self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_present.layout, null);
-    self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_gui.layout, null);
-    self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_sprite_opaque.layout, null);
-    self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_text.layout, null);
-    self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_triangles.layout, null);
-    self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_landscape.layout, null);
-    self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_line.layout, null);
-    self.ctx.vkd.destroyPipelineLayout(self.ctx.device, self.pipelines.pipeline_point.layout, null);
-    self.ctx.vkd.destroyDescriptorSetLayout(self.ctx.device, self.pipelines.descriptor_set_layout, null);
-}
-
-fn createCommandPools(self: *@This()) !void {
-    self.ctx.graphic_command_pool = try self.ctx.vkd.createCommandPool(self.ctx.device, &.{
-        .queue_family_index = self.ctx.queue_families.graphics,
-        .flags = .{ .reset_command_buffer_bit = true },
-    }, null);
-}
-
-fn destroyCommandPools(self: *@This()) void {
-    self.ctx.vkd.destroyCommandPool(self.ctx.device, self.ctx.graphic_command_pool, null);
-}
-
 fn createFrameData(self: *@This()) !void {
     self.frames = .{ .{}, .{} };
     self.frame_index = 0;
@@ -897,10 +396,10 @@ fn createFrameData(self: *@This()) !void {
 
         frame.image_depth = try self.createImage(.{
             .extent = image_extent,
-            .format = self.pipelines.resolved_depth_format,
+            .format = self.pipelines.depth_format,
             .usage = .{ .depth_stencil_attachment_bit = true },
             .property = .{ .device_local_bit = true },
-            .aspect_mask = self.pipelines.resolved_depth_aspect,
+            .aspect_mask = self.pipelines.depth_aspect,
         });
 
         frame.image_color_sampler = try self.ctx.vkd.createSampler(self.ctx.device, &.{
@@ -1135,12 +634,12 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         const subtrace = tracy.traceNamed(@src(), "Sprite opaque");
         defer subtrace.end();
 
-        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_sprite_opaque.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.set.sprite_opaque.handle);
 
         self.ctx.vkd.cmdBindDescriptorSets(
             frame.command_buffer,
             .graphics,
-            self.pipelines.pipeline_sprite_opaque.layout,
+            self.pipelines.set.sprite_opaque.layout,
             0,
             1,
             utils.meta.asConstArray(&frame.descriptor_set),
@@ -1164,7 +663,7 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
 
         self.ctx.vkd.cmdPushConstants(
             frame.command_buffer,
-            self.pipelines.pipeline_sprite_opaque.layout,
+            self.pipelines.set.sprite_opaque.layout,
             .{ .vertex_bit = true, .fragment_bit = true },
             0,
             @sizeOf(@TypeOf(push)),
@@ -1183,12 +682,12 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         const subtrace = tracy.traceNamed(@src(), "Line");
         defer subtrace.end();
 
-        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_line.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.set.line.handle);
 
         self.ctx.vkd.cmdBindDescriptorSets(
             frame.command_buffer,
             .graphics,
-            self.pipelines.pipeline_line.layout,
+            self.pipelines.set.line.layout,
             0,
             1,
             utils.meta.asConstArray(&frame.descriptor_set),
@@ -1212,7 +711,7 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
 
         self.ctx.vkd.cmdPushConstants(
             frame.command_buffer,
-            self.pipelines.pipeline_line.layout,
+            self.pipelines.set.line.layout,
             .{ .vertex_bit = true, .fragment_bit = true },
             0,
             @sizeOf(@TypeOf(push)),
@@ -1231,12 +730,12 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         const subtrace = tracy.traceNamed(@src(), "Point");
         defer subtrace.end();
 
-        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_point.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.set.point.handle);
 
         self.ctx.vkd.cmdBindDescriptorSets(
             frame.command_buffer,
             .graphics,
-            self.pipelines.pipeline_point.layout,
+            self.pipelines.set.point.layout,
             0,
             1,
             utils.meta.asConstArray(&frame.descriptor_set),
@@ -1260,7 +759,7 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
 
         self.ctx.vkd.cmdPushConstants(
             frame.command_buffer,
-            self.pipelines.pipeline_point.layout,
+            self.pipelines.set.point.layout,
             .{ .vertex_bit = true, .fragment_bit = true },
             0,
             @sizeOf(@TypeOf(push)),
@@ -1279,12 +778,12 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         const subtrace = tracy.traceNamed(@src(), "Landscape");
         defer subtrace.end();
 
-        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_landscape.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.set.landscape.handle);
 
         self.ctx.vkd.cmdBindDescriptorSets(
             frame.command_buffer,
             .graphics,
-            self.pipelines.pipeline_landscape.layout,
+            self.pipelines.set.landscape.layout,
             0,
             1,
             utils.meta.asConstArray(&frame.descriptor_set),
@@ -1308,7 +807,7 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
 
         self.ctx.vkd.cmdPushConstants(
             frame.command_buffer,
-            self.pipelines.pipeline_sprite_opaque.layout,
+            self.pipelines.set.sprite_opaque.layout,
             .{ .vertex_bit = true, .fragment_bit = true },
             0,
             @sizeOf(@TypeOf(push)),
@@ -1321,12 +820,12 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         const subtrace = tracy.traceNamed(@src(), "Triangles");
         defer subtrace.end();
 
-        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_triangles.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.set.triangles.handle);
 
         self.ctx.vkd.cmdBindDescriptorSets(
             frame.command_buffer,
             .graphics,
-            self.pipelines.pipeline_triangles.layout,
+            self.pipelines.set.triangles.layout,
             0,
             1,
             utils.meta.asConstArray(&frame.descriptor_set),
@@ -1350,7 +849,7 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
 
         self.ctx.vkd.cmdPushConstants(
             frame.command_buffer,
-            self.pipelines.pipeline_triangles.layout,
+            self.pipelines.set.triangles.layout,
             .{ .vertex_bit = true, .fragment_bit = true },
             0,
             @sizeOf(@TypeOf(push)),
@@ -1363,12 +862,12 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         const subtrace = tracy.traceNamed(@src(), "Text");
         defer subtrace.end();
 
-        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_text.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.set.text.handle);
 
         self.ctx.vkd.cmdBindDescriptorSets(
             frame.command_buffer,
             .graphics,
-            self.pipelines.pipeline_text.layout,
+            self.pipelines.set.text.layout,
             0,
             1,
             utils.meta.asConstArray(&frame.descriptor_set),
@@ -1392,7 +891,7 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
 
         self.ctx.vkd.cmdPushConstants(
             frame.command_buffer,
-            self.pipelines.pipeline_text.layout,
+            self.pipelines.set.text.layout,
             .{ .vertex_bit = true, .fragment_bit = true },
             0,
             @sizeOf(@TypeOf(push_text)),
@@ -1409,12 +908,12 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         const subtrace = tracy.traceNamed(@src(), "Present");
         defer subtrace.end();
 
-        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_present.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.set.present.handle);
 
         self.ctx.vkd.cmdBindDescriptorSets(
             frame.command_buffer,
             .graphics,
-            self.pipelines.pipeline_present.layout,
+            self.pipelines.set.present.layout,
             0,
             1,
             utils.meta.asConstArray(&frame.descriptor_set),
@@ -1441,12 +940,12 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         const subtrace = tracy.traceNamed(@src(), "GUI");
         defer subtrace.end();
 
-        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.pipeline_gui.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.set.gui.handle);
 
         self.ctx.vkd.cmdBindDescriptorSets(
             frame.command_buffer,
             .graphics,
-            self.pipelines.pipeline_gui.layout,
+            self.pipelines.set.gui.layout,
             0,
             1,
             utils.meta.asConstArray(&frame.descriptor_set),
@@ -1470,7 +969,7 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
 
         self.ctx.vkd.cmdPushConstants(
             frame.command_buffer,
-            self.pipelines.pipeline_gui.layout,
+            self.pipelines.set.gui.layout,
             .{ .vertex_bit = true, .fragment_bit = true },
             0,
             @sizeOf(@TypeOf(push_gui)),
@@ -1513,7 +1012,7 @@ fn transitionFrameImagesBegin(self: *@This(), frame: FrameData) void {
         .dst_stage_mask = .{ .fragment_shader_bit = true },
         .dst_access_mask = .{ .memory_write_bit = true },
         .old_layout = .undefined,
-        .new_layout = self.pipelines.resolved_depth_layout,
+        .new_layout = self.pipelines.depth_layout,
         .image = frame.image_depth.handle,
         .subresource_range = .{
             .aspect_mask = frame.image_depth.aspect_mask,
