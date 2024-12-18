@@ -14,6 +14,7 @@ pub const Landscape = @import("Landscape.zig");
 pub const SandSim = @import("../World/SandSim.zig");
 const Ctx = @import("Ctx.zig");
 const Pipelines = @import("Pipelines.zig");
+const Landscape2 = @import("Landscape2.zig");
 
 const spv = @import("spv");
 
@@ -95,6 +96,9 @@ pub fn init(
 
     self.pipelines = try Pipelines.init(self.ctx);
     errdefer self.pipelines.deinit();
+
+    var l2 = try Landscape2.init(self.ctx);
+    defer l2.deinit();
 
     self.atlas = try Atlas.init(&self, &.{
         "images/crate_16.png",

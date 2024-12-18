@@ -438,3 +438,238 @@ fn createCommandPools(self: *@This()) !void {
 fn destroyCommandPools(self: *@This()) void {
     self.vkd.destroyCommandPool(self.device, self.graphic_command_pool, null);
 }
+
+fn findMemoryType(self: *@This(), type_filter: u32, properties: vk.MemoryPropertyFlags) !u32 {
+    const props = self.vki.getPhysicalDeviceMemoryProperties(self.physical_device);
+
+    for (0..props.memory_type_count) |i| {
+        const properties_match = vk.MemoryPropertyFlags.contains(props.memory_types[i].property_flags, properties);
+        const type_match = type_filter & @as(u32, 1) << @intCast(i) != 0;
+
+        if (type_match and properties_match) return @intCast(i);
+    }
+
+    return error.MemoryTypeNotFound;
+}
+
+pub const CreateBufferInfo = struct {
+    size: vk.DeviceSize,
+    usage: vk.BufferUsageFlags,
+    sharing_mode: vk.SharingMode = .exclusive,
+    properties: vk.MemoryPropertyFlags,
+};
+
+pub fn createBuffer(self: *@This(), comptime T: type, info: CreateBufferInfo) !types.BufferVisible(T) {
+    const size_in_bytes = info.size * @sizeOf(T);
+
+    const buffer = try self.vkd.createBuffer(self.device, &.{
+        .size = size_in_bytes,
+        .usage = info.usage,
+        .sharing_mode = info.sharing_mode,
+    }, null);
+    errdefer self.vkd.destroyBuffer(self.device, buffer, null);
+
+    const memory_requirements = self.vkd.getBufferMemoryRequirements(self.device, buffer);
+
+    const memory = try self.vkd.allocateMemory(self.device, &.{
+        .allocation_size = memory_requirements.size,
+        .memory_type_index = try self.findMemoryType(memory_requirements.memory_type_bits, info.properties),
+    }, null);
+    errdefer self.vkd.freeMemory(self.device, memory, null);
+
+    try self.vkd.bindBufferMemory(self.device, buffer, memory, 0);
+    const ptr = try self.vkd.mapMemory(self.device, memory, 0, size_in_bytes, .{}) orelse return error.NullMemory;
+
+    return types.BufferVisible(T){
+        .handle = buffer,
+        .requirements = memory_requirements,
+        .memory = memory,
+        .map = @as([*]T, @alignCast(@ptrCast(ptr)))[0..info.size],
+    };
+}
+
+pub fn destroyBuffer(self: *@This(), typed_buffer: anytype) void {
+    self.vkd.freeMemory(self.device, typed_buffer.memory, null);
+    self.vkd.destroyBuffer(self.device, typed_buffer.handle, null);
+}
+
+pub const ImageDataCreateInfo = struct {
+    extent: vk.Extent2D,
+    array_layers: u32 = 1,
+    format: vk.Format,
+    tiling: vk.ImageTiling = .optimal,
+    initial_layout: vk.ImageLayout = .undefined,
+    usage: vk.ImageUsageFlags,
+    sharing_mode: vk.SharingMode = .exclusive,
+    flags: vk.ImageCreateFlags = .{},
+    property: vk.MemoryPropertyFlags,
+    aspect_mask: vk.ImageAspectFlags,
+    has_view: bool = true,
+    map_memory: bool = false,
+};
+
+pub fn createImage(self: *@This(), info: ImageDataCreateInfo) !types.ImageData {
+    const image = try self.vkd.createImage(self.device, &.{
+        .image_type = .@"2d",
+        .extent = .{
+            .width = info.extent.width,
+            .height = info.extent.height,
+            .depth = 1,
+        },
+        .mip_levels = 1,
+        .array_layers = info.array_layers,
+        .format = info.format,
+        .tiling = info.tiling,
+        .initial_layout = info.initial_layout,
+        .usage = info.usage,
+        .sharing_mode = info.sharing_mode,
+        .samples = .{ .@"1_bit" = true },
+        .flags = info.flags,
+    }, null);
+    errdefer self.vkd.destroyImage(self.device, image, null);
+
+    const memory_requirements = self.vkd.getImageMemoryRequirements(self.device, image);
+
+    const memory = try self.vkd.allocateMemory(self.device, &.{
+        .allocation_size = memory_requirements.size,
+        .memory_type_index = try self.findMemoryType(memory_requirements.memory_type_bits, info.property),
+    }, null);
+    errdefer self.vkd.freeMemory(self.device, memory, null);
+
+    const map = if (info.map_memory) try self.vkd.mapMemory(self.device, memory, 0, memory_requirements.size, .{}) else null;
+
+    try self.vkd.bindImageMemory(self.device, image, memory, 0);
+
+    if (!info.has_view) return .{
+        .handle = image,
+        .memory = memory,
+        .requirements = memory_requirements,
+        .format = info.format,
+        .view = .null_handle,
+        .aspect_mask = info.aspect_mask,
+        .extent = info.extent,
+        .map = map,
+    };
+
+    const view = try self.vkd.createImageView(self.device, &.{
+        .image = image,
+        .view_type = if (info.array_layers > 1) .@"2d_array" else .@"2d",
+        .format = info.format,
+        .subresource_range = builder.defaultSubrange(info.aspect_mask, info.array_layers),
+        .components = builder.compIdentity,
+    }, null);
+
+    return .{
+        .handle = image,
+        .memory = memory,
+        .requirements = memory_requirements,
+        .format = info.format,
+        .view = view,
+        .aspect_mask = info.aspect_mask,
+        .extent = info.extent,
+        .map = map,
+    };
+}
+
+pub fn destroyImage(self: *@This(), image_data: types.ImageData) void {
+    if (image_data.view != .null_handle) self.vkd.destroyImageView(self.device, image_data.view, null);
+    self.vkd.freeMemory(self.device, image_data.memory, null);
+    self.vkd.destroyImage(self.device, image_data.handle, null);
+}
+
+pub const SamplerCreateInfo = struct {
+    mag_filter: vk.Filter = .nearest,
+    min_filter: vk.Filter = .nearest,
+    mipmap: ?struct {
+        mode: vk.SamplerMipmapMode,
+        lod_bias: f32,
+        lod_min: f32,
+        lod_max: f32,
+    } = null,
+    address_mode: vk.SamplerAddressMode = .clamp_to_edge,
+    anisotropy: ?f32 = null,
+    compare_op: ?vk.CompareOp = null,
+    border_color: vk.BorderColor = .int_transparent_black,
+    unnormalized_coordinates: bool = false,
+};
+
+pub fn createSampler(self: *@This(), create_info: SamplerCreateInfo) !vk.Sampler {
+    return try self.vkd.createSampler(self.device, &.{
+        .mag_filter = create_info.mag_filter,
+        .min_filter = create_info.min_filter,
+        .address_mode_u = create_info.address_mode,
+        .address_mode_v = create_info.address_mode,
+        .address_mode_w = create_info.address_mode,
+        .anisotropy_enable = if (create_info.anisotropy != null) vk.TRUE else vk.FALSE,
+        .max_anisotropy = create_info.anisotropy orelse undefined,
+        .border_color = create_info.border_color,
+        .unnormalized_coordinates = if (create_info.unnormalized_coordinates) vk.TRUE else vk.FALSE,
+        .compare_enable = if (create_info.compare_op != null) vk.TRUE else vk.FALSE,
+        .compare_op = create_info.compare_op orelse undefined,
+        .mipmap_mode = if (create_info.mipmap) |m| m.mode else .nearest,
+        .mip_lod_bias = if (create_info.mipmap) |m| m.lod_bias else 0,
+        .min_lod = if (create_info.mipmap) |m| m.lod_min else 0,
+        .max_lod = if (create_info.mipmap) |m| m.lod_max else 0,
+    }, null);
+}
+
+pub fn destroySampler(self: *@This(), sampler: vk.Sampler) void {
+    self.vkd.destroySampler(self.device, sampler, null);
+}
+
+pub fn createCommandBuffer(self: *@This(), level: vk.CommandBufferLevel) !vk.CommandBuffer {
+    var cmd_buf: vk.CommandBuffer = undefined;
+    try self.vkd.allocateCommandBuffers(self.device, &.{
+        .command_buffer_count = 1,
+        .command_pool = self.graphic_command_pool,
+        .level = level,
+    }, util.meta.asArray(&cmd_buf));
+    return cmd_buf;
+}
+
+pub fn destroyCommandBuffer(self: *@This(), cmd: vk.CommandBuffer) void {
+    self.vkd.freeCommandBuffers(self.device, self.graphic_command_pool, 1, util.meta.asConstArray(&cmd));
+}
+
+pub const CommandBufferBeginInfo = struct {
+    flags: vk.CommandBufferUsageFlags = .{},
+    inheritance: ?*const vk.CommandBufferInheritanceInfo = null,
+};
+
+pub fn beginCommandBuffer(self: *@This(), cmd: vk.CommandBuffer, info: CommandBufferBeginInfo) !void {
+    try self.vkd.beginCommandBuffer(cmd, &.{
+        .flags = info.flags,
+        .p_inheritance_info = info.inheritance,
+    });
+}
+
+pub fn endCommandBuffer(self: *@This(), cmd: vk.CommandBuffer) !void {
+    try self.vkd.endCommandBuffer(cmd);
+}
+
+pub fn resetCommandBuffer(self: *@This(), cmd: vk.CommandBuffer, flags: vk.CommandBufferResetFlags) !void {
+    try self.vkd.resetCommandBuffer(cmd, flags);
+}
+
+pub fn cmdExecuteCommands(self: *@This(), cmd_primary: vk.CommandBuffer, cmds_secondary: []const vk.CommandBuffer) void {
+    self.vkd.cmdExecuteCommands(cmd_primary, @intCast(cmds_secondary.len), cmds_secondary.ptr);
+}
+
+pub const DependencyInfo = struct {
+    flags: vk.DependencyFlags = .{},
+    memory_barriers: []const vk.MemoryBarrier2 = &.{},
+    buffer_memory_barriers: []const vk.BufferMemoryBarrier2 = &.{},
+    image_memory_barriers: []const vk.ImageMemoryBarrier2 = &.{},
+};
+
+pub fn cmdPipelineBarrier2(self: *@This(), cmd: vk.CommandBuffer, info: DependencyInfo) void {
+    self.vkd.cmdPipelineBarrier2(cmd, &.{
+        .dependency_flags = info.flags,
+        .memory_barrier_count = @intCast(info.memory_barriers.len),
+        .p_memory_barriers = info.memory_barriers.ptr,
+        .buffer_memory_barrier_count = @intCast(info.buffer_memory_barriers.len),
+        .p_buffer_memory_barriers = info.buffer_memory_barriers.ptr,
+        .image_memory_barrier_count = @intCast(info.image_memory_barriers.len),
+        .p_image_memory_barriers = info.image_memory_barriers.ptr,
+    });
+}
