@@ -27,6 +27,10 @@ pub fn init(options: InitOptions) !*@This() {
     return self;
 }
 
+pub fn deinit(self: *@This()) void {
+    self.allocator.destroy(self);
+}
+
 pub fn enter(self: *@This(), _: *root.Sequencer, m: *root.Modules) !void {
     util.meta.logFn(log, @src());
 
@@ -38,6 +42,7 @@ pub fn enter(self: *@This(), _: *root.Sequencer, m: *root.Modules) !void {
     }
 
     self.id_channel = try m.net.registerChannel(systems.Net.Channel.init(self));
+    errdefer m.net.unregisterChannel(self.id_channel);
 
     const id_sound = m.audio.streams_slut.get("music/t01.ogg") orelse unreachable;
     try m.audio.mixer.playMusic(id_sound);
@@ -88,7 +93,6 @@ pub fn exit(self: *const @This(), _: *root.Sequencer, m: *root.Modules) void {
 
     m.net.unregisterChannel(self.id_channel);
     m.world.sand_sim.clear();
-    self.allocator.destroy(self);
 }
 
 pub fn tickEnter(self: *@This(), _: *root.Sequencer, m: *root.Modules) !void {
@@ -135,8 +139,8 @@ fn tickProcess(self: *@This(), m: *root.Modules) !void {
 fn pushCrateBatch(self: *@This(), m: *root.Modules, count: usize) !void {
     for (0..count) |_| {
         const random_vel_chunk: @Vector(2, f32) = .{
-            self.rand.random().floatNorm(f32) * 80,
-            (self.rand.random().floatNorm(f32) + 1) * -80,
+            self.rand.random().floatNorm(f32) * 120,
+            (self.rand.random().floatNorm(f32) + 1) * -120,
         };
 
         _ = try prototypes.Crate.default(m, .{ 0, 0 }, random_vel_chunk);

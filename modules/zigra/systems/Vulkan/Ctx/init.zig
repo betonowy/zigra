@@ -2,6 +2,7 @@ const vk = @import("vk");
 const types = @import("types.zig");
 const std = @import("std");
 const builtin = @import("builtin");
+const util = @import("util");
 const VkAllocator = @import("VkAllocator.zig");
 
 const log = std.log.scoped(.Vulkan_init);
@@ -13,11 +14,10 @@ fn vulkanDebugCallback(
     p_callback_data: ?*const vk.DebugUtilsMessengerCallbackDataEXT,
     _: ?*anyopaque,
 ) callconv(vk.vulkan_call_conv) vk.Bool32 {
-    if (p_callback_data) |data| {
-        if (data.p_message) |message| {
-            log_debug.err("\n{s}\n", .{message});
-        }
-    }
+    if (p_callback_data) |data| if (data.p_message) |message| {
+        log_debug.err("\n{s}\n", .{message});
+        util.tried.breakIfDebuggerPresent();
+    };
 
     return vk.FALSE;
 }

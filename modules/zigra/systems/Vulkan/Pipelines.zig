@@ -111,7 +111,19 @@ pub fn init(ctx: *Ctx) !@This() {
         .depth_write = true,
     };
 
-    const default_color_attachment = Ctx.PipelineColorBlendStateCreateInfo{ .attachments = &.{.{}} };
+    const disabled_color_blending = Ctx.PipelineColorBlendStateCreateInfo{ .attachments = &.{.{}} };
+
+    const enabled_color_blending = Ctx.PipelineColorBlendStateCreateInfo{
+        .attachments = &.{Ctx.PipelineColorBlendAttachmentState{ .blend = .{
+            .color_op = .add,
+            .alpha_op = .add,
+            .src_color_factor = .src_alpha,
+            .dst_color_factor = .one_minus_src_alpha,
+            .src_alpha_factor = .one,
+            .dst_alpha_factor = .zero,
+        } }},
+        .blend_constants = .{ 0.5, 0.5, 0.5, 0.5 },
+    };
 
     const view_scissor_dynamic_state: []const vk.DynamicState = &.{ .viewport, .scissor };
 
@@ -120,7 +132,7 @@ pub fn init(ctx: *Ctx) !@This() {
         .topology = .point_list,
         .rasterization = default_rasterization,
         .depth_stencil = enabled_depth_attachment,
-        .color_blend = default_color_attachment,
+        .color_blend = disabled_color_blending,
         .dynamic_states = view_scissor_dynamic_state,
         .layout = point_layout,
         .target_info = middle_target_info,
@@ -132,7 +144,7 @@ pub fn init(ctx: *Ctx) !@This() {
         .topology = .line_list,
         .rasterization = default_rasterization,
         .depth_stencil = enabled_depth_attachment,
-        .color_blend = default_color_attachment,
+        .color_blend = disabled_color_blending,
         .dynamic_states = view_scissor_dynamic_state,
         .layout = line_layout,
         .target_info = middle_target_info,
@@ -144,7 +156,7 @@ pub fn init(ctx: *Ctx) !@This() {
         .topology = .triangle_strip,
         .rasterization = default_rasterization,
         .depth_stencil = enabled_depth_attachment,
-        .color_blend = default_color_attachment,
+        .color_blend = disabled_color_blending,
         .dynamic_states = view_scissor_dynamic_state,
         .layout = landscape_layout,
         .target_info = middle_target_info,
@@ -156,7 +168,7 @@ pub fn init(ctx: *Ctx) !@This() {
         .topology = .triangle_list,
         .rasterization = default_rasterization,
         .depth_stencil = enabled_depth_attachment,
-        .color_blend = default_color_attachment,
+        .color_blend = disabled_color_blending,
         .dynamic_states = view_scissor_dynamic_state,
         .layout = triangles_layout,
         .target_info = middle_target_info,
@@ -168,7 +180,7 @@ pub fn init(ctx: *Ctx) !@This() {
         .topology = .triangle_strip,
         .rasterization = default_rasterization,
         .depth_stencil = enabled_depth_attachment,
-        .color_blend = default_color_attachment,
+        .color_blend = disabled_color_blending,
         .dynamic_states = view_scissor_dynamic_state,
         .layout = text_layout,
         .target_info = middle_target_info,
@@ -180,7 +192,7 @@ pub fn init(ctx: *Ctx) !@This() {
         .topology = .triangle_strip,
         .rasterization = default_rasterization,
         .depth_stencil = enabled_depth_attachment,
-        .color_blend = default_color_attachment,
+        .color_blend = disabled_color_blending,
         .dynamic_states = view_scissor_dynamic_state,
         .layout = sprite_opaque_layout,
         .target_info = middle_target_info,
@@ -192,10 +204,10 @@ pub fn init(ctx: *Ctx) !@This() {
         .topology = .triangle_list,
         .rasterization = default_rasterization,
         .depth_stencil = disable_depth_attachment,
-        .color_blend = default_color_attachment,
+        .color_blend = enabled_color_blending,
         .dynamic_states = view_scissor_dynamic_state,
         .layout = gui_layout,
-        .target_info = middle_target_info,
+        .target_info = present_target_info,
     });
     errdefer ctx.destroyPipeline(pipeline_gui);
 
@@ -204,7 +216,7 @@ pub fn init(ctx: *Ctx) !@This() {
         .topology = .triangle_strip,
         .rasterization = default_rasterization,
         .depth_stencil = disable_depth_attachment,
-        .color_blend = default_color_attachment,
+        .color_blend = disabled_color_blending,
         .dynamic_states = view_scissor_dynamic_state,
         .layout = present_layout,
         .target_info = present_target_info,

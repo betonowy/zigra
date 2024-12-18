@@ -30,6 +30,13 @@ pub const BasicPushConstant = extern struct {
     atlas_size: @Vector(2, u32),
     target_size: @Vector(2, u32),
     camera_pos: @Vector(2, i32),
+    alpha_factor: f32,
+};
+
+pub const LandscapePushConstant = extern struct {
+    offset: @Vector(2, i32),
+    target_size: @Vector(2, u32),
+    camera_pos: @Vector(2, i32),
 };
 
 pub const TextPushConstant = extern struct {
@@ -332,6 +339,7 @@ const apis: []const vk.ApiInfo = &.{
             .cmdClearDepthStencilImage = true,
             .cmdCopyImage2 = true,
             .cmdSetPrimitiveTopology = true,
+            .cmdExecuteCommands = true,
         },
     },
     // Or you can add entire feature sets or extensions

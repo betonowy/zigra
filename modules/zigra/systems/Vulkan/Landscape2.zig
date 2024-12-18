@@ -168,7 +168,7 @@ pub fn getDstSlice(self: *@This()) []u8 {
     return @as([*]u8, @ptrCast(self.upload_image.map.?))[0 .. frame_width * frame_height * @sizeOf(u16)];
 }
 
-pub fn recordUploadData(self: *@This(), cmd_primary: vk.CommandBuffer) !void {
+pub fn cmdUploadData(self: *@This(), cmd_primary: vk.CommandBuffer) !void {
     self.ctx.cmdExecuteCommands(cmd_primary, &.{self.cmd_upload});
 }
 

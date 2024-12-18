@@ -105,6 +105,7 @@ fn make(build_step: *std.Build.Step, make_options: std.Build.Step.MakeOptions) a
 
         var run = std.Build.Step.Run.create(b, "glslc");
         run.addArgs(&.{ glslc, "-I", shaders_path, "--target-env=vulkan1.2", shader.input, "-o", shader.output });
+        errdefer build_step.result_stderr = "GLSLC compilation failed";
         try run.step.make(make_options);
 
         build_step.result_cached = false;

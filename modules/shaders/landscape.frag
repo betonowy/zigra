@@ -5,10 +5,10 @@
 #extension GL_EXT_nonuniform_qualifier : require
 
 layout(binding = 3) uniform usampler2D tex_landscape[];
+layout(binding = 4) uniform usampler2D tex_landscape2;
 
-layout(location = 0) flat in uint in_descriptor;
-layout(location = 1) in vec2 in_uv;
-layout(location = 2) in vec2 in_pos_global;
+layout(location = 0) in vec2 in_uv;
+layout(location = 1) in vec2 in_pos_global;
 
 layout(location = 0) out vec4 out_color;
 
@@ -61,7 +61,8 @@ vec4 getColor(uint code) {
 }
 
 void main() {
-    uint code = texture(tex_landscape[in_descriptor], in_uv).r;
+    // uint code = texture(tex_landscape[in_descriptor], in_uv).r;
+    uint code = texture(tex_landscape2, in_uv).r;
     out_color = getColor(code);
 
     if (out_color.a < 0.1) discard;

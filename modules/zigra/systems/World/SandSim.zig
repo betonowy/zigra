@@ -403,7 +403,7 @@ pub fn tileCountForArea(_: *@This(), extent: NodeExtent) u32 {
 /// Fills tiles with Tile pointers from area in an unspecified order.
 /// `tileCountForArea()` tells the required size of the slice.
 /// Returns unused slice.
-pub fn fillTilesFromArea(self: *@This(), extent: NodeExtent, tiles: []*Tile) ![]*Tile {
+pub fn fillTilesFromArea(self: *@This(), extent: NodeExtent, tiles: []*Tile) []*Tile {
     const unused_slice = fillTilesFromAreaTree(self, extent, tiles, &self.tree);
     return tiles[0 .. tiles.len - unused_slice.len];
 }
@@ -417,7 +417,7 @@ fn fillTilesFromAreaTree(self: *@This(), extent: NodeExtent, tiles: []*Tile, tre
         const sub_extent = tree.indexToSubtreeExtent(@intCast(i));
         if (!intersection(sub_extent, extent)) continue;
 
-        const node = opt_node.*.?;
+        const node = opt_node.* orelse continue;
 
         if (!node.isLeaf()) {
             slice = fillTilesFromAreaTree(self, extent, slice, node);
@@ -428,6 +428,34 @@ fn fillTilesFromAreaTree(self: *@This(), extent: NodeExtent, tiles: []*Tile, tre
     }
 
     return slice;
+}
+
+pub fn fillView(self: *@This(), extent: NodeExtent, data: []u8) !void {
+    const required_space = @reduce(.Mul, extent.size) * @sizeOf(Cell);
+    if (required_space != data.len) return error.IncorrectBufferSize;
+
+    var sf = std.heap.stackFallback(64 * @sizeOf(*Tile), self.allocator);
+    const allocator = sf.get();
+
+    const buf = try allocator.alloc(*Tile, self.tileCountForArea(extent));
+    defer allocator.free(buf);
+
+    const tiles = self.fillTilesFromArea(extent, buf);
+
+    const dst = @as([*]Cell, @alignCast(@ptrCast(data.ptr)))[0..@reduce(.Mul, extent.size)];
+    @memset(dst, cell_types.air);
+
+    for (tiles) |p_tile| for (p_tile.matrix[0..], 0..) |row, y| {
+        const coord_y = p_tile.coord[1] + @as(i32, @intCast(y)) - extent.coord[1];
+        if (coord_y < 0 or coord_y >= @as(i32, @intCast(extent.size[1]))) continue;
+
+        for (row[0..], 0..) |cell, x| {
+            const coord_x = p_tile.coord[0] + @as(i32, @intCast(x)) - extent.coord[0];
+            if (coord_x < 0 or coord_x >= @as(i32, @intCast(extent.size[0]))) continue;
+
+            dst[@as(usize, @intCast(coord_x)) + @as(usize, @intCast(coord_y)) * extent.size[0]] = cell;
+        }
+    };
 }
 
 pub fn loadFromBuffer(self: *@This(), extent: NodeExtent, data: []const Cell) !void {
@@ -441,7 +469,7 @@ pub fn loadFromBuffer(self: *@This(), extent: NodeExtent, data: []const Cell) !v
     try self.ensureArea(extent);
 
     const tiles = try temp_allocator.alloc(*Tile, self.tileCountForArea(extent));
-    const used = try self.fillTilesFromArea(extent, tiles);
+    const used = self.fillTilesFromArea(extent, tiles);
     std.debug.assert(tiles.len == used.len);
 
     const data_stride = @Vector(2, u32){ 1, extent.size[0] };

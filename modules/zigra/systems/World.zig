@@ -7,12 +7,15 @@ const lifetime = @import("lifetime");
 const root = @import("../root.zig");
 const Net = @import("Net.zig");
 const lz4 = @import("lz4");
+const la = @import("la");
 const common = @import("common.zig");
 
 const log = std.log.scoped(.World);
 
 allocator: std.mem.Allocator,
 sand_sim: SandSim,
+
+render_sync: ?std.Thread.ResetEvent = null,
 
 id_channel: u8 = undefined,
 
@@ -55,24 +58,14 @@ pub fn render(self: *@This(), m: *root.Modules) anyerror!void {
     var t = common.systemTrace(@This(), @src(), m);
     defer t.end();
 
-    const set = try m.vulkan.prepareLandscapeUpdateRegion();
-    const lve = m.vulkan.getLandscapeVisibleExtent();
-
-    const ss_node_extent = SandSim.NodeExtent{
-        .coord = .{ lve.offset.x, lve.offset.y },
-        .size = .{ lve.extent.width, lve.extent.height },
-    };
-
-    try self.sand_sim.ensureArea(ss_node_extent);
-    var tiles: [12]*SandSim.Tile = undefined;
-    const used_tiles = try self.sand_sim.fillTilesFromArea(ss_node_extent, &tiles);
-
-    for (used_tiles) |src| for (set) |dst| {
-        if (@reduce(.Or, src.coord != dst.tile.coord)) continue;
-        try m.vulkan.pushCmdLandscapeTileUpdate(dst.tile, std.mem.asBytes(&src.matrix));
-    };
-
-    m.vulkan.shouldDrawLandscape();
+    const size = @Vector(2, u32){ 320 + 16 * 2, 200 + 16 * 2 };
+    try m.world.sand_sim.fillView(
+        .{
+            .coord = m.vulkan.impl.camera_pos - @as(@Vector(2, i32), @intCast(size)) / la.splatT(2, i32, 2),
+            .size = size,
+        },
+        m.vulkan.impl.currentFrameData().landscape2.getDstSlice(),
+    );
 
     for (self.sand_sim.particles.items) |particle| {
         const point_a = particle.pos - particle.vel * @as(@Vector(2, f32), @splat(m.time.tickDelay()));

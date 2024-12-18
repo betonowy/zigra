@@ -6,7 +6,6 @@ const vk = @import("vk");
 const types = @import("types.zig");
 const initialization = @import("init.zig");
 const Atlas = @import("../Atlas.zig");
-const Landscape = @import("../Landscape.zig");
 const spv = @import("spv");
 
 const stb = @cImport(@cInclude("stb/stb_image.h"));
@@ -183,10 +182,10 @@ pub const pipeline = struct {
         .stage_flags = .{ .fragment_bit = true },
     };
 
-    pub const dslb_landscape_img = vk.DescriptorSetLayoutBinding{
-        .binding = 3,
+    pub const dslb_landscape2_img = vk.DescriptorSetLayoutBinding{
+        .binding = 4,
         .descriptor_type = .combined_image_sampler,
-        .descriptor_count = Landscape.tile_count,
+        .descriptor_count = 1,
         .stage_flags = .{ .fragment_bit = true },
     };
 
@@ -194,7 +193,7 @@ pub const pipeline = struct {
         dslb_draw_buffer,
         dslb_atlas_img,
         dslb_target_img,
-        dslb_landscape_img,
+        dslb_landscape2_img,
     };
 
     fn countDescriptors(bindings: []const vk.DescriptorSetLayoutBinding) u32 {
@@ -204,7 +203,7 @@ pub const pipeline = struct {
     }
 
     const dps_combined_image_samplers = vk.DescriptorPoolSize{
-        .descriptor_count = countDescriptors(&.{ dslb_atlas_img, dslb_target_img, dslb_landscape_img }),
+        .descriptor_count = countDescriptors(&.{ dslb_atlas_img, dslb_target_img, dslb_landscape2_img }),
         .type = .combined_image_sampler,
     };
 

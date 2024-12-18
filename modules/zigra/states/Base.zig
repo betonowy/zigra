@@ -26,6 +26,11 @@ pub fn init(options: InitOptions) !*@This() {
     return self;
 }
 
+pub fn deinit(self: *@This()) void {
+    self.allocator.free(self.resource_dir);
+    self.allocator.destroy(self);
+}
+
 pub fn enter(self: *@This(), _: *root.Sequencer, m: *root.Modules) !void {
     util.meta.logFn(log, @src());
 
@@ -153,7 +158,7 @@ pub fn updateExit(_: @This(), _: *root.Sequencer, m: *root.Modules) !void {
     m.time.checkpoint(m);
 }
 
-pub fn exit(self: *@This(), _: *root.Sequencer, m: *root.Modules) void {
+pub fn exit(_: @This(), _: *root.Sequencer, m: *root.Modules) void {
     util.meta.logFn(log, @src());
 
     m.background.deinit();
@@ -171,6 +176,4 @@ pub fn exit(self: *@This(), _: *root.Sequencer, m: *root.Modules) void {
     m.entities.deinit();
     m.time.deinit();
     m.thread_pool.deinit();
-    self.allocator.free(self.resource_dir);
-    self.allocator.destroy(self);
 }

@@ -6,11 +6,10 @@ const vk = @import("vk");
 const types = @import("Ctx/types.zig");
 const initialization = @import("Ctx/init.zig");
 const builder = @import("Ctx/builder.zig");
-const utils = @import("util");
+const util = @import("util");
 const push_commands = @import("push_commands.zig");
 const VkAllocator = @import("Ctx/VkAllocator.zig");
 pub const Atlas = @import("Atlas.zig");
-pub const Landscape = @import("Landscape.zig");
 pub const SandSim = @import("../World/SandSim.zig");
 const Ctx = @import("Ctx.zig");
 const Pipelines = @import("Pipelines.zig");
@@ -61,8 +60,7 @@ pub const FrameData = struct {
     image_color: types.ImageData = .{},
     image_depth: types.ImageData = .{},
 
-    landscape: Landscape = .{},
-    landscape_upload: Landscape.UploadSets = .{},
+    landscape2: Landscape2 = undefined,
 
     descriptor_set: vk.DescriptorSet = .null_handle,
 
@@ -81,7 +79,7 @@ pub const FrameData = struct {
     draw_text_range: u32 = 0,
     draw_cmd_gui_slice: []types.GuiHeader = &.{},
 
-    command_buffer: vk.CommandBuffer = .null_handle,
+    cmd: vk.CommandBuffer = .null_handle,
 };
 
 pub fn init(
@@ -96,9 +94,6 @@ pub fn init(
 
     self.pipelines = try Pipelines.init(self.ctx);
     errdefer self.pipelines.deinit();
-
-    var l2 = try Landscape2.init(self.ctx);
-    defer l2.deinit();
 
     self.atlas = try Atlas.init(&self, &.{
         "images/crate_16.png",
@@ -158,21 +153,17 @@ pub fn waitForFreeFrame(self: *@This()) !void {
     if (try self.ctx.vkd.waitForFences(
         self.ctx.device,
         1,
-        utils.meta.asConstArray(&self.frames[self.frame_index].fence_busy),
+        util.meta.asConstArray(&self.frames[self.frame_index].fence_busy),
         vk.TRUE,
         1_000_000_000,
     ) != .success) return error.FenceTimeout;
 }
 
 pub fn process(self: *@This()) !void {
-    try self.ctx.vkd.resetCommandBuffer(self.frames[self.frame_index].command_buffer, .{});
-    try self.ctx.vkd.beginCommandBuffer(self.frames[self.frame_index].command_buffer, &.{ .flags = .{ .one_time_submit_bit = true } });
+    try self.ctx.vkd.resetCommandBuffer(self.frames[self.frame_index].cmd, .{});
+    try self.ctx.vkd.beginCommandBuffer(self.frames[self.frame_index].cmd, &.{ .flags = .{ .one_time_submit_bit = true } });
 
-    try self.frames[self.frame_index].landscape.recordUploadData(
-        self,
-        self.frames[self.frame_index].command_buffer,
-        self.frames[self.frame_index].landscape_upload,
-    );
+    try self.frames[self.frame_index].landscape2.cmdUploadData(self.frames[self.frame_index].cmd);
 
     try self.uploadScheduledData(&self.frames[self.frame_index]);
 
@@ -191,7 +182,7 @@ pub fn process(self: *@This()) !void {
     const trace_finalize = tracy.traceNamed(@src(), "finalize");
     defer trace_finalize.end();
 
-    try self.ctx.vkd.endCommandBuffer(self.frames[self.frame_index].command_buffer);
+    try self.ctx.vkd.endCommandBuffer(self.frames[self.frame_index].cmd);
 
     var wait_semaphores = std.BoundedArray(vk.Semaphore, 4){};
     var wait_dst_stage_mask = std.BoundedArray(vk.PipelineStageFlags, 4){};
@@ -206,13 +197,13 @@ pub fn process(self: *@This()) !void {
         .p_wait_semaphores = wait_semaphores.constSlice().ptr,
         .p_wait_dst_stage_mask = wait_dst_stage_mask.constSlice().ptr,
         .command_buffer_count = 1,
-        .p_command_buffers = utils.meta.asConstArray(&self.frames[self.frame_index].command_buffer),
+        .p_command_buffers = util.meta.asConstArray(&self.frames[self.frame_index].cmd),
         .signal_semaphore_count = 1,
-        .p_signal_semaphores = utils.meta.asConstArray(&self.frames[self.frame_index].semaphore_finished),
+        .p_signal_semaphores = util.meta.asConstArray(&self.frames[self.frame_index].semaphore_finished),
     };
 
-    try self.ctx.vkd.resetFences(self.ctx.device, 1, utils.meta.asConstArray(&self.frames[self.frame_index].fence_busy));
-    try self.ctx.vkd.queueSubmit(self.ctx.graphic_queue, 1, utils.meta.asConstArray(&submit_info), self.frames[self.frame_index].fence_busy);
+    try self.ctx.vkd.resetFences(self.ctx.device, 1, util.meta.asConstArray(&self.frames[self.frame_index].fence_busy));
+    try self.ctx.vkd.queueSubmit(self.ctx.graphic_queue, 1, util.meta.asConstArray(&submit_info), self.frames[self.frame_index].fence_busy);
 
     const present_result = try self.presentSwapchainImage(
         self.frames[self.frame_index],
@@ -424,8 +415,8 @@ fn createFrameData(self: *@This()) !void {
             .max_lod = 0,
         }, null);
 
-        frame.landscape = try Landscape.init(self);
-        frame.landscape_upload.resize(0) catch unreachable;
+        frame.landscape2 = try Landscape2.init(self.ctx);
+        errdefer frame.landscape2.deinit();
 
         frame.fence_busy = try self.ctx.vkd.createFence(self.ctx.device, &.{ .flags = .{ .signaled_bit = true } }, null);
         frame.semaphore_finished = try self.ctx.vkd.createSemaphore(self.ctx.device, &.{}, null);
@@ -434,14 +425,14 @@ fn createFrameData(self: *@This()) !void {
         try self.ctx.vkd.allocateDescriptorSets(self.ctx.device, &.{
             .descriptor_pool = self.ctx.descriptor_pool,
             .descriptor_set_count = 1,
-            .p_set_layouts = utils.meta.asConstArray(&self.pipelines.descriptor_set_layout),
-        }, utils.meta.asArray(&frame.descriptor_set));
+            .p_set_layouts = util.meta.asConstArray(&self.pipelines.descriptor_set_layout),
+        }, util.meta.asArray(&frame.descriptor_set));
 
         try self.ctx.vkd.allocateCommandBuffers(self.ctx.device, &.{
             .command_buffer_count = 1,
             .level = .primary,
             .command_pool = self.ctx.graphic_command_pool,
-        }, utils.meta.asArray(&frame.command_buffer));
+        }, util.meta.asArray(&frame.cmd));
 
         const ds_ssb_info = vk.DescriptorBufferInfo{
             .buffer = frame.draw_buffer.handle,
@@ -461,13 +452,11 @@ fn createFrameData(self: *@This()) !void {
             .sampler = frame.image_color_sampler,
         };
 
-        var ds_landscape_info: [Landscape.tile_count]vk.DescriptorImageInfo = undefined;
-
-        for (ds_landscape_info[0..], frame.landscape.tiles[0..]) |*info, tile| {
-            info.image_layout = .shader_read_only_optimal;
-            info.image_view = tile.device_image.view;
-            info.sampler = tile.sampler;
-        }
+        const ds_landscape2_info = vk.DescriptorImageInfo{
+            .image_layout = .shader_read_only_optimal,
+            .image_view = frame.landscape2.device_image.view,
+            .sampler = frame.landscape2.sampler,
+        };
 
         const write_ssb = vk.WriteDescriptorSet{
             .descriptor_count = 1,
@@ -475,7 +464,7 @@ fn createFrameData(self: *@This()) !void {
             .dst_array_element = 0,
             .dst_binding = 0,
             .dst_set = frame.descriptor_set,
-            .p_buffer_info = utils.meta.asConstArray(&ds_ssb_info),
+            .p_buffer_info = util.meta.asConstArray(&ds_ssb_info),
             .p_image_info = undefined,
             .p_texel_buffer_view = undefined,
         };
@@ -486,7 +475,7 @@ fn createFrameData(self: *@This()) !void {
             .dst_array_element = 0,
             .dst_binding = 1,
             .dst_set = frame.descriptor_set,
-            .p_image_info = utils.meta.asConstArray(&ds_atlas_info),
+            .p_image_info = util.meta.asConstArray(&ds_atlas_info),
             .p_buffer_info = undefined,
             .p_texel_buffer_view = undefined,
         };
@@ -497,23 +486,28 @@ fn createFrameData(self: *@This()) !void {
             .dst_array_element = 0,
             .dst_binding = 2,
             .dst_set = frame.descriptor_set,
-            .p_image_info = utils.meta.asConstArray(&ds_target_info),
+            .p_image_info = util.meta.asConstArray(&ds_target_info),
             .p_buffer_info = undefined,
             .p_texel_buffer_view = undefined,
         };
 
-        const write_landscape = vk.WriteDescriptorSet{
-            .descriptor_count = ds_landscape_info.len,
+        const write_landscape2 = vk.WriteDescriptorSet{
+            .descriptor_count = 1,
             .descriptor_type = .combined_image_sampler,
             .dst_array_element = 0,
-            .dst_binding = 3,
+            .dst_binding = 4,
             .dst_set = frame.descriptor_set,
-            .p_image_info = &ds_landscape_info,
+            .p_image_info = util.meta.asConstArray(&ds_landscape2_info),
             .p_buffer_info = undefined,
             .p_texel_buffer_view = undefined,
         };
 
-        const writes = [_]vk.WriteDescriptorSet{ write_ssb, write_atlas, write_img, write_landscape };
+        const writes = [_]vk.WriteDescriptorSet{
+            write_ssb,
+            write_atlas,
+            write_img,
+            write_landscape2,
+        };
 
         self.ctx.vkd.updateDescriptorSets(self.ctx.device, writes.len, &writes, 0, null);
     }
@@ -521,16 +515,16 @@ fn createFrameData(self: *@This()) !void {
 
 fn destroyFrameData(self: *@This()) void {
     for (self.frames[0..]) |*frame| {
-        if (frame.command_buffer != .null_handle) {
+        if (frame.cmd != .null_handle) {
             self.ctx.vkd.freeCommandBuffers(
                 self.ctx.device,
                 self.ctx.graphic_command_pool,
                 1,
-                utils.meta.asConstArray(&frame.command_buffer),
+                util.meta.asConstArray(&frame.cmd),
             );
         }
 
-        frame.landscape.deinit(self);
+        frame.landscape2.deinit();
 
         if (frame.image_color_sampler != .null_handle) self.ctx.vkd.destroySampler(self.ctx.device, frame.image_color_sampler, null);
         if (frame.draw_buffer.handle != .null_handle) self.destroyBuffer(frame.draw_buffer);
@@ -575,10 +569,10 @@ fn acquireNextSwapchainImage(self: *@This()) !types.DeviceDispatch.AcquireNextIm
 fn presentSwapchainImage(self: *@This(), frame: FrameData, swapchain_image_index: u32) !vk.Result {
     return self.ctx.vkd.queuePresentKHR(self.ctx.present_queue, &.{
         .wait_semaphore_count = 1,
-        .p_wait_semaphores = utils.meta.asConstArray(&frame.semaphore_finished),
+        .p_wait_semaphores = util.meta.asConstArray(&frame.semaphore_finished),
         .swapchain_count = 1,
-        .p_swapchains = utils.meta.asConstArray(&self.ctx.swapchain.handle),
-        .p_image_indices = utils.meta.asConstArray(&swapchain_image_index),
+        .p_swapchains = util.meta.asConstArray(&self.ctx.swapchain.handle),
+        .p_image_indices = util.meta.asConstArray(&swapchain_image_index),
         .p_results = null,
     }) catch |err| {
         switch (err) {
@@ -605,6 +599,7 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             frame.image_color.extent.height,
         },
         .camera_pos = self.camera_pos,
+        .alpha_factor = 1.0,
     };
 
     const push_text = types.TextPushConstant{
@@ -632,26 +627,36 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             @as(i32, @intCast(self.ctx.swapchain.extent.width / 2)),
             @as(i32, @intCast(self.ctx.swapchain.extent.height / 2)),
         },
+        .alpha_factor = 0.9,
+    };
+
+    const push_landscape = types.LandscapePushConstant{
+        .offset = undefined,
+        .target_size = .{
+            frame.image_color.extent.width,
+            frame.image_color.extent.height,
+        },
+        .camera_pos = self.camera_pos,
     };
 
     {
         const subtrace = tracy.traceNamed(@src(), "Sprite opaque");
         defer subtrace.end();
 
-        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.set.sprite_opaque.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.cmd, .graphics, self.pipelines.set.sprite_opaque.handle);
 
         self.ctx.vkd.cmdBindDescriptorSets(
-            frame.command_buffer,
+            frame.cmd,
             .graphics,
             self.pipelines.set.sprite_opaque.layout,
             0,
             1,
-            utils.meta.asConstArray(&frame.descriptor_set),
+            util.meta.asConstArray(&frame.descriptor_set),
             0,
             null,
         );
 
-        self.ctx.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
+        self.ctx.vkd.cmdSetViewport(frame.cmd, 0, 1, util.meta.asConstArray(&vk.Viewport{
             .x = 0,
             .y = 0,
             .width = @floatFromInt(frame.image_color.extent.width),
@@ -660,13 +665,13 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             .max_depth = 1,
         }));
 
-        self.ctx.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
+        self.ctx.vkd.cmdSetScissor(frame.cmd, 0, 1, util.meta.asConstArray(&vk.Rect2D{
             .offset = .{ .x = 0, .y = 0 },
             .extent = frame.image_color.extent,
         }));
 
         self.ctx.vkd.cmdPushConstants(
-            frame.command_buffer,
+            frame.cmd,
             self.pipelines.set.sprite_opaque.layout,
             .{ .vertex_bit = true, .fragment_bit = true },
             0,
@@ -675,7 +680,7 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         );
 
         self.ctx.vkd.cmdDraw(
-            frame.command_buffer,
+            frame.cmd,
             4,
             frame.draw_sprite_opaque_range,
             0,
@@ -686,20 +691,20 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         const subtrace = tracy.traceNamed(@src(), "Line");
         defer subtrace.end();
 
-        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.set.line.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.cmd, .graphics, self.pipelines.set.line.handle);
 
         self.ctx.vkd.cmdBindDescriptorSets(
-            frame.command_buffer,
+            frame.cmd,
             .graphics,
             self.pipelines.set.line.layout,
             0,
             1,
-            utils.meta.asConstArray(&frame.descriptor_set),
+            util.meta.asConstArray(&frame.descriptor_set),
             0,
             null,
         );
 
-        self.ctx.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
+        self.ctx.vkd.cmdSetViewport(frame.cmd, 0, 1, util.meta.asConstArray(&vk.Viewport{
             .x = 0,
             .y = 0,
             .width = @floatFromInt(frame.image_color.extent.width),
@@ -708,13 +713,13 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             .max_depth = 1,
         }));
 
-        self.ctx.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
+        self.ctx.vkd.cmdSetScissor(frame.cmd, 0, 1, util.meta.asConstArray(&vk.Rect2D{
             .offset = .{ .x = 0, .y = 0 },
             .extent = frame.image_color.extent,
         }));
 
         self.ctx.vkd.cmdPushConstants(
-            frame.command_buffer,
+            frame.cmd,
             self.pipelines.set.line.layout,
             .{ .vertex_bit = true, .fragment_bit = true },
             0,
@@ -723,7 +728,7 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         );
 
         self.ctx.vkd.cmdDraw(
-            frame.command_buffer,
+            frame.cmd,
             2,
             frame.draw_line_range,
             0,
@@ -734,20 +739,20 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         const subtrace = tracy.traceNamed(@src(), "Point");
         defer subtrace.end();
 
-        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.set.point.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.cmd, .graphics, self.pipelines.set.point.handle);
 
         self.ctx.vkd.cmdBindDescriptorSets(
-            frame.command_buffer,
+            frame.cmd,
             .graphics,
             self.pipelines.set.point.layout,
             0,
             1,
-            utils.meta.asConstArray(&frame.descriptor_set),
+            util.meta.asConstArray(&frame.descriptor_set),
             0,
             null,
         );
 
-        self.ctx.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
+        self.ctx.vkd.cmdSetViewport(frame.cmd, 0, 1, util.meta.asConstArray(&vk.Viewport{
             .x = 0,
             .y = 0,
             .width = @floatFromInt(frame.image_color.extent.width),
@@ -756,13 +761,13 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             .max_depth = 1,
         }));
 
-        self.ctx.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
+        self.ctx.vkd.cmdSetScissor(frame.cmd, 0, 1, util.meta.asConstArray(&vk.Rect2D{
             .offset = .{ .x = 0, .y = 0 },
             .extent = frame.image_color.extent,
         }));
 
         self.ctx.vkd.cmdPushConstants(
-            frame.command_buffer,
+            frame.cmd,
             self.pipelines.set.point.layout,
             .{ .vertex_bit = true, .fragment_bit = true },
             0,
@@ -771,7 +776,7 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         );
 
         self.ctx.vkd.cmdDraw(
-            frame.command_buffer,
+            frame.cmd,
             frame.draw_point_range,
             1,
             frame.draw_point_index,
@@ -782,20 +787,20 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         const subtrace = tracy.traceNamed(@src(), "Landscape");
         defer subtrace.end();
 
-        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.set.landscape.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.cmd, .graphics, self.pipelines.set.landscape.handle);
 
         self.ctx.vkd.cmdBindDescriptorSets(
-            frame.command_buffer,
+            frame.cmd,
             .graphics,
             self.pipelines.set.landscape.layout,
             0,
             1,
-            utils.meta.asConstArray(&frame.descriptor_set),
+            util.meta.asConstArray(&frame.descriptor_set),
             0,
             null,
         );
 
-        self.ctx.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
+        self.ctx.vkd.cmdSetViewport(frame.cmd, 0, 1, util.meta.asConstArray(&vk.Viewport{
             .x = 0,
             .y = 0,
             .width = @floatFromInt(frame.image_color.extent.width),
@@ -804,40 +809,40 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             .max_depth = 1,
         }));
 
-        self.ctx.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
+        self.ctx.vkd.cmdSetScissor(frame.cmd, 0, 1, util.meta.asConstArray(&vk.Rect2D{
             .offset = .{ .x = 0, .y = 0 },
             .extent = frame.image_color.extent,
         }));
 
         self.ctx.vkd.cmdPushConstants(
-            frame.command_buffer,
-            self.pipelines.set.sprite_opaque.layout,
+            frame.cmd,
+            self.pipelines.set.landscape.layout,
             .{ .vertex_bit = true, .fragment_bit = true },
             0,
-            @sizeOf(@TypeOf(push)),
-            &push,
+            @sizeOf(@TypeOf(push_landscape)),
+            &push_landscape,
         );
 
-        self.ctx.vkd.cmdDraw(frame.command_buffer, 4, frame.draw_landscape_range, 0, frame.draw_landscape_index);
+        self.ctx.vkd.cmdDraw(frame.cmd, 3, 1, 0, 0);
     }
     {
         const subtrace = tracy.traceNamed(@src(), "Triangles");
         defer subtrace.end();
 
-        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.set.triangles.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.cmd, .graphics, self.pipelines.set.triangles.handle);
 
         self.ctx.vkd.cmdBindDescriptorSets(
-            frame.command_buffer,
+            frame.cmd,
             .graphics,
             self.pipelines.set.triangles.layout,
             0,
             1,
-            utils.meta.asConstArray(&frame.descriptor_set),
+            util.meta.asConstArray(&frame.descriptor_set),
             0,
             null,
         );
 
-        self.ctx.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
+        self.ctx.vkd.cmdSetViewport(frame.cmd, 0, 1, util.meta.asConstArray(&vk.Viewport{
             .x = 0,
             .y = 0,
             .width = @floatFromInt(frame.image_color.extent.width),
@@ -846,13 +851,13 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             .max_depth = 1,
         }));
 
-        self.ctx.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
+        self.ctx.vkd.cmdSetScissor(frame.cmd, 0, 1, util.meta.asConstArray(&vk.Rect2D{
             .offset = .{ .x = 0, .y = 0 },
             .extent = frame.image_color.extent,
         }));
 
         self.ctx.vkd.cmdPushConstants(
-            frame.command_buffer,
+            frame.cmd,
             self.pipelines.set.triangles.layout,
             .{ .vertex_bit = true, .fragment_bit = true },
             0,
@@ -860,26 +865,26 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             &push,
         );
 
-        self.ctx.vkd.cmdDraw(frame.command_buffer, frame.draw_triangles_range, 1, frame.draw_triangles_index, 0);
+        self.ctx.vkd.cmdDraw(frame.cmd, frame.draw_triangles_range, 1, frame.draw_triangles_index, 0);
     }
     {
         const subtrace = tracy.traceNamed(@src(), "Text");
         defer subtrace.end();
 
-        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.set.text.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.cmd, .graphics, self.pipelines.set.text.handle);
 
         self.ctx.vkd.cmdBindDescriptorSets(
-            frame.command_buffer,
+            frame.cmd,
             .graphics,
             self.pipelines.set.text.layout,
             0,
             1,
-            utils.meta.asConstArray(&frame.descriptor_set),
+            util.meta.asConstArray(&frame.descriptor_set),
             0,
             null,
         );
 
-        self.ctx.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
+        self.ctx.vkd.cmdSetViewport(frame.cmd, 0, 1, util.meta.asConstArray(&vk.Viewport{
             .x = 0,
             .y = 0,
             .width = @floatFromInt(frame.image_color.extent.width),
@@ -888,13 +893,13 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             .max_depth = 1,
         }));
 
-        self.ctx.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
+        self.ctx.vkd.cmdSetScissor(frame.cmd, 0, 1, util.meta.asConstArray(&vk.Rect2D{
             .offset = .{ .x = 0, .y = 0 },
             .extent = frame.image_color.extent,
         }));
 
         self.ctx.vkd.cmdPushConstants(
-            frame.command_buffer,
+            frame.cmd,
             self.pipelines.set.text.layout,
             .{ .vertex_bit = true, .fragment_bit = true },
             0,
@@ -902,32 +907,32 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             &push_text,
         );
 
-        self.ctx.vkd.cmdDraw(frame.command_buffer, 4, frame.draw_text_range, 0, frame.draw_text_index);
+        self.ctx.vkd.cmdDraw(frame.cmd, 4, frame.draw_text_range, 0, frame.draw_text_index);
     }
 
-    self.ctx.vkd.cmdEndRendering(frame.command_buffer);
+    self.ctx.vkd.cmdEndRendering(frame.cmd);
     self.transitionFrameImagesFinal(frame, swapchain_image_index);
     self.beginRenderingFinal(frame, swapchain_image_index);
     {
         const subtrace = tracy.traceNamed(@src(), "Present");
         defer subtrace.end();
 
-        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.set.present.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.cmd, .graphics, self.pipelines.set.present.handle);
 
         self.ctx.vkd.cmdBindDescriptorSets(
-            frame.command_buffer,
+            frame.cmd,
             .graphics,
             self.pipelines.set.present.layout,
             0,
             1,
-            utils.meta.asConstArray(&frame.descriptor_set),
+            util.meta.asConstArray(&frame.descriptor_set),
             0,
             null,
         );
 
         const integer_scaling = integerScaling(self.ctx.swapchain.extent, frame.image_color.extent);
 
-        self.ctx.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
+        self.ctx.vkd.cmdSetViewport(frame.cmd, 0, 1, util.meta.asConstArray(&vk.Viewport{
             .x = @floatFromInt(integer_scaling.offset.x),
             .y = @floatFromInt(integer_scaling.offset.y),
             .width = @floatFromInt(integer_scaling.extent.width),
@@ -936,28 +941,28 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             .max_depth = 1,
         }));
 
-        self.ctx.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&integer_scaling));
+        self.ctx.vkd.cmdSetScissor(frame.cmd, 0, 1, util.meta.asConstArray(&integer_scaling));
 
-        self.ctx.vkd.cmdDraw(frame.command_buffer, 3, 1, 0, 0);
+        self.ctx.vkd.cmdDraw(frame.cmd, 3, 1, 0, 0);
     }
     {
         const subtrace = tracy.traceNamed(@src(), "GUI");
         defer subtrace.end();
 
-        self.ctx.vkd.cmdBindPipeline(frame.command_buffer, .graphics, self.pipelines.set.gui.handle);
+        self.ctx.vkd.cmdBindPipeline(frame.cmd, .graphics, self.pipelines.set.gui.handle);
 
         self.ctx.vkd.cmdBindDescriptorSets(
-            frame.command_buffer,
+            frame.cmd,
             .graphics,
             self.pipelines.set.gui.layout,
             0,
             1,
-            utils.meta.asConstArray(&frame.descriptor_set),
+            util.meta.asConstArray(&frame.descriptor_set),
             0,
             null,
         );
 
-        self.ctx.vkd.cmdSetViewport(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Viewport{
+        self.ctx.vkd.cmdSetViewport(frame.cmd, 0, 1, util.meta.asConstArray(&vk.Viewport{
             .x = 0,
             .y = 0,
             .width = @floatFromInt(self.ctx.swapchain.extent.width),
@@ -966,13 +971,13 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
             .max_depth = 1,
         }));
 
-        self.ctx.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
+        self.ctx.vkd.cmdSetScissor(frame.cmd, 0, 1, util.meta.asConstArray(&vk.Rect2D{
             .offset = .{ .x = 0, .y = 0 },
             .extent = self.ctx.swapchain.extent,
         }));
 
         self.ctx.vkd.cmdPushConstants(
-            frame.command_buffer,
+            frame.cmd,
             self.pipelines.set.gui.layout,
             .{ .vertex_bit = true, .fragment_bit = true },
             0,
@@ -990,13 +995,13 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
                         s.offset[i] = 0;
                     };
 
-                    self.ctx.vkd.cmdSetScissor(frame.command_buffer, 0, 1, utils.meta.asConstArray(&vk.Rect2D{
+                    self.ctx.vkd.cmdSetScissor(frame.cmd, 0, 1, util.meta.asConstArray(&vk.Rect2D{
                         .offset = .{ .x = s.offset[0], .y = s.offset[1] },
                         .extent = .{ .width = s.extent[0], .height = s.extent[1] },
                     }));
                 },
                 .triangles => |t| {
-                    self.ctx.vkd.cmdDraw(frame.command_buffer, t.end - t.begin, 1, t.begin, 0);
+                    self.ctx.vkd.cmdDraw(frame.cmd, t.end - t.begin, 1, t.begin, 0);
                 },
                 else => {
                     @panic("Unimplemented");
@@ -1005,7 +1010,7 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
         }
     }
 
-    self.ctx.vkd.cmdEndRendering(frame.command_buffer);
+    self.ctx.vkd.cmdEndRendering(frame.cmd);
     self.transitionFrameImagesPresent(frame, swapchain_image_index);
 }
 
@@ -1050,7 +1055,7 @@ fn transitionFrameImagesBegin(self: *@This(), frame: FrameData) void {
 
     const barriers = [_]vk.ImageMemoryBarrier2{ depth_image_barrier, color_image_barrier };
 
-    self.ctx.vkd.cmdPipelineBarrier2(frame.command_buffer, &.{
+    self.ctx.vkd.cmdPipelineBarrier2(frame.cmd, &.{
         .image_memory_barrier_count = barriers.len,
         .p_image_memory_barriers = &barriers,
     });
@@ -1077,9 +1082,9 @@ fn beginRenderingOpaque(self: *@This(), frame: FrameData) void {
         .clear_value = .{ .depth_stencil = .{ .depth = 1, .stencil = 0 } },
     };
 
-    self.ctx.vkd.cmdBeginRendering(frame.command_buffer, &.{
+    self.ctx.vkd.cmdBeginRendering(frame.cmd, &.{
         .color_attachment_count = 1,
-        .p_color_attachments = utils.meta.asConstArray(&color_attachment),
+        .p_color_attachments = util.meta.asConstArray(&color_attachment),
         .p_depth_attachment = &depth_attachment,
         .render_area = .{ .offset = .{ .x = 0, .y = 0 }, .extent = frame.image_color.extent },
         .layer_count = 1,
@@ -1128,7 +1133,7 @@ fn transitionFrameImagesFinal(self: *@This(), frame: FrameData, swapchain_image_
 
     const barriers = [_]vk.ImageMemoryBarrier2{ swapchain_image_barrier, color_image_barrier };
 
-    self.ctx.vkd.cmdPipelineBarrier2(frame.command_buffer, &.{
+    self.ctx.vkd.cmdPipelineBarrier2(frame.cmd, &.{
         .image_memory_barrier_count = barriers.len,
         .p_image_memory_barriers = &barriers,
     });
@@ -1145,9 +1150,9 @@ fn beginRenderingFinal(self: *@This(), frame: FrameData, swapchain_image_index: 
         .clear_value = .{ .color = .{ .float_32 = .{ 0.1, 0.1, 0.1, 0.1 } } },
     };
 
-    self.ctx.vkd.cmdBeginRendering(frame.command_buffer, &.{
+    self.ctx.vkd.cmdBeginRendering(frame.cmd, &.{
         .color_attachment_count = 1,
-        .p_color_attachments = utils.meta.asConstArray(&color_attachment),
+        .p_color_attachments = util.meta.asConstArray(&color_attachment),
         .p_depth_attachment = null,
         .render_area = .{ .offset = .{ .x = 0, .y = 0 }, .extent = self.ctx.swapchain.extent },
         .layer_count = 1,
@@ -1175,9 +1180,9 @@ fn transitionFrameImagesPresent(self: *@This(), frame: FrameData, swapchain_imag
         .dst_queue_family_index = 0,
     };
 
-    self.ctx.vkd.cmdPipelineBarrier2(frame.command_buffer, &.{
+    self.ctx.vkd.cmdPipelineBarrier2(frame.cmd, &.{
         .image_memory_barrier_count = 1,
-        .p_image_memory_barriers = utils.meta.asConstArray(&swapchain_image_barrier),
+        .p_image_memory_barriers = util.meta.asConstArray(&swapchain_image_barrier),
     });
 }
 
@@ -1241,29 +1246,6 @@ fn uploadScheduledData(self: *@This(), frame: *FrameData) !void {
     defer trace.end();
 
     var current_index: u32 = 0;
-
-    {
-        const subtrace = tracy.traceNamed(@src(), "Landscape");
-        defer subtrace.end();
-
-        for (
-            self.frames[self.frame_index].landscape.active_sets.constSlice(),
-            frame.draw_buffer.map[current_index .. current_index + self.frames[self.frame_index].landscape.active_sets.len],
-        ) |set, *cmd| {
-            cmd.landscape = .{
-                .depth = 0.9,
-                .descriptor = @intCast(set.tile.table_index),
-                .offset = set.tile.coord,
-                .size = .{ Landscape.image_size, Landscape.image_size },
-            };
-        }
-
-        frame.draw_landscape_index = current_index;
-        frame.draw_landscape_range = @intCast(self.frames[self.frame_index].landscape.active_sets.len);
-        current_index += @intCast(self.frames[self.frame_index].landscape.active_sets.len);
-
-        subtrace.setValue(frame.draw_landscape_range);
-    }
 
     {
         const subtrace = tracy.traceNamed(@src(), "Points");

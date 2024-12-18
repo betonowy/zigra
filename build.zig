@@ -18,6 +18,7 @@ pub fn build(b: *std.Build) !void {
     const lock_fps = b.option(f32, "lock-fps", "Limits FPS to this limit. (default: null)");
     const test_filter = b.option([]const u8, "test-filter", "Run/install only [name] test. (default: runs/installs all tests)");
     const thread_sanitizer = b.option(bool, "tsan", "Enable thread sanitizer");
+    const ensure_debug_info = b.option(bool, "ensure-debug-info", "Ensures debug info is in the executable");
 
     const options = b.addOptions();
     options.addOption(bool, "profiling", profiling orelse false);
@@ -95,7 +96,10 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
         .use_llvm = use_llvm,
-        .strip = optimize != .Debug and tracy != true and thread_sanitizer != true,
+        .strip = optimize != .Debug and
+            tracy != true and
+            thread_sanitizer != true and
+            ensure_debug_info != true,
         .sanitize_thread = thread_sanitizer orelse false,
     });
 

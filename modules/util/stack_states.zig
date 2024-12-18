@@ -13,18 +13,21 @@ pub fn OpaqueState(T: type) type {
         const Vt = struct {
             name: [:0]const u8,
             long_name: [:0]const u8,
-            enter_pfn: ?*const ActionFunction = null,
-            enterLoop_pfn: ?*const TransitionFunction = null,
-            updateEnter_pfn: ?*const ActionFunction = null,
-            tickEnter_pfn: ?*const ActionFunction = null,
-            tickExit_pfn: ?*const ActionFunction = null,
-            updateExit_pfn: ?*const ActionFunction = null,
-            exitLoop_pfn: ?*const TransitionFunction = null,
-            exit_pfn: ?*const ActionFunction = null,
+            enter_pfn: ?*const ActionFn = null,
+            enterLoop_pfn: ?*const TransitionFn = null,
+            updateEnter_pfn: ?*const ActionFn = null,
+            tickEnter_pfn: ?*const ActionFn = null,
+            tickExit_pfn: ?*const ActionFn = null,
+            updateExit_pfn: ?*const ActionFn = null,
+            exitLoop_pfn: ?*const TransitionFn = null,
+            exit_pfn: ?*const InfallibleActionFn = null,
+            deinit_pfn: *const DeinitFn,
         };
 
-        const ActionFunction = fn (@This(), *Sequencer(T), *T) anyerror!void;
-        const TransitionFunction = fn (@This(), *Sequencer(T), *T) anyerror!LoopAction;
+        const DeinitFn = fn (@This()) void;
+        const ActionFn = fn (@This(), *Sequencer(T), *T) anyerror!void;
+        const InfallibleActionFn = fn (@This(), *Sequencer(T), *T) void;
+        const TransitionFn = fn (@This(), *Sequencer(T), *T) anyerror!LoopAction;
 
         pub fn enter(self: @This(), state_stack: *Sequencer(T), user_ctx: *T) anyerror!void {
             if (self.vt.enter_pfn) |pfn| return pfn(self, state_stack, user_ctx);
@@ -54,8 +57,12 @@ pub fn OpaqueState(T: type) type {
             return if (self.vt.exitLoop_pfn) |pfn| pfn(self, state_stack, user_ctx) else return .advance;
         }
 
-        pub fn exit(self: @This(), state_stack: *Sequencer(T), user_ctx: *T) anyerror!void {
+        pub fn exit(self: @This(), state_stack: *Sequencer(T), user_ctx: *T) void {
             if (self.vt.exit_pfn) |pfn| return pfn(self, state_stack, user_ctx);
+        }
+
+        pub fn deinit(self: @This()) void {
+            self.vt.deinit_pfn(self);
         }
 
         pub fn initFrom(pimpl: anytype) @This() {
@@ -97,8 +104,12 @@ pub fn OpaqueState(T: type) type {
                     return @as(Impl, @ptrCast(@alignCast(self.ptr))).exitLoop(state_stack, user_ctx);
                 }
 
-                pub fn exit(self: Self, state_stack: *Sequencer(T), user_ctx: *T) anyerror!void {
+                pub fn exit(self: Self, state_stack: *Sequencer(T), user_ctx: *T) void {
                     return @as(Impl, @ptrCast(@alignCast(self.ptr))).exit(state_stack, user_ctx);
+                }
+
+                pub fn deinit(self: Self) void {
+                    return @as(Impl, @ptrCast(@alignCast(self.ptr))).deinit();
                 }
 
                 fn nameSuffix(name: [:0]const u8) [:0]const u8 {
@@ -119,6 +130,7 @@ pub fn OpaqueState(T: type) type {
                 .updateExit_pfn = if (std.meta.hasMethod(Impl, "updateExit")) &lambda.updateExit else null,
                 .exitLoop_pfn = if (std.meta.hasMethod(Impl, "exitLoop")) &lambda.exitLoop else null,
                 .exit_pfn = if (std.meta.hasMethod(Impl, "exit")) &lambda.exit else null,
+                .deinit_pfn = &lambda.deinit,
                 .long_name = long_name,
                 .name = short_name,
             };
@@ -139,6 +151,24 @@ pub fn Sequencer(T: type) type {
                 .current = std.ArrayList(OpaqueState(T)).init(allocator),
                 .arena_next = std.heap.ArenaAllocator.init(allocator),
             };
+        }
+
+        pub fn safeDeinit(self: *@This(), user_ctx: *T) void {
+            var reverse_current = std.mem.reverseIterator(self.current.items);
+            while (reverse_current.nextPtr()) |o| switch (o.state) {
+                .enter => {
+                    o.deinit();
+                    o.state = .dead;
+                },
+                .enterLoop, .normal, .exitLoop, .exit => {
+                    o.exit(self, user_ctx);
+                    o.deinit();
+                    o.state = .dead;
+                },
+                .dead => {},
+            };
+
+            self.deinit();
         }
 
         pub fn deinit(self: @This()) void {
@@ -195,16 +225,12 @@ pub fn Sequencer(T: type) type {
         }
 
         inline fn updateUp(self: *@This(), slice: []const OpaqueState(T), user_ctx: *T, comptime fn_name: anytype) !void {
-            for (slice) |state| {
-                try self.updateCall(state, user_ctx, fn_name);
-            }
+            for (slice) |state| try self.updateCall(state, user_ctx, fn_name);
         }
 
         inline fn updateDown(self: *@This(), slice: []const OpaqueState(T), user_ctx: *T, comptime fn_name: anytype) !void {
             var reverse_iterator = std.mem.reverseIterator(slice);
-            while (reverse_iterator.next()) |state| {
-                try self.updateCall(state, user_ctx, fn_name);
-            }
+            while (reverse_iterator.next()) |state| try self.updateCall(state, user_ctx, fn_name);
         }
 
         inline fn updateCall(self: *@This(), state: OpaqueState(T), user_ctx: *T, comptime fn_name: anytype) !void {
@@ -247,8 +273,11 @@ pub fn Sequencer(T: type) type {
             {
                 var reverse_current = std.mem.reverseIterator(self.current.items[drop_level..]);
                 while (reverse_current.nextPtr()) |o| switch (o.state) {
-                    .enter, .enterLoop => unreachable,
-                    .normal => {
+                    .enter => {
+                        o.deinit();
+                        o.state = .dead;
+                    },
+                    .enterLoop, .normal => {
                         o.state = .exitLoop;
                         return .transition;
                     },
@@ -262,7 +291,8 @@ pub fn Sequencer(T: type) type {
                         },
                     },
                     .exit => {
-                        try o.exit(self, user_ctx);
+                        o.exit(self, user_ctx);
+                        o.deinit();
                         o.state = .dead;
                     },
                     .dead => {},
@@ -319,6 +349,8 @@ test OpaqueState {
         pub fn exit(self: *@This(), _: *UserSequencer, _: *UserCtx) void {
             self.value += 128;
         }
+
+        pub fn deinit(_: *@This()) void {}
     };
 
     var s = S{};
@@ -331,7 +363,8 @@ test OpaqueState {
     try o.tickExit(undefined, undefined);
     try o.updateExit(undefined, undefined);
     try std.testing.expectEqual(.advance, o.exitLoop(undefined, undefined));
-    try o.exit(undefined, undefined);
+    o.exit(undefined, undefined);
+    o.deinit();
 
     try std.testing.expectEqual(1 + 2 + 4 + 8 + 16 + 32 + 64 + 128, s.value);
     try std.testing.expectEqualStrings("stack_states.decltest.OpaqueState.S", o.vt.long_name);
@@ -349,8 +382,11 @@ test Sequencer {
         n_exit_loop: usize = 0,
         n_loop_limit: usize = 2,
 
+        saved_ctx: *UserCtx = undefined,
+
         pub fn enter(self: *@This(), _: *UserSequencer, ctx: *UserCtx) void {
             self.write(ctx.writer(), @src());
+            self.saved_ctx = ctx;
         }
 
         pub fn enterLoop(self: *@This(), _: *UserSequencer, ctx: *UserCtx) LoopAction {
@@ -391,7 +427,11 @@ test Sequencer {
             self.write(ctx.writer(), @src());
         }
 
-        fn write(self: *@This(), writer: UserCtx.Writer, src: std.builtin.SourceLocation) void {
+        pub fn deinit(self: @This()) void {
+            self.write(self.saved_ctx.writer(), @src());
+        }
+
+        fn write(self: @This(), writer: UserCtx.Writer, src: std.builtin.SourceLocation) void {
             writer.print("{c}:{s}\n", .{ self.symbol, src.fn_name }) catch unreachable;
         }
     };
@@ -454,9 +494,11 @@ test Sequencer {
         \\c:exitLoop
         \\c:exitLoop
         \\c:exit
+        \\c:deinit
         \\b:exitLoop
         \\b:exitLoop
         \\b:exit
+        \\b:deinit
         \\c:enter
         \\c:enterLoop
         \\c:enterLoop
@@ -471,9 +513,245 @@ test Sequencer {
         \\c:exitLoop
         \\c:exitLoop
         \\c:exit
+        \\c:deinit
         \\a:exitLoop
         \\a:exitLoop
         \\a:exit
+        \\a:deinit
+        \\
+    , recorder.items);
+}
+
+test "Sequencer.EdgeCases" {
+    const UserCtx = std.ArrayList(u8);
+    const UserSequencer = Sequencer(UserCtx);
+
+    const S = struct {
+        symbol: u8,
+        next_failure_point: LifetimeState = .dead,
+        saved_ctx: *UserCtx = undefined,
+
+        pub fn enter(self: *@This(), _: *UserSequencer, ctx: *UserCtx) !void {
+            self.write(ctx.writer(), @src());
+            if (self.next_failure_point == .enter) return error.UserFailure;
+        }
+
+        pub fn enterLoop(self: @This(), _: *UserSequencer, ctx: *UserCtx) !LoopAction {
+            self.write(ctx.writer(), @src());
+            return if (self.next_failure_point == .enterLoop) return error.UserFailure else .advance;
+        }
+
+        pub fn updateEnter(self: @This(), _: *UserSequencer, ctx: *UserCtx) !void {
+            self.write(ctx.writer(), @src());
+            if (self.next_failure_point == .normal) return error.UserFailure;
+        }
+
+        pub fn tickEnter(self: @This(), _: *UserSequencer, ctx: *UserCtx) !void {
+            self.write(ctx.writer(), @src());
+        }
+
+        pub fn tickExit(self: @This(), _: *UserSequencer, ctx: *UserCtx) !void {
+            self.write(ctx.writer(), @src());
+        }
+
+        pub fn updateExit(self: @This(), _: *UserSequencer, ctx: *UserCtx) !void {
+            self.write(ctx.writer(), @src());
+        }
+
+        pub fn exitLoop(self: @This(), _: *UserSequencer, ctx: *UserCtx) !LoopAction {
+            self.write(ctx.writer(), @src());
+            return if (self.next_failure_point == .exitLoop) error.UserFailure else .advance;
+        }
+
+        pub fn exit(self: @This(), _: *UserSequencer, ctx: *UserCtx) void {
+            self.write(ctx.writer(), @src());
+        }
+
+        pub fn deinit(self: @This()) void {
+            self.write(self.saved_ctx.writer(), @src());
+        }
+
+        fn write(self: @This(), writer: UserCtx.Writer, src: std.builtin.SourceLocation) void {
+            writer.print("{c}:{s}\n", .{ self.symbol, src.fn_name }) catch unreachable;
+        }
+    };
+
+    var recorder = std.ArrayList(u8).init(std.testing.allocator);
+    defer recorder.deinit();
+    {
+        var a = S{ .symbol = 'a', .saved_ctx = &recorder, .next_failure_point = .enter };
+        var b = S{ .symbol = 'b', .saved_ctx = &recorder };
+
+        var stack_sequencer = UserSequencer.init(std.testing.allocator);
+        defer stack_sequencer.safeDeinit(&recorder);
+
+        try stack_sequencer.setAny(.{ &a, &b });
+        try std.testing.expectEqual(.transition, stack_sequencer.update(&recorder, 1));
+        try std.testing.expectError(error.UserFailure, stack_sequencer.update(&recorder, 1));
+    }
+    try std.testing.expectEqualStrings(
+        \\a:enter
+        \\b:deinit
+        \\a:deinit
+        \\
+    , recorder.items);
+    recorder.clearRetainingCapacity();
+    {
+        var a = S{ .symbol = 'a', .saved_ctx = &recorder, .next_failure_point = .enterLoop };
+        var b = S{ .symbol = 'b', .saved_ctx = &recorder };
+
+        var stack_sequencer = UserSequencer.init(std.testing.allocator);
+        defer stack_sequencer.safeDeinit(&recorder);
+
+        try stack_sequencer.setAny(.{ &a, &b });
+        for (0..2) |_| try std.testing.expectEqual(.transition, stack_sequencer.update(&recorder, 1));
+        try std.testing.expectError(error.UserFailure, stack_sequencer.update(&recorder, 1));
+    }
+    try std.testing.expectEqualStrings(
+        \\a:enter
+        \\a:enterLoop
+        \\b:deinit
+        \\a:exit
+        \\a:deinit
+        \\
+    , recorder.items);
+    recorder.clearRetainingCapacity();
+    {
+        var a = S{ .symbol = 'a', .saved_ctx = &recorder };
+        var b = S{ .symbol = 'b', .saved_ctx = &recorder, .next_failure_point = .enter };
+
+        var stack_sequencer = UserSequencer.init(std.testing.allocator);
+        defer stack_sequencer.safeDeinit(&recorder);
+
+        try stack_sequencer.setAny(.{ &a, &b });
+        for (0..2) |_| try std.testing.expectEqual(.transition, stack_sequencer.update(&recorder, 1));
+        try std.testing.expectError(error.UserFailure, stack_sequencer.update(&recorder, 1));
+    }
+    try std.testing.expectEqualStrings(
+        \\a:enter
+        \\a:enterLoop
+        \\b:enter
+        \\b:deinit
+        \\a:exit
+        \\a:deinit
+        \\
+    , recorder.items);
+    recorder.clearRetainingCapacity();
+    {
+        var a = S{ .symbol = 'a', .saved_ctx = &recorder };
+        var b = S{ .symbol = 'b', .saved_ctx = &recorder, .next_failure_point = .enterLoop };
+
+        var stack_sequencer = UserSequencer.init(std.testing.allocator);
+        defer stack_sequencer.safeDeinit(&recorder);
+
+        try stack_sequencer.setAny(.{ &a, &b });
+        for (0..3) |_| try std.testing.expectEqual(.transition, stack_sequencer.update(&recorder, 1));
+        try std.testing.expectError(error.UserFailure, stack_sequencer.update(&recorder, 1));
+    }
+    try std.testing.expectEqualStrings(
+        \\a:enter
+        \\a:enterLoop
+        \\b:enter
+        \\b:enterLoop
+        \\b:exit
+        \\b:deinit
+        \\a:exit
+        \\a:deinit
+        \\
+    , recorder.items);
+    recorder.clearRetainingCapacity();
+    {
+        var a = S{ .symbol = 'a', .saved_ctx = &recorder, .next_failure_point = .normal };
+        var b = S{ .symbol = 'b', .saved_ctx = &recorder };
+
+        var stack_sequencer = UserSequencer.init(std.testing.allocator);
+        defer stack_sequencer.safeDeinit(&recorder);
+
+        try stack_sequencer.setAny(.{ &a, &b });
+        for (0..3) |_| try std.testing.expectEqual(.transition, stack_sequencer.update(&recorder, 1));
+        try std.testing.expectError(error.UserFailure, stack_sequencer.update(&recorder, 1));
+    }
+    try std.testing.expectEqualStrings(
+        \\a:enter
+        \\a:enterLoop
+        \\b:enter
+        \\b:enterLoop
+        \\a:updateEnter
+        \\b:exit
+        \\b:deinit
+        \\a:exit
+        \\a:deinit
+        \\
+    , recorder.items);
+    recorder.clearRetainingCapacity();
+    {
+        var a = S{ .symbol = 'a', .saved_ctx = &recorder };
+        var b = S{ .symbol = 'b', .saved_ctx = &recorder, .next_failure_point = .exitLoop };
+
+        var stack_sequencer = UserSequencer.init(std.testing.allocator);
+        defer stack_sequencer.safeDeinit(&recorder);
+
+        try stack_sequencer.setAny(.{ &a, &b });
+        for (0..3) |_| try std.testing.expectEqual(.transition, stack_sequencer.update(&recorder, 1));
+        try std.testing.expectEqual(.stable, stack_sequencer.update(&recorder, 1));
+        try stack_sequencer.setAny(.{});
+        try std.testing.expectEqual(.transition, stack_sequencer.update(&recorder, 1));
+        try std.testing.expectError(error.UserFailure, stack_sequencer.update(&recorder, 1));
+    }
+    try std.testing.expectEqualStrings(
+        \\a:enter
+        \\a:enterLoop
+        \\b:enter
+        \\b:enterLoop
+        \\a:updateEnter
+        \\b:updateEnter
+        \\a:tickEnter
+        \\b:tickEnter
+        \\b:tickExit
+        \\a:tickExit
+        \\b:updateExit
+        \\a:updateExit
+        \\b:exitLoop
+        \\b:exit
+        \\b:deinit
+        \\a:exit
+        \\a:deinit
+        \\
+    , recorder.items);
+    recorder.clearRetainingCapacity();
+    {
+        var a = S{ .symbol = 'a', .saved_ctx = &recorder, .next_failure_point = .exitLoop };
+        var b = S{ .symbol = 'b', .saved_ctx = &recorder };
+
+        var stack_sequencer = UserSequencer.init(std.testing.allocator);
+        defer stack_sequencer.safeDeinit(&recorder);
+
+        try stack_sequencer.setAny(.{ &a, &b });
+        for (0..3) |_| try std.testing.expectEqual(.transition, stack_sequencer.update(&recorder, 1));
+        try std.testing.expectEqual(.stable, stack_sequencer.update(&recorder, 1));
+        try stack_sequencer.setAny(.{});
+        for (0..3) |_| try std.testing.expectEqual(.transition, stack_sequencer.update(&recorder, 1));
+        try std.testing.expectError(error.UserFailure, stack_sequencer.update(&recorder, 1));
+    }
+    try std.testing.expectEqualStrings(
+        \\a:enter
+        \\a:enterLoop
+        \\b:enter
+        \\b:enterLoop
+        \\a:updateEnter
+        \\b:updateEnter
+        \\a:tickEnter
+        \\b:tickEnter
+        \\b:tickExit
+        \\a:tickExit
+        \\b:updateExit
+        \\a:updateExit
+        \\b:exitLoop
+        \\b:exit
+        \\b:deinit
+        \\a:exitLoop
+        \\a:exit
+        \\a:deinit
         \\
     , recorder.items);
 }
