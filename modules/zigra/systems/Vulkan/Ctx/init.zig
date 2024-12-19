@@ -247,7 +247,7 @@ pub fn findQueueFamilies(
     vki.getPhysicalDeviceQueueFamilyProperties(vk_physical_device, &index_count, queue_families.ptr);
 
     for (queue_families, 0..) |queue_family, i| {
-        if (indices.graphics == null and queue_family.queue_flags.graphics_bit) {
+        if (indices.graphics == null and queue_family.queue_flags.graphics_bit and queue_family.queue_flags.compute_bit) {
             indices.graphics = @intCast(i);
         }
 

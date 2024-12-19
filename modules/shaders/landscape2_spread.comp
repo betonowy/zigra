@@ -1,0 +1,42 @@
+#version 450
+
+layout (binding = 0, rgba16f) uniform readonly image2D img_src;
+layout (binding = 1, rgba16f) uniform readonly image2D img_baseline;
+layout (binding = 2, rgba16f) uniform writeonly image2D img_dst;
+
+vec4 loadSafeSrc(ivec2 relative) {
+    ivec2 size = imageSize(img_src);
+    ivec2 coord = relative + ivec2(gl_GlobalInvocationID.xy);
+    // if (any(lessThan(coord, ivec2(0))) || any(greaterThanEqual(coord, size))) return vec4(0);
+    return imageLoad(img_src, coord);
+}
+
+vec4 loadSafeBaseline(ivec2 relative) {
+    ivec2 size = imageSize(img_baseline);
+    ivec2 coord = relative + ivec2(gl_GlobalInvocationID.xy);
+    // if (any(lessThan(coord, ivec2(0))) || any(greaterThanEqual(coord, size))) return vec4(0);
+    return imageLoad(img_baseline, coord);
+}
+
+void store(vec4 value) {
+    imageStore(img_dst, ivec2(gl_GlobalInvocationID.xy), value);
+}
+
+void main() {
+    vec4 baseline = loadSafeBaseline(ivec2(0));
+    vec3 baseline_color = baseline.rgb;
+    float baseline_fallout = baseline.a;
+
+    vec3 sum_color = vec3(0);
+
+    const int kernel_range = 2;
+    for (int i = -kernel_range; i <= kernel_range; ++i) {
+        for (int j = -kernel_range; j <= kernel_range; ++j) {
+            sum_color += loadSafeSrc(ivec2(j, i)).rgb;
+        }
+    }
+
+    sum_color *= 1.0 / float((kernel_range * 2 + 1) * (kernel_range * 2 + 1));
+
+    store(vec4(max(sum_color * baseline_fallout, baseline_color), 1.0));
+}

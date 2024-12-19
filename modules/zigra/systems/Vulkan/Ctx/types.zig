@@ -34,9 +34,10 @@ pub const BasicPushConstant = extern struct {
 };
 
 pub const LandscapePushConstant = extern struct {
-    offset: @Vector(2, i32),
+    buffer_size: @Vector(2, u32),
     target_size: @Vector(2, u32),
     camera_pos: @Vector(2, i32),
+    spread_index: @Vector(2, u32),
 };
 
 pub const TextPushConstant = extern struct {
@@ -290,6 +291,7 @@ const apis: []const vk.ApiInfo = &.{
             .destroyShaderModule = true,
             .createPipelineLayout = true,
             .createGraphicsPipelines = true,
+            .createComputePipelines = true,
             .destroyPipelineLayout = true,
             .destroyPipeline = true,
             .beginCommandBuffer = true,
@@ -340,6 +342,7 @@ const apis: []const vk.ApiInfo = &.{
             .cmdCopyImage2 = true,
             .cmdSetPrimitiveTopology = true,
             .cmdExecuteCommands = true,
+            .cmdDispatch = true,
         },
     },
     // Or you can add entire feature sets or extensions

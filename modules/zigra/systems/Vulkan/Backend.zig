@@ -370,7 +370,6 @@ pub fn destroyImage(self: *@This(), image_data: types.ImageData) void {
 fn createFrameData(self: *@This()) !void {
     self.frames = .{ .{}, .{} };
     self.frame_index = 0;
-    errdefer self.destroyFrameData();
 
     const image_extent = vk.Extent2D{ .width = frame_target_width, .height = frame_target_height };
 
@@ -380,6 +379,7 @@ fn createFrameData(self: *@This()) !void {
             .usage = .{ .storage_buffer_bit = true },
             .properties = .{ .host_visible_bit = true },
         });
+        errdefer self.ctx.destroyBuffer(frame.draw_buffer);
 
         frame.image_color = try self.createImage(.{
             .extent = image_extent,
@@ -388,6 +388,7 @@ fn createFrameData(self: *@This()) !void {
             .property = .{ .device_local_bit = true },
             .aspect_mask = .{ .color_bit = true },
         });
+        errdefer self.ctx.destroyImage(frame.image_color);
 
         frame.image_depth = try self.createImage(.{
             .extent = image_extent,
@@ -396,6 +397,7 @@ fn createFrameData(self: *@This()) !void {
             .property = .{ .device_local_bit = true },
             .aspect_mask = self.pipelines.depth_aspect,
         });
+        errdefer self.ctx.destroyImage(frame.image_depth);
 
         frame.image_color_sampler = try self.ctx.vkd.createSampler(self.ctx.device, &.{
             .mag_filter = .nearest,
@@ -414,25 +416,31 @@ fn createFrameData(self: *@This()) !void {
             .min_lod = 0,
             .max_lod = 0,
         }, null);
+        errdefer self.ctx.destroySampler(frame.image_color_sampler);
 
         frame.landscape2 = try Landscape2.init(self.ctx);
         errdefer frame.landscape2.deinit();
 
         frame.fence_busy = try self.ctx.vkd.createFence(self.ctx.device, &.{ .flags = .{ .signaled_bit = true } }, null);
+        errdefer self.ctx.vkd.destroyFence(self.ctx.device, frame.fence_busy, null);
         frame.semaphore_finished = try self.ctx.vkd.createSemaphore(self.ctx.device, &.{}, null);
+        errdefer self.ctx.vkd.destroySemaphore(self.ctx.device, frame.semaphore_finished, null);
         frame.semaphore_swapchain_image_acquired = try self.ctx.vkd.createSemaphore(self.ctx.device, &.{}, null);
+        errdefer self.ctx.vkd.destroySemaphore(self.ctx.device, frame.semaphore_swapchain_image_acquired, null);
 
         try self.ctx.vkd.allocateDescriptorSets(self.ctx.device, &.{
             .descriptor_pool = self.ctx.descriptor_pool,
             .descriptor_set_count = 1,
             .p_set_layouts = util.meta.asConstArray(&self.pipelines.descriptor_set_layout),
         }, util.meta.asArray(&frame.descriptor_set));
+        errdefer self.ctx.freeDescriptorSet(frame.descriptor_set);
 
         try self.ctx.vkd.allocateCommandBuffers(self.ctx.device, &.{
             .command_buffer_count = 1,
             .level = .primary,
             .command_pool = self.ctx.graphic_command_pool,
         }, util.meta.asArray(&frame.cmd));
+        errdefer self.ctx.destroyCommandBuffer(frame.cmd);
 
         const ds_ssb_info = vk.DescriptorBufferInfo{
             .buffer = frame.draw_buffer.handle,
@@ -454,8 +462,8 @@ fn createFrameData(self: *@This()) !void {
 
         const ds_landscape2_info = vk.DescriptorImageInfo{
             .image_layout = .shader_read_only_optimal,
-            .image_view = frame.landscape2.device_image.view,
-            .sampler = frame.landscape2.sampler,
+            .image_view = frame.landscape2.processed_image.view,
+            .sampler = frame.landscape2.processed_image_sampler,
         };
 
         const write_ssb = vk.WriteDescriptorSet{
@@ -631,12 +639,13 @@ fn recordDrawFrame(self: *@This(), frame: FrameData, swapchain_image_index: u32)
     };
 
     const push_landscape = types.LandscapePushConstant{
-        .offset = undefined,
+        .buffer_size = frame.landscape2.getDstExtent(),
         .target_size = .{
             frame.image_color.extent.width,
             frame.image_color.extent.height,
         },
         .camera_pos = self.camera_pos,
+        .spread_index = undefined,
     };
 
     {

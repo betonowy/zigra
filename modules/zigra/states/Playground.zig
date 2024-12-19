@@ -138,9 +138,14 @@ fn tickProcess(self: *@This(), m: *root.Modules) !void {
 
 fn pushCrateBatch(self: *@This(), m: *root.Modules, count: usize) !void {
     for (0..count) |_| {
+        // this causes a crate that gets stuck in a wall
+        // const random_vel_chunk: @Vector(2, f32) = .{
+        //     self.rand.random().floatNorm(f32) * 120,
+        //     (self.rand.random().floatNorm(f32) + 1) * -120,
+        // };
         const random_vel_chunk: @Vector(2, f32) = .{
-            self.rand.random().floatNorm(f32) * 120,
-            (self.rand.random().floatNorm(f32) + 1) * -120,
+            self.rand.random().floatNorm(f32) * 70,
+            (self.rand.random().floatNorm(f32) + 1) * -70,
         };
 
         _ = try prototypes.Crate.default(m, .{ 0, 0 }, random_vel_chunk);

@@ -58,7 +58,7 @@ pub fn render(self: *@This(), m: *root.Modules) anyerror!void {
     var t = common.systemTrace(@This(), @src(), m);
     defer t.end();
 
-    const size = @Vector(2, u32){ 320 + 16 * 2, 200 + 16 * 2 };
+    const size = m.vulkan.impl.currentFrameData().landscape2.getDstExtent();
     try m.world.sand_sim.fillView(
         .{
             .coord = m.vulkan.impl.camera_pos - @as(@Vector(2, i32), @intCast(size)) / la.splatT(2, i32, 2),

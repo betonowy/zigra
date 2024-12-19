@@ -46,6 +46,7 @@ pub const pipeline = struct {
         pub const Names = struct {
             vs: [:0]const u8 = "main",
             fs: [:0]const u8 = "main",
+            comp: [:0]const u8 = "main",
         };
 
         pub fn vsFs(
@@ -64,6 +65,17 @@ pub const pipeline = struct {
                     .module = fs,
                     .p_name = entries.fs.ptr,
                 },
+            };
+        }
+
+        pub fn comp(
+            sm: vk.ShaderModule,
+            entries: Names,
+        ) vk.PipelineShaderStageCreateInfo {
+            return .{
+                .stage = .{ .compute_bit = true },
+                .module = sm,
+                .p_name = entries.vs.ptr,
             };
         }
     };
@@ -212,7 +224,16 @@ pub const pipeline = struct {
         .type = .storage_buffer,
     };
 
-    pub const descriptor_pool_sizes = [_]vk.DescriptorPoolSize{ dps_combined_image_samplers, dps_storage_buffers };
+    const dps_storage_images = vk.DescriptorPoolSize{
+        .descriptor_count = 16, // TODO change that
+        .type = .storage_image,
+    };
+
+    pub const descriptor_pool_sizes = [_]vk.DescriptorPoolSize{
+        dps_combined_image_samplers,
+        dps_storage_buffers,
+        dps_storage_images,
+    };
 
     pub fn pushConstantVsFs(size: u32) vk.PushConstantRange {
         return .{

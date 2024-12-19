@@ -43,9 +43,9 @@ pub fn init(ctx: *Ctx) !@This() {
     defer ctx.destroyShaderModule(fullscreen_vs);
     const present_fs = try ctx.createShaderModule(&spv.final_frag);
     defer ctx.destroyShaderModule(present_fs);
-    const landscape_vs = try ctx.createShaderModule(&spv.landscape_vert);
+    const landscape_vs = try ctx.createShaderModule(&spv.landscape3_vert);
     defer ctx.destroyShaderModule(landscape_vs);
-    const landscape_fs = try ctx.createShaderModule(&spv.landscape_frag);
+    const landscape_fs = try ctx.createShaderModule(&spv.landscape3_frag);
     defer ctx.destroyShaderModule(landscape_fs);
     const line_vs = try ctx.createShaderModule(&spv.line_vert);
     defer ctx.destroyShaderModule(line_vs);

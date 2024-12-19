@@ -73,7 +73,7 @@ fn make(build_step: *std.Build.Step, make_options: std.Build.Step.MakeOptions) a
     while (try walker.next()) |entry| {
         if (entry.kind != .file) continue;
 
-        if (strEqlAnyOf(getExtension(entry.path), &.{ "frag", "vert" })) {
+        if (strEqlAnyOf(getExtension(entry.path), &.{ "frag", "vert", "comp" })) {
             try shaders.append(.{
                 .input = b.pathJoin(&.{ shaders_path, entry.path }),
                 .output = b.pathJoin(&.{ spv_cache, try std.mem.concat(allocator, u8, &.{ entry.path, ".spv" }) }),

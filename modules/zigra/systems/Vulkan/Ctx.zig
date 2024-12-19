@@ -32,6 +32,7 @@ window_callbacks: *const types.WindowCallbacks,
 
 instance: vk.Instance,
 physical_device: vk.PhysicalDevice,
+limits: vk.PhysicalDeviceLimits,
 device: vk.Device,
 queue_families: types.QueueFamilyIndicesComplete,
 debug_messenger: ?vk.DebugUtilsMessengerEXT,
@@ -75,6 +76,7 @@ pub fn init(
         var p: vk.PhysicalDeviceProperties2 = .{ .properties = undefined };
         self.vki.getPhysicalDeviceProperties2(self.physical_device, &p);
         log.info("Selected: {s}, vendor ID: 0x{x}", .{ p.properties.device_name, p.properties.vendor_id });
+        self.limits = p.properties.limits;
     }
 
     self.queue_families = try initialization.findQueueFamilies(self.vki, self.physical_device, self.surface, allocator);
@@ -88,7 +90,7 @@ pub fn init(
     self.descriptor_pool = try self.vkd.createDescriptorPool(self.device, &.{
         .pool_size_count = builder.pipeline.descriptor_pool_sizes.len,
         .p_pool_sizes = &builder.pipeline.descriptor_pool_sizes,
-        .max_sets = 2,
+        .max_sets = 16,
         .flags = .{ .free_descriptor_set_bit = true },
     }, null);
     errdefer self.vkd.destroyDescriptorPool(self.device, self.descriptor_pool, null);
@@ -283,7 +285,7 @@ pub const PipelineRasterizationStateCreateInfo = struct {
 };
 
 pub const PipelineDepthStencilStateCreateInfo = struct {
-    depth_test: ?vk.CompareOp,
+    depth_test: ?vk.CompareOp = null,
     depth_write: bool = false,
     stencil_test: ?struct {
         front: vk.StencilOpState,
@@ -424,8 +426,45 @@ pub fn createGraphicsPipeline(self: *@This(), create_info: GraphicsPipelineCreat
     ) != .success) error.createGraphicsPipelinesFailed else pipeline;
 }
 
+pub const ComputePipelineCreateInfo = struct {
+    stage: vk.PipelineShaderStageCreateInfo,
+    layout: vk.PipelineLayout,
+};
+
+pub fn createComputePipeline(self: *@This(), info: ComputePipelineCreateInfo) !vk.Pipeline {
+    const vk_info = vk.ComputePipelineCreateInfo{
+        .base_pipeline_index = 0,
+        .stage = info.stage,
+        .layout = info.layout,
+    };
+
+    var pipeline: vk.Pipeline = undefined;
+    return if (try self.vkd.createComputePipelines(
+        self.device,
+        .null_handle,
+        1,
+        util.meta.asConstArray(&vk_info),
+        null,
+        util.meta.asArray(&pipeline),
+    ) != .success) return error.createComputePipelineFailed else pipeline;
+}
+
 pub fn destroyPipeline(self: *@This(), pipeline: vk.Pipeline) void {
     self.vkd.destroyPipeline(self.device, pipeline, null);
+}
+
+pub fn allocateDescriptorSet(self: *@This(), dsl: vk.DescriptorSetLayout) !vk.DescriptorSet {
+    var ds: vk.DescriptorSet = undefined;
+    try self.vkd.allocateDescriptorSets(self.device, &.{
+        .descriptor_pool = self.descriptor_pool,
+        .descriptor_set_count = 1,
+        .p_set_layouts = util.meta.asConstArray(&dsl),
+    }, util.meta.asArray(&ds));
+    return ds;
+}
+
+pub fn freeDescriptorSet(self: *@This(), ds: vk.DescriptorSet) void {
+    self.vkd.freeDescriptorSets(self.device, self.descriptor_pool, 1, util.meta.asConstArray(&ds)) catch unreachable;
 }
 
 fn createCommandPools(self: *@This()) !void {
@@ -647,7 +686,11 @@ pub fn endCommandBuffer(self: *@This(), cmd: vk.CommandBuffer) !void {
     try self.vkd.endCommandBuffer(cmd);
 }
 
-pub fn resetCommandBuffer(self: *@This(), cmd: vk.CommandBuffer, flags: vk.CommandBufferResetFlags) !void {
+pub fn resetCommandBuffer(
+    self: *@This(),
+    cmd: vk.CommandBuffer,
+    flags: vk.CommandBufferResetFlags,
+) !void {
     try self.vkd.resetCommandBuffer(cmd, flags);
 }
 
@@ -672,4 +715,65 @@ pub fn cmdPipelineBarrier2(self: *@This(), cmd: vk.CommandBuffer, info: Dependen
         .image_memory_barrier_count = @intCast(info.image_memory_barriers.len),
         .p_image_memory_barriers = info.image_memory_barriers.ptr,
     });
+}
+
+pub fn cmdBindPipeline(self: *@This(), cmd: vk.CommandBuffer, bind: vk.PipelineBindPoint, handle: vk.Pipeline) void {
+    self.vkd.cmdBindPipeline(cmd, bind, handle);
+}
+
+pub fn cmdBindDescriptorSets(
+    self: *@This(),
+    cmd: vk.CommandBuffer,
+    bind: vk.PipelineBindPoint,
+    layout: vk.PipelineLayout,
+    sets: struct { first: u32 = 0, slice: []const vk.DescriptorSet = &.{} },
+    offsets: struct { slice: []const u32 = &.{} },
+) void {
+    self.vkd.cmdBindDescriptorSets(
+        cmd,
+        bind,
+        layout,
+        sets.first,
+        @intCast(sets.slice.len),
+        sets.slice.ptr,
+        @intCast(offsets.slice.len),
+        offsets.slice.ptr,
+    );
+}
+
+pub fn cmdPushConstants(
+    self: *@This(),
+    cmd: vk.CommandBuffer,
+    layout: vk.PipelineLayout,
+    stage_flags: vk.ShaderStageFlags,
+    data: anytype,
+) void {
+    self.vkd.cmdPushConstants(cmd, layout, stage_flags, 0, @sizeOf(@TypeOf(data)), &data);
+}
+
+pub fn cmdDraw(
+    self: *@This(),
+    cmd: vk.CommandBuffer,
+    vertex_count: u32,
+    instance_count: u32,
+    first_vertex: u32,
+    first_instance: u32,
+) void {
+    self.vkd.cmdDraw(cmd, vertex_count, instance_count, first_vertex, first_instance);
+}
+
+pub fn cmdDispatch(
+    self: *@This(),
+    cmd: vk.CommandBuffer,
+    group_count: @Vector(3, u32),
+) void {
+    self.vkd.cmdDispatch(cmd, group_count[0], group_count[1], group_count[2]);
+}
+
+pub fn cmdBeginRendering(self: *@This(), cmd: vk.CommandBuffer, rendering_info: vk.RenderingInfo) void {
+    self.vkd.cmdBeginRendering(cmd, &rendering_info);
+}
+
+pub fn cmdEndRendering(self: *@This(), cmd: vk.CommandBuffer) void {
+    self.vkd.cmdEndRendering(cmd);
 }
