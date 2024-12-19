@@ -7,5 +7,5 @@ layout (binding = 2, rgba16f) uniform writeonly image2D img_out;
 void main() {
     vec4 albedo = imageLoad(img_albedo, ivec2(gl_GlobalInvocationID.xy)).rgba;
     vec4 light = imageLoad(img_light, ivec2(gl_GlobalInvocationID.xy)).rgba;
-    imageStore(img_out, ivec2(gl_GlobalInvocationID.xy), albedo * light);
+    imageStore(img_out, ivec2(gl_GlobalInvocationID.xy), albedo * sqrt(light));
 }
