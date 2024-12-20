@@ -242,6 +242,14 @@ pub const pipeline = struct {
             .stage_flags = .{ .vertex_bit = true, .fragment_bit = true },
         };
     }
+
+    pub fn pushConstantComp(size: u32) vk.PushConstantRange {
+        return .{
+            .size = size,
+            .offset = 0,
+            .stage_flags = .{ .compute_bit = true },
+        };
+    }
 };
 
 pub const frame = struct {};

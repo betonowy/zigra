@@ -14,6 +14,14 @@ const Backend = @import("Backend.zig");
 const frame_margin = 64;
 const frame_width = Backend.frame_target_width + frame_margin * 2;
 const frame_height = Backend.frame_target_height + frame_margin * 2;
+
+const comp_local_group_size = @Vector(2, u32){ 16, 16 };
+
+const comp_workgroups_size = @Vector(2, u32){
+    (frame_width - 1) / comp_local_group_size[0] + 1,
+    (frame_height - 1) / comp_local_group_size[1] + 1,
+};
+
 const spread_iteration_count = 5;
 
 comptime {
@@ -25,7 +33,8 @@ comptime {
 
 ctx: *Ctx,
 
-cmd_process: vk.CommandBuffer,
+cmd_process_p1: vk.CommandBuffer,
+cmd_process_p2: vk.CommandBuffer,
 
 upload_image: types.ImageData,
 device_image: types.ImageData,
@@ -35,10 +44,10 @@ spread_light_image: [2]types.ImageData,
 processed_image: types.ImageData,
 processed_image_sampler: vk.Sampler,
 
-dsl_decode: vk.DescriptorSetLayout,
-ds_decode: vk.DescriptorSet,
-pip_decode: vk.Pipeline,
-pipl_decode: vk.PipelineLayout,
+dsl_setup: vk.DescriptorSetLayout,
+ds_setup: vk.DescriptorSet,
+pip_setup: vk.Pipeline,
+pipl_setup: vk.PipelineLayout,
 
 dsl_spread: vk.DescriptorSetLayout,
 ds_spread: [2]vk.DescriptorSet,
@@ -127,7 +136,7 @@ pub fn init(ctx: *Ctx) !@This() {
     const processed_image_sampler = try ctx.createSampler(.{});
     errdefer ctx.destroySampler(processed_image_sampler);
 
-    const dsl_decode = try ctx.createDescriptorSetLayout(&.{
+    const dsl_setup = try ctx.createDescriptorSetLayout(&.{
         .{
             .binding = 0, // device_image
             .descriptor_count = 1,
@@ -152,18 +161,24 @@ pub fn init(ctx: *Ctx) !@This() {
             .descriptor_type = .storage_image,
             .stage_flags = .{ .compute_bit = true },
         },
+        .{
+            .binding = 4, // spread_light_image[1]
+            .descriptor_count = 1,
+            .descriptor_type = .storage_image,
+            .stage_flags = .{ .compute_bit = true },
+        },
     });
-    errdefer ctx.destroyDescriptorSetLayout(dsl_decode);
+    errdefer ctx.destroyDescriptorSetLayout(dsl_setup);
 
-    const ds_decode = try ctx.allocateDescriptorSet(dsl_decode);
-    errdefer ctx.freeDescriptorSet(ds_decode);
+    const ds_setup = try ctx.allocateDescriptorSet(dsl_setup);
+    errdefer ctx.freeDescriptorSet(ds_setup);
     {
-        const ds_decode_device_image = vk.WriteDescriptorSet{
+        const ds_setup_device_image = vk.WriteDescriptorSet{
             .descriptor_count = 1,
             .descriptor_type = .storage_image,
             .dst_array_element = 0,
             .dst_binding = 0,
-            .dst_set = ds_decode,
+            .dst_set = ds_setup,
             .p_image_info = &.{.{
                 .image_layout = .general,
                 .image_view = device_image.view,
@@ -173,12 +188,12 @@ pub fn init(ctx: *Ctx) !@This() {
             .p_texel_buffer_view = undefined,
         };
 
-        const ds_decode_albedo_image = vk.WriteDescriptorSet{
+        const ds_setup_albedo_image = vk.WriteDescriptorSet{
             .descriptor_count = 1,
             .descriptor_type = .storage_image,
             .dst_array_element = 0,
             .dst_binding = 1,
-            .dst_set = ds_decode,
+            .dst_set = ds_setup,
             .p_image_info = &.{vk.DescriptorImageInfo{
                 .image_layout = .general,
                 .image_view = albedo_image.view,
@@ -188,12 +203,12 @@ pub fn init(ctx: *Ctx) !@This() {
             .p_texel_buffer_view = undefined,
         };
 
-        const ds_decode_src_light_image = vk.WriteDescriptorSet{
+        const ds_setup_src_light_image = vk.WriteDescriptorSet{
             .descriptor_count = 1,
             .descriptor_type = .storage_image,
             .dst_array_element = 0,
             .dst_binding = 2,
-            .dst_set = ds_decode,
+            .dst_set = ds_setup,
             .p_image_info = &.{.{
                 .image_layout = .general,
                 .image_view = src_light_image.view,
@@ -203,12 +218,12 @@ pub fn init(ctx: *Ctx) !@This() {
             .p_texel_buffer_view = undefined,
         };
 
-        const ds_decode_spread_light_image_0 = vk.WriteDescriptorSet{
+        const ds_setup_spread_light_image_0 = vk.WriteDescriptorSet{
             .descriptor_count = 1,
             .descriptor_type = .storage_image,
             .dst_array_element = 0,
             .dst_binding = 3,
-            .dst_set = ds_decode,
+            .dst_set = ds_setup,
             .p_image_info = &.{.{
                 .image_layout = .general,
                 .image_view = spread_light_image_0.view,
@@ -218,27 +233,45 @@ pub fn init(ctx: *Ctx) !@This() {
             .p_texel_buffer_view = undefined,
         };
 
+        const ds_setup_spread_light_image_1 = vk.WriteDescriptorSet{
+            .descriptor_count = 1,
+            .descriptor_type = .storage_image,
+            .dst_array_element = 0,
+            .dst_binding = 4,
+            .dst_set = ds_setup,
+            .p_image_info = &.{.{
+                .image_layout = .general,
+                .image_view = spread_light_image_1.view,
+                .sampler = undefined,
+            }},
+            .p_buffer_info = undefined,
+            .p_texel_buffer_view = undefined,
+        };
+
         const writes = [_]vk.WriteDescriptorSet{
-            ds_decode_device_image,
-            ds_decode_albedo_image,
-            ds_decode_src_light_image,
-            ds_decode_spread_light_image_0,
+            ds_setup_device_image,
+            ds_setup_albedo_image,
+            ds_setup_src_light_image,
+            ds_setup_spread_light_image_0,
+            ds_setup_spread_light_image_1,
         };
 
         ctx.vkd.updateDescriptorSets(ctx.device, writes.len, &writes, 0, null);
     }
 
-    const pipl_decode = try ctx.createPipelineLayout(.{ .dsl = dsl_decode });
-    errdefer ctx.destroyPipelineLayout(pipl_decode);
+    const pipl_setup = try ctx.createPipelineLayout(.{ .dsl = dsl_setup, .pcr = &.{
+        builder.pipeline.pushConstantComp(@sizeOf(types.CameraPosDiffPushConstant)),
+    } });
+    errdefer ctx.destroyPipelineLayout(pipl_setup);
 
-    const sm_comp_decode = try ctx.createShaderModule(&spv.landscape2_decode_comp);
-    defer ctx.destroyShaderModule(sm_comp_decode);
+    const sm_comp_setup = try ctx.createShaderModule(&spv.landscape2_setup_comp);
+    defer ctx.destroyShaderModule(sm_comp_setup);
 
-    const pip_decode = try ctx.createComputePipeline(.{
-        .layout = pipl_decode,
-        .stage = builder.pipeline.shader_stage.comp(sm_comp_decode, .{}),
+    const pip_setup = try ctx.createComputePipeline(.{
+        .layout = pipl_setup,
+        .stage = builder.pipeline.shader_stage.comp(sm_comp_setup, .{}),
     });
-    errdefer ctx.destroyPipeline(pip_decode);
+    errdefer ctx.destroyPipeline(pip_setup);
 
     const dsl_spread = try ctx.createDescriptorSetLayout(&.{
         .{
@@ -381,10 +414,12 @@ pub fn init(ctx: *Ctx) !@This() {
     });
     errdefer ctx.destroyPipeline(pip_spread);
 
-    const cmd_process = try ctx.createCommandBuffer(.secondary);
-    errdefer ctx.destroyCommandBuffer(cmd_process);
+    const cmd_process_p1 = try ctx.createCommandBuffer(.secondary);
+    errdefer ctx.destroyCommandBuffer(cmd_process_p1);
+    const cmd_process_p2 = try ctx.createCommandBuffer(.secondary);
+    errdefer ctx.destroyCommandBuffer(cmd_process_p2);
 
-    try ctx.beginCommandBuffer(cmd_process, .{
+    try ctx.beginCommandBuffer(cmd_process_p1, .{
         .inheritance = &.{ .subpass = 0, .occlusion_query_enable = vk.FALSE },
     });
 
@@ -427,7 +462,7 @@ pub fn init(ctx: *Ctx) !@This() {
         },
     };
 
-    ctx.cmdPipelineBarrier2(cmd_process, .{
+    ctx.cmdPipelineBarrier2(cmd_process_p1, .{
         .image_memory_barriers = &upload_begin_barriers,
     });
 
@@ -453,7 +488,7 @@ pub fn init(ctx: *Ctx) !@This() {
         },
     };
 
-    ctx.vkd.cmdCopyImage2(cmd_process, &.{
+    ctx.vkd.cmdCopyImage2(cmd_process_p1, &.{
         .src_image = upload_image.handle,
         .dst_image = device_image.handle,
         .src_image_layout = .transfer_src_optimal,
@@ -536,15 +571,32 @@ pub fn init(ctx: *Ctx) !@This() {
                 .src_queue_family_index = 0,
                 .dst_queue_family_index = 0,
             },
+            .{
+                .src_stage_mask = .{ .compute_shader_bit = true },
+                .src_access_mask = .{ .shader_read_bit = true },
+                .dst_stage_mask = .{ .compute_shader_bit = true },
+                .dst_access_mask = .{ .shader_write_bit = true },
+                .old_layout = .undefined,
+                .new_layout = .general,
+                .image = spread_light_image_1.handle,
+                .subresource_range = .{
+                    .aspect_mask = .{ .color_bit = true },
+                    .base_mip_level = 0,
+                    .level_count = vk.REMAINING_MIP_LEVELS,
+                    .base_array_layer = 0,
+                    .layer_count = vk.REMAINING_ARRAY_LAYERS,
+                },
+                .src_queue_family_index = 0,
+                .dst_queue_family_index = 0,
+            },
         };
 
-        ctx.cmdPipelineBarrier2(cmd_process, .{ .image_memory_barriers = &copy_barriers });
+        ctx.cmdPipelineBarrier2(cmd_process_p1, .{ .image_memory_barriers = &copy_barriers });
     }
-    {
-        ctx.cmdBindPipeline(cmd_process, .compute, pip_decode);
-        ctx.cmdBindDescriptorSets(cmd_process, .compute, pipl_decode, .{ .slice = &.{ds_decode} }, .{});
-        ctx.cmdDispatch(cmd_process, .{ frame_width, frame_height, 1 });
-    }
+    try ctx.endCommandBuffer(cmd_process_p1);
+    try ctx.beginCommandBuffer(cmd_process_p2, .{
+        .inheritance = &.{ .subpass = 0, .occlusion_query_enable = vk.FALSE },
+    });
     {
         const decode_to_spread_barriers = [_]vk.ImageMemoryBarrier2{
             .{
@@ -603,11 +655,11 @@ pub fn init(ctx: *Ctx) !@This() {
             },
         };
 
-        ctx.cmdPipelineBarrier2(cmd_process, .{ .image_memory_barriers = &decode_to_spread_barriers });
+        ctx.cmdPipelineBarrier2(cmd_process_p2, .{ .image_memory_barriers = &decode_to_spread_barriers });
     }
     var loop_variant: enum { spread_0_to_1, spread_1_to_0 } = .spread_0_to_1;
     {
-        ctx.cmdBindPipeline(cmd_process, .compute, pip_spread);
+        ctx.cmdBindPipeline(cmd_process_p2, .compute, pip_spread);
 
         for (0..spread_iteration_count) |_| {
             const ds_current = switch (loop_variant) {
@@ -615,8 +667,8 @@ pub fn init(ctx: *Ctx) !@This() {
                 .spread_1_to_0 => ds_spread_1_to_0,
             };
 
-            ctx.cmdBindDescriptorSets(cmd_process, .compute, pipl_spread, .{ .slice = &.{ds_current} }, .{});
-            ctx.cmdDispatch(cmd_process, .{ frame_width, frame_height, 1 });
+            ctx.cmdBindDescriptorSets(cmd_process_p2, .compute, pipl_spread, .{ .slice = &.{ds_current} }, .{});
+            ctx.cmdDispatch(cmd_process_p2, .{ comp_workgroups_size[0], comp_workgroups_size[1], 1 });
 
             const img_spread: struct {
                 src: types.ImageData,
@@ -665,7 +717,7 @@ pub fn init(ctx: *Ctx) !@This() {
                 },
             };
 
-            ctx.cmdPipelineBarrier2(cmd_process, .{ .image_memory_barriers = &spread_finish_barriers });
+            ctx.cmdPipelineBarrier2(cmd_process_p2, .{ .image_memory_barriers = &spread_finish_barriers });
 
             loop_variant = switch (loop_variant) {
                 .spread_0_to_1 => .spread_1_to_0,
@@ -788,12 +840,12 @@ pub fn init(ctx: *Ctx) !@This() {
             },
         };
 
-        ctx.cmdPipelineBarrier2(cmd_process, .{ .image_memory_barriers = &spread_to_assemble_barriers });
+        ctx.cmdPipelineBarrier2(cmd_process_p2, .{ .image_memory_barriers = &spread_to_assemble_barriers });
     }
     {
-        ctx.cmdBindPipeline(cmd_process, .compute, pip_assemble);
-        ctx.cmdBindDescriptorSets(cmd_process, .compute, pipl_assemble, .{ .slice = &.{ds_assemble} }, .{});
-        ctx.cmdDispatch(cmd_process, .{ frame_width, frame_height, 1 });
+        ctx.cmdBindPipeline(cmd_process_p2, .compute, pip_assemble);
+        ctx.cmdBindDescriptorSets(cmd_process_p2, .compute, pipl_assemble, .{ .slice = &.{ds_assemble} }, .{});
+        ctx.cmdDispatch(cmd_process_p2, .{ comp_workgroups_size[0], comp_workgroups_size[1], 1 });
     }
     {
         const pipeline_finish_barriers = [_]vk.ImageMemoryBarrier2{
@@ -907,10 +959,10 @@ pub fn init(ctx: *Ctx) !@This() {
             },
         };
 
-        ctx.cmdPipelineBarrier2(cmd_process, .{ .image_memory_barriers = &pipeline_finish_barriers });
+        ctx.cmdPipelineBarrier2(cmd_process_p2, .{ .image_memory_barriers = &pipeline_finish_barriers });
     }
 
-    try ctx.endCommandBuffer(cmd_process);
+    try ctx.endCommandBuffer(cmd_process_p2);
 
     return .{
         .ctx = ctx,
@@ -921,10 +973,10 @@ pub fn init(ctx: *Ctx) !@This() {
         .spread_light_image = .{ spread_light_image_0, spread_light_image_1 },
         .processed_image = processed_image,
         .processed_image_sampler = processed_image_sampler,
-        .ds_decode = ds_decode,
-        .dsl_decode = dsl_decode,
-        .pipl_decode = pipl_decode,
-        .pip_decode = pip_decode,
+        .ds_setup = ds_setup,
+        .dsl_setup = dsl_setup,
+        .pipl_setup = pipl_setup,
+        .pip_setup = pip_setup,
         .ds_spread = .{ ds_spread_0_to_1, ds_spread_1_to_0 },
         .dsl_spread = dsl_spread,
         .pipl_spread = pipl_spread,
@@ -933,7 +985,8 @@ pub fn init(ctx: *Ctx) !@This() {
         .ds_assemble = ds_assemble,
         .pipl_assemble = pipl_assemble,
         .pip_assemble = pip_assemble,
-        .cmd_process = cmd_process,
+        .cmd_process_p1 = cmd_process_p1,
+        .cmd_process_p2 = cmd_process_p2,
     };
 }
 
@@ -945,26 +998,32 @@ pub fn getDstSlice(self: *@This()) []u8 {
     return @as([*]u8, @ptrCast(self.upload_image.map.?))[0 .. frame_width * frame_height * @sizeOf(u16)];
 }
 
-pub fn cmdUploadData(self: *@This(), cmd_primary: vk.CommandBuffer, camera_diff: @Vector(2, i32)) !void {
-    _ = camera_diff; // autofix
-    self.ctx.cmdExecuteCommands(cmd_primary, &.{self.cmd_process});
+pub fn cmdUploadData(self: *@This(), cmd_primary: vk.CommandBuffer, camera_pos_diff: @Vector(2, i32)) !void {
+    const push_constant = types.CameraPosDiffPushConstant{ .camera_pos_diff = camera_pos_diff };
+    self.ctx.cmdExecuteCommands(cmd_primary, &.{self.cmd_process_p1});
+    self.ctx.cmdBindPipeline(cmd_primary, .compute, self.pip_setup);
+    self.ctx.cmdBindDescriptorSets(cmd_primary, .compute, self.pipl_setup, .{ .slice = &.{self.ds_setup} }, .{});
+    self.ctx.cmdPushConstants(cmd_primary, self.pipl_setup, .{ .compute_bit = true }, push_constant);
+    self.ctx.cmdDispatch(cmd_primary, .{ comp_workgroups_size[0], comp_workgroups_size[1], 1 });
+    self.ctx.cmdExecuteCommands(cmd_primary, &.{self.cmd_process_p2});
 }
 
 pub fn deinit(self: *@This()) void {
-    self.ctx.destroyCommandBuffer(self.cmd_process);
+    self.ctx.destroyCommandBuffer(self.cmd_process_p2);
+    self.ctx.destroyCommandBuffer(self.cmd_process_p1);
     self.ctx.destroyPipeline(self.pip_assemble);
     self.ctx.destroyPipeline(self.pip_spread);
-    self.ctx.destroyPipeline(self.pip_decode);
+    self.ctx.destroyPipeline(self.pip_setup);
     self.ctx.destroyPipelineLayout(self.pipl_assemble);
     self.ctx.destroyPipelineLayout(self.pipl_spread);
-    self.ctx.destroyPipelineLayout(self.pipl_decode);
+    self.ctx.destroyPipelineLayout(self.pipl_setup);
     self.ctx.freeDescriptorSet(self.ds_assemble);
     self.ctx.freeDescriptorSet(self.ds_spread[1]);
     self.ctx.freeDescriptorSet(self.ds_spread[0]);
-    self.ctx.freeDescriptorSet(self.ds_decode);
+    self.ctx.freeDescriptorSet(self.ds_setup);
     self.ctx.destroyDescriptorSetLayout(self.dsl_assemble);
     self.ctx.destroyDescriptorSetLayout(self.dsl_spread);
-    self.ctx.destroyDescriptorSetLayout(self.dsl_decode);
+    self.ctx.destroyDescriptorSetLayout(self.dsl_setup);
     self.ctx.destroySampler(self.processed_image_sampler);
     self.ctx.destroyImage(self.processed_image);
     self.ctx.destroyImage(self.spread_light_image[1]);

@@ -40,6 +40,10 @@ pub const LandscapePushConstant = extern struct {
     spread_index: @Vector(2, u32),
 };
 
+pub const CameraPosDiffPushConstant = extern struct {
+    camera_pos_diff: @Vector(2, i32),
+};
+
 pub const TextPushConstant = extern struct {
     atlas_size: @Vector(2, u32),
     target_size: @Vector(2, u32),

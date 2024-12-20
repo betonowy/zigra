@@ -27,6 +27,7 @@ fn make(build_step: *std.Build.Step, _: std.Build.Step.MakeOptions) anyerror!voi
     if (try genPushConstant(b, types.BasicPushConstant, &arena)) build_step.result_cached = false;
     if (try genPushConstant(b, types.TextPushConstant, &arena)) build_step.result_cached = false;
     if (try genPushConstant(b, types.LandscapePushConstant, &arena)) build_step.result_cached = false;
+    if (try genPushConstant(b, types.CameraPosDiffPushConstant, &arena)) build_step.result_cached = false;
     if (try genLandscapeCells(b, &arena)) build_step.result_cached = false;
 }
 
