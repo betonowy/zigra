@@ -40,6 +40,7 @@ pipelines: Pipelines,
 atlas: Atlas,
 
 camera_pos: @Vector(2, i32),
+camera_pos_diff: @Vector(2, i32),
 start_timestamp: i128,
 
 upload_line_data: std.ArrayListUnmanaged(types.LineData),
@@ -118,6 +119,7 @@ pub fn init(
 
     self.start_timestamp = std.time.nanoTimestamp();
     self.camera_pos = .{ 0, 0 };
+    self.camera_pos_diff = .{ 0, 0 };
 
     self.upload_line_data = .{};
     self.upload_triangle_data = .{};
@@ -145,8 +147,12 @@ pub fn deinit(self: *@This()) void {
     self.ctx.deinit();
 }
 
-pub fn currentFrameData(self: *@This()) *FrameData {
+pub fn currentFrameDataPtr(self: *@This()) *FrameData {
     return &self.frames[self.frame_index];
+}
+
+pub fn currentFrameData(self: *@This()) FrameData {
+    return self.frames[self.frame_index];
 }
 
 pub fn waitForFreeFrame(self: *@This()) !void {
@@ -163,8 +169,7 @@ pub fn process(self: *@This()) !void {
     try self.ctx.vkd.resetCommandBuffer(self.frames[self.frame_index].cmd, .{});
     try self.ctx.vkd.beginCommandBuffer(self.frames[self.frame_index].cmd, &.{ .flags = .{ .one_time_submit_bit = true } });
 
-    try self.frames[self.frame_index].landscape2.cmdUploadData(self.frames[self.frame_index].cmd);
-
+    try self.currentFrameDataPtr().landscape2.cmdUploadData(self.currentFrameData().cmd, self.camera_pos_diff);
     try self.uploadScheduledData(&self.frames[self.frame_index]);
 
     const next_image = try self.acquireNextSwapchainImage();
@@ -174,20 +179,17 @@ pub fn process(self: *@This()) !void {
         return;
     }
 
-    try self.recordDrawFrame(
-        self.frames[self.frame_index],
-        next_image.image_index,
-    );
+    try self.recordDrawFrame(self.currentFrameData(), next_image.image_index);
 
     const trace_finalize = tracy.traceNamed(@src(), "finalize");
     defer trace_finalize.end();
 
-    try self.ctx.vkd.endCommandBuffer(self.frames[self.frame_index].cmd);
+    try self.ctx.vkd.endCommandBuffer(self.currentFrameData().cmd);
 
     var wait_semaphores = std.BoundedArray(vk.Semaphore, 4){};
     var wait_dst_stage_mask = std.BoundedArray(vk.PipelineStageFlags, 4){};
 
-    try wait_semaphores.append(self.frames[self.frame_index].semaphore_swapchain_image_acquired);
+    try wait_semaphores.append(self.currentFrameData().semaphore_swapchain_image_acquired);
     try wait_dst_stage_mask.append(.{ .color_attachment_output_bit = true });
 
     std.debug.assert(wait_semaphores.len == wait_dst_stage_mask.len);
@@ -197,16 +199,16 @@ pub fn process(self: *@This()) !void {
         .p_wait_semaphores = wait_semaphores.constSlice().ptr,
         .p_wait_dst_stage_mask = wait_dst_stage_mask.constSlice().ptr,
         .command_buffer_count = 1,
-        .p_command_buffers = util.meta.asConstArray(&self.frames[self.frame_index].cmd),
+        .p_command_buffers = util.meta.asConstArray(&self.currentFrameData().cmd),
         .signal_semaphore_count = 1,
-        .p_signal_semaphores = util.meta.asConstArray(&self.frames[self.frame_index].semaphore_finished),
+        .p_signal_semaphores = util.meta.asConstArray(&self.currentFrameData().semaphore_finished),
     };
 
-    try self.ctx.vkd.resetFences(self.ctx.device, 1, util.meta.asConstArray(&self.frames[self.frame_index].fence_busy));
-    try self.ctx.vkd.queueSubmit(self.ctx.graphic_queue, 1, util.meta.asConstArray(&submit_info), self.frames[self.frame_index].fence_busy);
+    try self.ctx.vkd.resetFences(self.ctx.device, 1, util.meta.asConstArray(&self.currentFrameData().fence_busy));
+    try self.ctx.vkd.queueSubmit(self.ctx.graphic_queue, 1, util.meta.asConstArray(&submit_info), self.currentFrameData().fence_busy);
 
     const present_result = try self.presentSwapchainImage(
-        self.frames[self.frame_index],
+        self.currentFrameData(),
         next_image.image_index,
     );
 

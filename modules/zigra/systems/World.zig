@@ -59,25 +59,22 @@ pub fn render(self: *@This(), m: *root.Modules) anyerror!void {
     defer t.end();
 
     const size = m.vulkan.impl.currentFrameData().landscape2.getDstExtent();
-    try m.world.sand_sim.fillView(
-        .{
-            .coord = m.vulkan.impl.camera_pos - @as(@Vector(2, i32), @intCast(size)) / la.splatT(2, i32, 2),
-            .size = size,
-        },
-        m.vulkan.impl.currentFrameData().landscape2.getDstSlice(),
-    );
+    try self.sand_sim.fillView(.{
+        .coord = m.vulkan.impl.camera_pos - @as(@Vector(2, i32), @intCast(size)) / la.splatT(2, i32, 2),
+        .size = size,
+    }, m.time.tickDelay(), m.vulkan.impl.currentFrameDataPtr().landscape2.getDstSlice());
 
-    for (self.sand_sim.particles.items) |particle| {
-        const point_a = particle.pos - particle.vel * @as(@Vector(2, f32), @splat(m.time.tickDelay()));
-        const point_b = particle.pos;
+    // for (self.sand_sim.particles.items) |particle| {
+    //     const point_a = particle.pos - particle.vel * @as(@Vector(2, f32), @splat(m.time.tickDelay()));
+    //     const point_b = particle.pos;
 
-        try m.vulkan.pushCmdLine(.{
-            .points = .{ point_a, point_b },
-            .color = .{ 0.0125, 0.025, 0.5, 1.0 },
-            .depth = 0.01,
-            .alpha_gradient = .{ 1.0, 1.0 },
-        });
-    }
+    //     try m.vulkan.pushCmdLine(.{
+    //         .points = .{ point_a, point_b },
+    //         .color = .{ 0.0125, 0.025, 0.5, 1.0 },
+    //         .depth = 0.01,
+    //         .alpha_gradient = .{ 1.0, 1.0 },
+    //     });
+    // }
 }
 
 pub fn netRecv(self: *@This(), m: *root.Modules, data: []const u8) !void {

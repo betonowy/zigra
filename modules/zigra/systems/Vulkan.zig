@@ -68,6 +68,7 @@ pub fn process(self: *@This(), m: *root.Modules) void {
 }
 
 pub fn setCameraPosition(self: *@This(), pos: @Vector(2, i32)) void {
+    self.impl.camera_pos_diff = pos - self.impl.camera_pos;
     self.impl.camera_pos = pos;
 }
 

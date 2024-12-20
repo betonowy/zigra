@@ -6,7 +6,7 @@ pub const Cell = sand_sim_defs.Cell;
 pub const cell_types = sand_sim_defs.cell_types;
 
 const marching = @import("marching.zig");
-const utils = @import("util");
+const util = @import("util");
 const la = @import("la");
 
 pub const tile_size = 128;
@@ -430,7 +430,7 @@ fn fillTilesFromAreaTree(self: *@This(), extent: NodeExtent, tiles: []*Tile, tre
     return slice;
 }
 
-pub fn fillView(self: *@This(), extent: NodeExtent, data: []u8) !void {
+pub fn fillView(self: *@This(), extent: NodeExtent, tick_delay: f32, data: []u8) !void {
     const required_space = @reduce(.Mul, extent.size) * @sizeOf(Cell);
     if (required_space != data.len) return error.IncorrectBufferSize;
 
@@ -456,6 +456,30 @@ pub fn fillView(self: *@This(), extent: NodeExtent, data: []u8) !void {
             dst[@as(usize, @intCast(coord_x)) + @as(usize, @intCast(coord_y)) * extent.size[0]] = cell;
         }
     };
+
+    var view = self.getView();
+
+    for (self.particles.items) |particle| {
+        const particle_coord = @as(@Vector(2, i32), @intFromFloat(particle.pos)) - extent.coord;
+
+        if (@reduce(.Or, particle_coord < la.splatT(2, i32, 0)) or
+            @reduce(.Or, particle_coord >= @as(@Vector(2, i32), @intCast(extent.size)))) continue;
+
+        const point_a = particle.pos - particle.vel * @as(@Vector(2, f32), @splat(tick_delay));
+        const point_b = particle.pos;
+
+        var dda = util.DDA.init(point_a, point_b);
+
+        while (!dda.finished) : (dda.next()) {
+            const cell = try view.get(dda.current_cell);
+            const coord = dda.current_cell - extent.coord;
+
+            if (@reduce(.And, coord < la.splatT(2, i32, 0)) or
+                @reduce(.Or, coord >= @as(@Vector(2, i32), @intCast(extent.size)))) continue;
+
+            if (cell.type == .air) dst[@as(usize, @intCast(coord[0])) + @as(usize, @intCast(coord[1])) * extent.size[0]] = particle.cell;
+        }
+    }
 }
 
 pub fn loadFromBuffer(self: *@This(), extent: NodeExtent, data: []const Cell) !void {
