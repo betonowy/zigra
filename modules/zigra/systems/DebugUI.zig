@@ -289,27 +289,29 @@ fn processUi_Entities(self: *@This(), m: *root.Modules) !void {
 }
 
 fn processUi_Atlas(self: *@This(), m: *root.Modules) !void {
-    const nk_ctx = &m.nuklear.nk_ctx;
-    var buf: [1024]u8 = undefined;
+    _ = m; // autofix
+    _ = self; // autofix
+    // const nk_ctx = &m.nuklear.nk_ctx;
+    // var buf: [1024]u8 = undefined;
 
-    const extent = m.vulkan.impl.atlas.image.extent;
+    // const extent = m.vulkan.impl.atlas.image.extent;
 
-    if (nk.begin(nk_ctx, "Atlas", .{ .x = 128, .y = 8, .w = 200, .h = 200 }, &.{ .movable, .closeable, .scalable, .border })) {
-        nk.layoutRowDynamic(nk_ctx, 10, 1);
-        nk.label(nk_ctx, try std.fmt.bufPrintZ(buf[0..], "Atlas size: {}x{}", .{ extent.width, extent.height }), nk.text_left);
+    // if (nk.begin(nk_ctx, "Atlas", .{ .x = 128, .y = 8, .w = 200, .h = 200 }, &.{ .movable, .closeable, .scalable, .border })) {
+    //     nk.layoutRowDynamic(nk_ctx, 10, 1);
+    //     nk.label(nk_ctx, try std.fmt.bufPrintZ(buf[0..], "Atlas size: {}x{}", .{ extent.width, extent.height }), nk.text_left);
 
-        nk.layoutRowDynamic(nk_ctx, 1, 1);
-        nk.rule(nk_ctx, nk_ctx.style.text.color);
+    //     nk.layoutRowDynamic(nk_ctx, 1, 1);
+    //     nk.rule(nk_ctx, nk_ctx.style.text.color);
 
-        nk.layoutRowStatic(nk_ctx, @floatFromInt(extent.height), @intCast(extent.width), 1);
-        nk.image(nk_ctx, .{
-            .handle = 0,
-            .size = .{ @intCast(extent.width), @intCast(extent.height) },
-        });
-    } else {
-        self.w_atlas = false;
-    }
-    nk.end(nk_ctx);
+    //     nk.layoutRowStatic(nk_ctx, @floatFromInt(extent.height), @intCast(extent.width), 1);
+    //     nk.image(nk_ctx, .{
+    //         .handle = 0,
+    //         .size = .{ @intCast(extent.width), @intCast(extent.height) },
+    //     });
+    // } else {
+    //     self.w_atlas = false;
+    // }
+    // nk.end(nk_ctx);
 }
 
 fn processUi_Profiling(self: *@This(), m: *root.Modules) !void {

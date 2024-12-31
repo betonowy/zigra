@@ -19,6 +19,8 @@ nk_mem: []u8 = undefined,
 nk_ctx: nk.Context = undefined,
 is_active: bool = false,
 
+font_ref: systems.Vulkan.Atlas.TextureReference = undefined,
+
 window_char_cb: systems.Window.CbCharChild = .{ .cb = &windowCharCb },
 window_key_cb: systems.Window.CbKeyChild = .{ .cb = &windowKeyCb },
 
@@ -39,6 +41,8 @@ pub fn deinit(self: *@This()) void {
 pub fn systemInit(self: *@This(), m: *root.Modules) anyerror!void {
     var t = common.systemTrace(@This(), @src(), null);
     defer t.end();
+
+    self.font_ref = m.vulkan.impl.atlas.getRectIdByPath("images/PhoenixBios_128.png").?;
 
     self.nk_mem = try self.allocator.allocWithOptions(u8, nk_max_mem, nk_mem_alignment, null);
 

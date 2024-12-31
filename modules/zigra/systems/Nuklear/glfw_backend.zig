@@ -1,7 +1,6 @@
 const nk = @import("nuklear");
 const zigra = @import("../../root.zig");
 const Window = @import("../Window.zig");
-const vk_types = @import("../Vulkan/Ctx/types.zig");
 const std = @import("std");
 const glfw = @import("glfw");
 

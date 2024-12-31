@@ -58,11 +58,17 @@ pub fn render(self: *@This(), m: *root.Modules) anyerror!void {
     var t = common.systemTrace(@This(), @src(), m);
     defer t.end();
 
-    const size = m.vulkan.impl.currentFrameData().landscape2.getDstExtent();
+    const landscape = &m.vulkan.impl.currentFrameDataPtr().images.landscape_encoded_host;
+
+    const mem = landscape.map orelse try landscape.mapMemory();
+    const size = landscape.options.extent;
+
     try self.sand_sim.fillView(.{
-        .coord = m.vulkan.impl.camera_pos - @as(@Vector(2, i32), @intCast(size)) / la.splatT(2, i32, 2),
-        .size = size,
-    }, m.time.tickDelay(), m.vulkan.impl.currentFrameDataPtr().landscape2.getDstSlice());
+        .coord = m.vulkan.impl.camera_pos -
+            @Vector(2, i32){ @intCast(size[0]), @intCast(size[1]) } /
+            la.splatT(2, i32, 2),
+        .size = .{ size[0], size[1] },
+    }, m.time.tickDelay(), mem);
 
     // for (self.sand_sim.particles.items) |particle| {
     //     const point_a = particle.pos - particle.vel * @as(@Vector(2, f32), @splat(m.time.tickDelay()));

@@ -48,31 +48,15 @@ pub fn enter(self: *@This(), _: *root.Sequencer, m: *root.Modules) !void {
     try m.audio.mixer.playMusic(id_sound);
 
     _ = try m.background.createId(.{
-        .id_vk_sprite = m.vulkan.impl.atlas.getRectIdByPath("images/mountains/full_00.png"),
-        .top_gradient = la.srgbColor(f16, 1.0 / 255.0, 17.0 / 255.0, 38.0 / 255.0, 1),
-        .bottom_gradient = la.srgbColor(f16, 170.0 / 255.0, 174.0 / 255.0, 203.0 / 255.0, 1),
-        .camera_influence = .{ 0.2, 0.2 },
-        .offset = .{ 0, 80 },
+        .id_vk_sprite = m.vulkan.impl.atlas.getRectIdByPath("images/mountains/cut_04.png").?,
+        .bottom_gradient = la.srgbColor(f16, 32.0 / 255.0, 30.0 / 255.0, 52.0 / 255.0, 1),
+        .camera_influence = .{ 0.45, 0.45 },
+        .offset = .{ 0, 100 },
         .depth = 1,
     });
 
     _ = try m.background.createId(.{
-        .id_vk_sprite = m.vulkan.impl.atlas.getRectIdByPath("images/mountains/cut_01.png"),
-        .bottom_gradient = la.srgbColor(f16, 123.0 / 255.0, 126.0 / 255.0, 154.0 / 255.0, 1),
-        .camera_influence = .{ 0.3, 0.3 },
-        .depth = 1,
-    });
-
-    _ = try m.background.createId(.{
-        .id_vk_sprite = m.vulkan.impl.atlas.getRectIdByPath("images/mountains/cut_02.png"),
-        .bottom_gradient = la.srgbColor(f16, 91.0 / 255.0, 95.0 / 255.0, 121.0 / 255.0, 1),
-        .camera_influence = .{ 0.35, 0.35 },
-        .offset = .{ 0, 60 },
-        .depth = 1,
-    });
-
-    _ = try m.background.createId(.{
-        .id_vk_sprite = m.vulkan.impl.atlas.getRectIdByPath("images/mountains/cut_03.png"),
+        .id_vk_sprite = m.vulkan.impl.atlas.getRectIdByPath("images/mountains/cut_03.png").?,
         .bottom_gradient = la.srgbColor(f16, 64.0 / 255.0, 68.0 / 255.0, 92.0 / 255.0, 1),
         .camera_influence = .{ 0.4, 0.4 },
         .offset = .{ 0, 80 },
@@ -80,10 +64,26 @@ pub fn enter(self: *@This(), _: *root.Sequencer, m: *root.Modules) !void {
     });
 
     _ = try m.background.createId(.{
-        .id_vk_sprite = m.vulkan.impl.atlas.getRectIdByPath("images/mountains/cut_04.png"),
-        .bottom_gradient = la.srgbColor(f16, 32.0 / 255.0, 30.0 / 255.0, 52.0 / 255.0, 1),
-        .camera_influence = .{ 0.45, 0.45 },
-        .offset = .{ 0, 100 },
+        .id_vk_sprite = m.vulkan.impl.atlas.getRectIdByPath("images/mountains/cut_02.png").?,
+        .bottom_gradient = la.srgbColor(f16, 91.0 / 255.0, 95.0 / 255.0, 121.0 / 255.0, 1),
+        .camera_influence = .{ 0.35, 0.35 },
+        .offset = .{ 0, 60 },
+        .depth = 1,
+    });
+
+    _ = try m.background.createId(.{
+        .id_vk_sprite = m.vulkan.impl.atlas.getRectIdByPath("images/mountains/cut_01.png").?,
+        .bottom_gradient = la.srgbColor(f16, 123.0 / 255.0, 126.0 / 255.0, 154.0 / 255.0, 1),
+        .camera_influence = .{ 0.3, 0.3 },
+        .depth = 1,
+    });
+
+    _ = try m.background.createId(.{
+        .id_vk_sprite = m.vulkan.impl.atlas.getRectIdByPath("images/mountains/full_00.png").?,
+        .top_gradient = la.srgbColor(f16, 1.0 / 255.0, 17.0 / 255.0, 38.0 / 255.0, 1),
+        .bottom_gradient = la.srgbColor(f16, 170.0 / 255.0, 174.0 / 255.0, 203.0 / 255.0, 1),
+        .camera_influence = .{ 0.2, 0.2 },
+        .offset = .{ 0, 80 },
         .depth = 1,
     });
 }

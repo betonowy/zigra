@@ -91,4 +91,7 @@ fn audioCallback(device: *zaudio.Device, output: ?*anyopaque, _: ?*const anyopaq
     const samples = @as([*]@Vector(2, f32), @ptrCast(@alignCast(output)))[0..num_frames];
 
     audio.mixer.getNextSamples(samples);
+
+    // TODO remove, temp silence because I'll get crazy
+    @memset(samples, .{ 0, 0 });
 }

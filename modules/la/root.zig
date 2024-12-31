@@ -189,7 +189,11 @@ test "splat" {
     try std.testing.expectEqual(@Vector(2, f32){ 2, 2 }, splatT(2, f32, 2));
 }
 
-pub fn extend(len: comptime_int, v: anytype, tuple: anytype) @Vector(len, types.VectorChild(@TypeOf(v))) {
+pub fn extend(v: anytype, tuple: anytype) @Vector(
+    types.len(@TypeOf(v)) + std.meta.fields(@TypeOf(tuple)).len,
+    types.VectorChild(@TypeOf(v)),
+) {
+    const len = types.len(@TypeOf(v)) + std.meta.fields(@TypeOf(tuple)).len;
     var out: @Vector(len, types.VectorChild(@TypeOf(v))) = undefined;
 
     inline for (0..types.len(@TypeOf(v))) |i| out[i] = v[i];
@@ -201,7 +205,7 @@ pub fn extend(len: comptime_int, v: anytype, tuple: anytype) @Vector(len, types.
 test "extend" {
     const v2 = @Vector(2, f32){ 1, 2 };
     const v4 = @Vector(4, f32){ 1, 2, 3, 4 };
-    try std.testing.expectEqual(v4, extend(4, v2, .{ 3, 4 }));
+    try std.testing.expectEqual(v4, extend(v2, .{ 3, 4 }));
 }
 
 pub fn zeroExtend(len: comptime_int, v: anytype) @Vector(len, types.VectorChild(@TypeOf(v))) {

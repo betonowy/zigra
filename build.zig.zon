@@ -4,8 +4,8 @@
     .minimum_zig_version = "0.14.0-dev.2457+82f35c518",
     .dependencies = .{
         .mach_glfw = .{
-            .url = "https://github.com/slimsag/mach-glfw/archive/daeb7b10187249aade7d92ccfef8dcf5a94f8148.tar.gz",
-            .hash = "12207f4bba892c44b3b1b92b13b7ce5df2b49da1e797ba3e02b38b08d1e78c5cec0d",
+            .url = "https://github.com/slimsag/mach-glfw/archive/affdd6ae6f2ac2c3b9162784bdad345c561eeeea.tar.gz",
+            .hash = "122022ea6df16700e521078c20d7d01f894c6f967e6c6ce1ea166426b4fc61667de3",
         },
         .vulkan_zig = .{
             .url = "https://github.com/Snektron/vulkan-zig/archive/dd6e61d68954a2eaa476044305dc227081a8d3fe.tar.gz",

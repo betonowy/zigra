@@ -1,0 +1,51 @@
+#version 450
+
+#include <ubo.glsl>
+
+layout (local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0, std140) uniform UBO_DEF ubo;
+layout(set = 0, binding = 1, rgba16f) uniform readonly image2D img_emission;
+layout(set = 0, binding = 2, rgba16f) uniform readonly image2D img_attenuation;
+layout(set = 1, binding = 0, rgba16f) uniform readonly image2D img_in_spread;
+layout(set = 2, binding = 0, rgba16f) uniform writeonly image2D img_out_spread;
+
+vec4 load(ivec2 relative) {
+    ivec2 coord = relative + ivec2(gl_GlobalInvocationID.xy);
+    return imageLoad(img_in_spread, coord);
+}
+
+vec4 loadEmission(ivec2 relative) {
+    ivec2 coord = relative + ivec2(gl_GlobalInvocationID.xy);
+    return imageLoad(img_emission, coord);
+}
+
+vec4 loadAttenuation(ivec2 relative) {
+    ivec2 coord = relative + ivec2(gl_GlobalInvocationID.xy);
+    return imageLoad(img_attenuation, coord);
+}
+
+void store(vec4 value) {
+    imageStore(img_out_spread, ivec2(gl_GlobalInvocationID.xy), value);
+}
+
+void main() {
+    vec4 emission = loadEmission(ivec2(0));
+    vec4 attenuation = loadAttenuation(ivec2(0));
+    vec3 baseline = emission.rgb;
+
+    vec3 sum = vec3(0);
+
+    const int kernel_range = 2;
+    const float multiplier = 1.0 / float((kernel_range * 2 + 1) * (kernel_range * 2 + 1));
+
+    for (int i = -kernel_range; i <= kernel_range; ++i) {
+        for (int j = -kernel_range; j <= kernel_range; ++j) {
+            sum += load(ivec2(j, i)).rgb;
+        }
+    }
+
+    vec3 radiosity = sum * multiplier * attenuation.rgb;
+
+    store(vec4(max(radiosity, baseline), 1.0));
+}

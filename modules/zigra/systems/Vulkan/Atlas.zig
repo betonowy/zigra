@@ -1,219 +1,262 @@
 const std = @import("std");
-const vk = @import("vk");
-const types = @import("Ctx/types.zig");
-const VulkanBackend = @import("Backend.zig");
-const utils = @import("util");
 
+const la = @import("la");
+const zvk = @import("zvk");
 const stb = @cImport(@cInclude("stb/stb_image.h"));
+// TODO Refactor stb here in favor of an externally provided decoder.
+//      Vulkan atlas should not care about image file formats at all.
 
-map: std.StringArrayHashMap(u32),
-rects: std.ArrayList(vk.Rect2D),
-image: types.ImageData,
-sampler: vk.Sampler,
+pub const max_layers = 16;
 
-pub fn init(backend: *VulkanBackend, paths: []const []const u8) !@This() {
-    var extents = std.ArrayList(vk.Extent2D).init(backend.ctx.allocator);
-    defer extents.deinit();
+map: std.StringArrayHashMap(TextureReference),
+layers: std.BoundedArray(TextureLayer, max_layers),
 
-    for (paths) |path| try extents.append(try readPngSize(path));
+pub const TextureReference = struct { layer: u32, index: u32 };
 
-    var self: @This() = undefined;
-    self.rects = std.ArrayList(vk.Rect2D).init(backend.ctx.allocator);
-    errdefer self.rects.deinit();
-    try self.rects.resize(extents.items.len);
+pub const TextureLayer = struct {
+    allocator: std.mem.Allocator,
+    image: zvk.Image,
+    view: zvk.ImageView,
+    last_index: u32 = 0,
 
-    for (extents.items, self.rects.items, 0..) |extent, *rect, i| {
-        rect.* = findFreeRect(extent, self.rects.items[0..i], .{ .width = 2048, .height = 2048 }) orelse {
-            return error.OutOfAtlasSpace;
+    device: *zvk.Device,
+    cmd_pool: zvk.CommandPool,
+    cmd: zvk.CommandBuffer,
+
+    pub fn init(device: *zvk.Device, n_slots: u32, new_extent: @Vector(2, u32)) !@This() {
+        const image = try zvk.Image.init(device, .{
+            .array_layers = n_slots,
+            .extent = la.extend(new_extent, .{1}),
+            .format = .r8g8b8a8_srgb,
+            .usage = .{ .sampled_bit = true, .transfer_dst_bit = true },
+        });
+        errdefer image.deinit();
+
+        const view = try zvk.ImageView.init(image);
+        errdefer view.deinit();
+
+        const cmd_pool = try zvk.CommandPool.init(device, .{
+            .queue_family = device.queue_gpu_comp.family,
+            .flags = .{ .reset_command_buffer_bit = true },
+        });
+
+        const cmd = try zvk.CommandBuffer.init(cmd_pool, .primary);
+
+        return .{
+            .image = image,
+            .view = view,
+            .allocator = device.allocator,
+            .cmd_pool = cmd_pool,
+            .cmd = cmd,
+            .device = device,
         };
     }
 
-    self.map = std.StringArrayHashMap(u32).init(backend.ctx.allocator);
-    errdefer {
-        var it = self.map.iterator();
-        while (it.next()) |next| self.map.allocator.free(next.key_ptr.*);
-        self.map.deinit();
+    pub fn deinit(self: @This()) void {
+        self.cmd.deinit();
+        self.cmd_pool.deinit();
+        self.image.deinit();
+        self.view.deinit();
     }
 
-    const required_extent = calculateRequiredExtent(self.rects.items);
+    pub fn uploadSlot(self: *@This(), data: []const u8) !u32 {
+        const bytes_per_pixel = switch (self.image.options.format) {
+            .r8g8b8a8_srgb => 4,
+            else => return error.UnsupportedFormat,
+        };
 
-    const staging_image = try backend.createImage(.{
-        .aspect_mask = .{ .color_bit = true },
-        .extent = required_extent,
-        .format = .r8g8b8a8_srgb,
-        .initial_layout = .preinitialized,
-        .property = .{ .host_visible_bit = true, .host_coherent_bit = true },
-        .usage = .{ .transfer_src_bit = true },
-        .tiling = .linear,
-        .has_view = false,
-        .map_memory = true,
-    });
-    defer backend.destroyImage(staging_image);
+        const expected_size = @reduce(.Mul, self.image.options.extent) * bytes_per_pixel;
 
-    for (paths, self.rects.items) |path, rect| {
-        var heap: [1024]u8 = undefined;
-        var fixed = std.heap.FixedBufferAllocator.init(&heap);
-        const c_str = try fixed.allocator().allocSentinel(u8, path.len, 0);
-        @memcpy(c_str[0..], path[0..]);
+        if (expected_size != data.len) return error.DataSizeMismatch;
 
-        var x: c_int = undefined;
-        var y: c_int = undefined;
-        var c: c_int = undefined;
+        var staging_image = try self.image.createStagingImage(.{ .layers = 1 });
+        defer staging_image.deinit();
 
-        const stb_mem = stb.stbi_load(c_str.ptr, &x, &y, &c, 4);
-        defer stb.stbi_image_free(stb_mem);
+        const map = try staging_image.mapMemory();
 
-        const src: [*]u8 = @ptrCast(stb_mem);
-        const dst: [*]u8 = @ptrCast(staging_image.map orelse unreachable);
+        @memcpy(map[0..data.len], data);
 
-        for (0..@intCast(y)) |dst_y| {
-            const dst_x_start: usize = @intCast(4 * rect.offset.x);
-            const dst_y_start: usize = @intCast(4 * required_extent.width * (dst_y + @as(u32, @intCast(rect.offset.y))));
-            const slice_src = (src + 4 * rect.extent.width * dst_y)[0 .. rect.extent.width * 4];
-            const slice_dst = (dst + dst_x_start + dst_y_start)[0 .. rect.extent.width * 4];
-            @memcpy(slice_dst, slice_src);
+        try self.cmd.reset();
+        try self.cmd.begin(.{ .flags = .{ .one_time_submit_bit = true } });
+
+        self.cmd.cmdPipelineBarrier(.{
+            .image = &.{
+                staging_image.barrier(.{
+                    .src_layout = .preinitialized,
+                    .dst_layout = .transfer_src_optimal,
+                }),
+                self.image.barrier(.{
+                    .src_stage_mask = .{ .all_commands_bit = true },
+                    .dst_stage_mask = .{ .all_commands_bit = true },
+                    .src_access_mask = .{ .memory_read_bit = true },
+                    .dst_access_mask = .{ .memory_write_bit = true },
+                    .src_layout = .undefined,
+                    .dst_layout = .transfer_dst_optimal,
+                }),
+            },
+        });
+
+        try self.cmd.cmdImageCopy(.{
+            .src = staging_image,
+            .dst = self.image,
+            .src_layout = .transfer_src_optimal,
+            .dst_layout = .transfer_dst_optimal,
+            .regions = &.{.{
+                .src_subresource = .{
+                    .base_array_layer = 0,
+                    .layer_count = 1,
+                },
+                .dst_subresource = .{
+                    .base_array_layer = self.last_index,
+                    .layer_count = 1,
+                },
+            }},
+        });
+
+        self.cmd.cmdPipelineBarrier(.{
+            .image = &.{self.image.barrier(.{
+                .src_stage_mask = .{ .all_commands_bit = true },
+                .dst_stage_mask = .{ .all_commands_bit = true },
+                .src_access_mask = .{ .memory_write_bit = true },
+                .dst_access_mask = .{ .shader_read_bit = true },
+                .src_layout = .transfer_dst_optimal,
+                .dst_layout = .shader_read_only_optimal,
+                .subresource_range = .{
+                    .base_array_layer = 0,
+                    .layer_count = 1,
+                },
+            })},
+        });
+
+        try self.cmd.end();
+
+        const fence = try zvk.Fence.init(self.cmd.device, false);
+        defer fence.deinit();
+
+        try self.device.queue_gpu_comp.submit(.{ .cmds = &.{self.cmd}, .fence = fence });
+        try fence.wait();
+
+        defer self.last_index += 1;
+        return self.last_index;
+    }
+
+    pub fn extent(self: @This()) @Vector(2, u32) {
+        return .{
+            self.image.options.extent.width,
+            self.image.options.extent.height,
+        };
+    }
+
+    pub fn getDescriptorSetWrite(
+        self: @This(),
+        set: zvk.DescriptorSet,
+        sampler: zvk.Sampler,
+        binding: u32,
+        index: u32,
+    ) zvk.DescriptorSet.Write {
+        return self.view.getDescriptorSetWrite(set, .{
+            .index = index,
+            .binding = binding,
+            .layout = .shader_read_only_optimal,
+            .sampler = sampler,
+            .type = .combined_image_sampler,
+        });
+    }
+};
+
+pub fn init(device: *zvk.Device, paths: []const []const u8, decoder: anytype) !@This() {
+    _ = decoder; // autofix
+    var extents = std.ArrayList(struct { extent: @Vector(2, u32), count: u32 }).init(device.allocator);
+    defer extents.deinit();
+
+    for (paths) |path| {
+        const size = try readPngSize(path);
+
+        blk: {
+            for (extents.items) |*e| if (@reduce(.And, e.extent == size)) {
+                e.count += 1;
+                break :blk;
+            };
+
+            try extents.append(.{ .extent = size, .count = 1 });
         }
     }
 
-    self.image = try backend.createImage(.{
-        .aspect_mask = .{ .color_bit = true },
-        .extent = required_extent,
-        .format = .r8g8b8a8_srgb,
-        .initial_layout = .undefined,
-        .property = .{ .device_local_bit = true },
-        .usage = .{ .transfer_dst_bit = true, .sampled_bit = true },
-        .tiling = .optimal,
-    });
-    errdefer backend.destroyImage(self.image);
+    if (extents.items.len > max_layers) return error.MoreExtentsThanMaxLayers;
 
-    var cmd: vk.CommandBuffer = undefined;
+    var layers = std.BoundedArray(TextureLayer, max_layers){};
+    errdefer for (layers.constSlice()) |l| l.deinit();
 
-    try backend.ctx.vkd.allocateCommandBuffers(backend.ctx.device, &.{
-        .command_buffer_count = 1,
-        .command_pool = backend.ctx.graphic_command_pool,
-        .level = .primary,
-    }, utils.meta.asArray(&cmd));
-    defer backend.ctx.vkd.freeCommandBuffers(backend.ctx.device, backend.ctx.graphic_command_pool, 1, utils.meta.asConstArray(&cmd));
-
-    {
-        try backend.ctx.vkd.beginCommandBuffer(cmd, &.{ .flags = .{ .one_time_submit_bit = true } });
-
-        const pre_copy_barriers = [_]vk.ImageMemoryBarrier2{
-            barrierPreinitializedToTransferSrc(staging_image.handle),
-            barrierUndefinedToTransferDst(self.image.handle),
-        };
-
-        backend.ctx.vkd.cmdPipelineBarrier2(cmd, &.{
-            .image_memory_barrier_count = pre_copy_barriers.len,
-            .p_image_memory_barriers = &pre_copy_barriers,
-        });
-
-        const image_copy = vk.ImageCopy2{
-            .src_offset = std.mem.zeroes(vk.Offset3D),
-            .dst_offset = std.mem.zeroes(vk.Offset3D),
-            .src_subresource = .{
-                .aspect_mask = .{ .color_bit = true },
-                .base_array_layer = 0,
-                .layer_count = 1,
-                .mip_level = 0,
-            },
-            .dst_subresource = .{
-                .aspect_mask = .{ .color_bit = true },
-                .base_array_layer = 0,
-                .layer_count = 1,
-                .mip_level = 0,
-            },
-            .extent = .{
-                .width = required_extent.width,
-                .height = required_extent.height,
-                .depth = 1,
-            },
-        };
-
-        backend.ctx.vkd.cmdCopyImage2(cmd, &.{
-            .src_image = staging_image.handle,
-            .dst_image = self.image.handle,
-            .src_image_layout = .transfer_src_optimal,
-            .dst_image_layout = .transfer_dst_optimal,
-            .region_count = 1,
-            .p_regions = utils.meta.asConstArray(&image_copy),
-        });
-
-        const sampler_barrier = barrierTransferDstToSampler(self.image.handle);
-
-        backend.ctx.vkd.cmdPipelineBarrier2(cmd, &.{
-            .image_memory_barrier_count = 1,
-            .p_image_memory_barriers = utils.meta.asConstArray(&sampler_barrier),
-        });
-
-        try backend.ctx.vkd.endCommandBuffer(cmd);
+    for (extents.items) |e| {
+        const tl = try TextureLayer.init(device, e.count, e.extent);
+        errdefer tl.deinit();
+        layers.appendAssumeCapacity(tl);
     }
 
-    const submit_info = vk.SubmitInfo{
-        .command_buffer_count = 1,
-        .p_command_buffers = utils.meta.asConstArray(&cmd),
-    };
+    var map = std.StringArrayHashMap(TextureReference).init(device.allocator);
+    errdefer map.deinit();
 
-    const fence = try backend.ctx.vkd.createFence(backend.ctx.device, &.{}, null);
-    defer backend.ctx.vkd.destroyFence(backend.ctx.device, fence, null);
+    for (paths) |path| {
+        const size = try readPngSize(path);
 
-    try backend.ctx.vkd.queueSubmit(backend.ctx.graphic_queue, 1, utils.meta.asConstArray(&submit_info), fence);
+        for (layers.slice(), 0..) |*l, i| {
+            if (@reduce(.Or, l.image.options.extent != la.extend(size, .{1}))) continue;
 
-    self.sampler = try backend.ctx.vkd.createSampler(backend.ctx.device, &.{
-        .mag_filter = .nearest,
-        .min_filter = .nearest,
-        .address_mode_u = .clamp_to_border,
-        .address_mode_v = .clamp_to_border,
-        .address_mode_w = .clamp_to_border,
-        .anisotropy_enable = vk.FALSE,
-        .max_anisotropy = undefined,
-        .border_color = vk.BorderColor.int_transparent_black,
-        .unnormalized_coordinates = vk.FALSE,
-        .compare_enable = vk.FALSE,
-        .compare_op = .never,
-        .mipmap_mode = .nearest,
-        .mip_lod_bias = 0,
-        .min_lod = 0,
-        .max_lod = 0,
-    }, null);
+            const data = try loadPng(path);
+            defer freePng(data);
 
-    _ = try backend.ctx.vkd.waitForFences(backend.ctx.device, 1, utils.meta.asConstArray(&fence), vk.TRUE, 1_000_000_000);
+            try map.put(path, .{
+                .index = try l.uploadSlot(data),
+                .layer = @intCast(i),
+            });
 
-    for (0.., paths) |i, path| try self.map.put(try backend.ctx.allocator.dupe(u8, path), @intCast(i));
+            break;
+        }
+    }
 
-    return self;
+    return .{ .layers = layers, .map = map };
 }
 
-pub fn deinit(self: *@This(), backend: *VulkanBackend) void {
-    backend.ctx.vkd.destroySampler(backend.ctx.device, self.sampler, null);
-    backend.destroyImage(self.image);
-    var it = self.map.iterator();
-    while (it.next()) |next| self.map.allocator.free(next.key_ptr.*);
+pub fn deinit(self: *@This()) void {
     self.map.deinit();
-    self.rects.deinit();
+    for (self.layers.constSlice()) |l| l.deinit();
 }
 
-pub fn getRectById(self: *const @This(), id: u32) vk.Rect2D {
-    return self.rects.items[id];
-}
-
-pub fn getRectIdByPath(self: *const @This(), path: []const u8) ?u32 {
+pub fn getRectIdByPath(self: @This(), path: []const u8) ?TextureReference {
     return self.map.get(path);
 }
 
-pub fn getRectByPath(self: *const @This(), path: []const u8) ?vk.Rect2D {
-    return if (self.getRectIdByPath(path)) |id| self.getRectById(id) else null;
-}
-
-pub fn descriptorImageInfo(self: *@This()) vk.DescriptorImageInfo {
+// TODO should be @Vector(2, u32)
+pub fn getRectById(self: @This(), ref: TextureReference) @import("vk").Rect2D {
+    const im = self.layers.constSlice()[ref.layer].image.options.extent;
     return .{
-        .image_layout = .shader_read_only_optimal,
-        .image_view = self.image.view,
-        .sampler = self.sampler,
+        .extent = .{ .width = im[0], .height = im[1] },
+        .offset = .{
+            .x = 0,
+            .y = 0,
+        },
     };
 }
 
-fn readPngSize(path: []const u8) !vk.Extent2D {
+pub fn WriteResult(len: comptime_int) type {
+    return std.BoundedArray(zvk.DescriptorSet.Write, len);
+}
+
+pub fn getDescriptorSetWrite(
+    self: @This(),
+    set: zvk.DescriptorSet,
+    sampler: zvk.Sampler,
+    binding: u32,
+) !WriteResult(max_layers) {
+    var writes = WriteResult(max_layers){};
+
+    for (self.layers.constSlice(), 0..) |layer, i| {
+        try writes.append(layer.getDescriptorSetWrite(set, sampler, binding, @intCast(i)));
+    }
+
+    return writes;
+}
+fn readPngSize(path: []const u8) !@Vector(2, u32) {
     const Header = extern struct {
         magic: [8]u8,
         _: [4]u8,
@@ -232,189 +275,24 @@ fn readPngSize(path: []const u8) !vk.Extent2D {
     if (!std.mem.eql(u8, header.ihdr[0..], "\x49\x48\x44\x52")) return error.BadFormat;
 
     return .{
-        .width = std.mem.readPackedIntForeign(u32, header.width[0..], 0),
-        .height = std.mem.readPackedIntForeign(u32, header.height[0..], 0),
+        std.mem.readPackedIntForeign(u32, header.width[0..], 0),
+        std.mem.readPackedIntForeign(u32, header.height[0..], 0),
     };
 }
 
-test "readPngSize" {
-    const size = try readPngSize("images/crate_16.png");
-    try std.testing.expectEqual(16, size.width);
-    try std.testing.expectEqual(16, size.height);
+fn loadPng(path: []const u8) ![]u8 {
+    var heap: [std.fs.max_path_bytes + 1]u8 = undefined;
+    var fixed = std.heap.FixedBufferAllocator.init(&heap);
+    const c_str = try fixed.allocator().dupeZ(u8, path);
+
+    var x: c_int = undefined;
+    var y: c_int = undefined;
+    var c: c_int = undefined;
+
+    const stb_mem = stb.stbi_load(c_str.ptr, &x, &y, &c, 4) orelse return error.StbError;
+    return @as([*]u8, @ptrCast(stb_mem))[0..@intCast(x * y * c)];
 }
 
-fn findFreeRect(extent: vk.Extent2D, existing_rects: []vk.Rect2D, max_extent: vk.Extent2D) ?vk.Rect2D {
-    std.debug.assert(std.math.isPowerOfTwo(max_extent.width));
-    std.debug.assert(std.math.isPowerOfTwo(max_extent.height));
-    std.debug.assert(max_extent.width == max_extent.height);
-
-    const slots = vk.Extent2D{
-        .width = max_extent.width / extent.width,
-        .height = max_extent.height / extent.height,
-    };
-
-    for (0..slots.height) |yo| {
-        for (0..slots.width) |xo| {
-            const z_orderer = zOrder(.{ @intCast(xo), @intCast(yo) }, slots.width);
-
-            const new_rect = vk.Rect2D{
-                .extent = extent,
-                .offset = .{
-                    .x = @intCast(extent.width * z_orderer[0]),
-                    .y = @intCast(extent.height * z_orderer[1]),
-                },
-            };
-
-            var free = true;
-
-            for (existing_rects) |rect| {
-                if (intersection(new_rect, rect)) {
-                    free = false;
-                    break;
-                }
-            }
-
-            if (!free) continue;
-
-            return new_rect;
-        }
-    }
-
-    return null;
-}
-
-// Supports  16 bits max
-fn zOrder(in: @Vector(2, u32), pitch: u32) @Vector(2, u32) {
-    const index = in[1] * pitch + in[0];
-    const L: u32 = @bitSizeOf(@TypeOf(index)) / 2;
-    var out = @Vector(2, u32){ 0, 0 };
-
-    inline for (0..L) |i| {
-        out[0] |= (index & (@as(u32, 1) << (2 * i + 0))) >> (i + 0);
-        out[1] |= (index & (@as(u32, 1) << (2 * i + 1))) >> (i + 1);
-    }
-
-    return out;
-}
-
-fn intersection(a: vk.Rect2D, b: vk.Rect2D) bool {
-    {
-        var a_min = a.offset.x;
-        var a_max = a.offset.x + @as(i32, @intCast(a.extent.width));
-        const b_min = b.offset.x;
-        const b_max = b.offset.x + @as(i32, @intCast(b.extent.width));
-
-        if (b_min > a_min) a_min = b_min;
-        if (b_max < a_max) a_max = b_max;
-        if (a_max <= a_min) return false;
-    }
-    {
-        var a_min = a.offset.y;
-        var a_max = a.offset.y + @as(i32, @intCast(a.extent.height));
-        const b_min = b.offset.y;
-        const b_max = b.offset.y + @as(i32, @intCast(b.extent.height));
-
-        if (b_min > a_min) a_min = b_min;
-        if (b_max < a_max) a_max = b_max;
-        if (a_max <= a_min) return false;
-    }
-    return true;
-}
-
-test "findFreeRect" {
-    const extents = [_]vk.Extent2D{
-        .{ .width = 16, .height = 16 },
-        .{ .width = 32, .height = 32 },
-        .{ .width = 16, .height = 16 },
-        .{ .width = 32, .height = 32 },
-        .{ .width = 64, .height = 64 },
-        .{ .width = 32, .height = 32 },
-        .{ .width = 32, .height = 32 },
-        .{ .width = 16, .height = 16 },
-        .{ .width = 16, .height = 16 },
-        .{ .width = 64, .height = 64 },
-        .{ .width = 32, .height = 32 },
-        .{ .width = 32, .height = 32 },
-        .{ .width = 32, .height = 32 },
-    };
-
-    var rects = std.mem.zeroes([extents.len]vk.Rect2D);
-
-    for (extents, rects[0..], 0..) |extent, *rect, i| {
-        rect.* = findFreeRect(extent, rects[0..i], .{ .width = 128, .height = 128 }) orelse unreachable;
-    }
-}
-
-fn calculateRequiredExtent(rects: []const vk.Rect2D) vk.Extent2D {
-    var extent = std.mem.zeroes(vk.Extent2D);
-
-    for (rects) |rect| {
-        extent.width = @max(extent.width, rect.extent.width + @as(u32, @intCast(rect.offset.x)));
-        extent.height = @max(extent.height, rect.extent.height + @as(u32, @intCast(rect.offset.y)));
-    }
-
-    return extent;
-}
-
-fn barrierUndefinedToTransferDst(handle: vk.Image) vk.ImageMemoryBarrier2 {
-    return vk.ImageMemoryBarrier2{
-        .src_stage_mask = .{},
-        .src_access_mask = .{},
-        .dst_stage_mask = .{},
-        .dst_access_mask = .{},
-        .old_layout = .undefined,
-        .new_layout = .transfer_dst_optimal,
-        .image = handle,
-        .subresource_range = .{
-            .aspect_mask = .{ .color_bit = true },
-            .base_mip_level = 0,
-            .level_count = vk.REMAINING_MIP_LEVELS,
-            .base_array_layer = 0,
-            .layer_count = vk.REMAINING_ARRAY_LAYERS,
-        },
-        .src_queue_family_index = 0,
-        .dst_queue_family_index = 0,
-    };
-}
-
-fn barrierPreinitializedToTransferSrc(handle: vk.Image) vk.ImageMemoryBarrier2 {
-    return vk.ImageMemoryBarrier2{
-        .src_stage_mask = .{ .all_commands_bit = true },
-        .src_access_mask = .{ .memory_write_bit = true },
-        .dst_stage_mask = .{ .all_commands_bit = true },
-        .dst_access_mask = .{ .memory_read_bit = true },
-        .old_layout = .preinitialized,
-        .new_layout = .transfer_src_optimal,
-        .image = handle,
-        .subresource_range = .{
-            .aspect_mask = .{ .color_bit = true },
-            .base_mip_level = 0,
-            .level_count = vk.REMAINING_MIP_LEVELS,
-            .base_array_layer = 0,
-            .layer_count = vk.REMAINING_ARRAY_LAYERS,
-        },
-        .src_queue_family_index = 0,
-        .dst_queue_family_index = 0,
-    };
-}
-
-fn barrierTransferDstToSampler(handle: vk.Image) vk.ImageMemoryBarrier2 {
-    return vk.ImageMemoryBarrier2{
-        .src_stage_mask = .{ .all_commands_bit = true },
-        .src_access_mask = .{ .memory_write_bit = true },
-        .dst_stage_mask = .{ .all_commands_bit = true },
-        .dst_access_mask = .{ .shader_read_bit = true },
-        .old_layout = .transfer_dst_optimal,
-        .new_layout = .shader_read_only_optimal,
-        .image = handle,
-        .subresource_range = .{
-            .aspect_mask = .{ .color_bit = true },
-            .base_mip_level = 0,
-            .level_count = vk.REMAINING_MIP_LEVELS,
-            .base_array_layer = 0,
-            .layer_count = vk.REMAINING_ARRAY_LAYERS,
-        },
-        .src_queue_family_index = 0,
-        .dst_queue_family_index = 0,
-    };
+fn freePng(data: []u8) void {
+    stb.stbi_image_free(data.ptr);
 }

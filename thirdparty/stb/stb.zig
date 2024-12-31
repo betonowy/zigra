@@ -1,5 +1,5 @@
 const std = @import("std");
-const utils = @import("utils");
+const util = @import("util");
 
 const c = @cImport({
     @cDefine("STB_VORBIS_HEADER_ONLY", {});
@@ -9,7 +9,7 @@ const c = @cImport({
 pub const Vorbis = struct {
     allocator: std.mem.Allocator,
     ctx: *c.stb_vorbis,
-    file: utils.mio.File,
+    file: util.mio.File,
     vorbis_memory: []const u8,
     info: struct {
         channels: u8,
@@ -19,7 +19,7 @@ pub const Vorbis = struct {
     },
 
     pub fn initFile(allocator: std.mem.Allocator, path: []const u8) !@This() {
-        const file = try utils.mio.File.open(path);
+        const file = try util.mio.File.open(path);
         errdefer file.close();
 
         const vorbis_memory = try allocator.alloc(u8, 1024 * 1024);

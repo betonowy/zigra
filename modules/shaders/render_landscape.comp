@@ -1,0 +1,110 @@
+#version 450
+
+#include <ubo.glsl>
+#include <unpack.glsl>
+
+#include <gen/landscape/Cells.glsl>
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0, std140) uniform UBO_DEF ubo;
+layout(set = 0, binding = 1, r16ui) uniform readonly uimage2D img_in_encoded;
+layout(set = 0, binding = 2, rgba16f) uniform writeonly image2D img_out_albedo;
+layout(set = 0, binding = 3, rgba16f) uniform writeonly image2D img_out_emission;
+layout(set = 0, binding = 4, rgba16f) uniform writeonly image2D img_out_attenuation;
+layout(set = 1, binding = 0, rgba16f) uniform readonly image2D img_in_spread;
+layout(set = 2, binding = 0, rgba16f) uniform writeonly image2D img_out_spread;
+
+vec4 getColor(uint code) {
+    uint type = code & 0xff;
+
+    // bkg dependent rendering
+    switch (type) {
+        case CellType_air: return vec4(0);
+    }
+
+    uint property_1 = code >> 8 & 0xf;
+    uint property_2 = code >> 12 & 0xf;
+
+    // bkg independent rendering
+    switch (type | 0x80) {
+        case CellType_bkg: return vec4(0.025, 0.0125, 0.00625, 1.0);
+        case CellType_soil: return vec4(0.1, 0.05, 0.025, 1.0);
+        case CellType_gold: return vec4(0.5, 0.25, 0.0, 1.0);
+        case CellType_rock: return vec4(0.25, 0.25, 0.25, 1.0);
+        case CellType_water: return vec4(0.1, 0.2, 0.5, 1.0);
+        case CellType_acid: return vec4(0.0125, 0.5, 0.025, 1.0);
+        case CellType_sand: return vec4(0.5, 0.45, 0.25, 1.0);
+    }
+
+    return vec4(1, 0, 1, 1);
+}
+
+vec4 getEmission(uint code) {
+    uint type = code & 0xff;
+
+    // bkg dependent rendering
+    switch (type) {
+        case CellType_air: return unpack4xf16(ubo.ambient_color_4xf16);
+    }
+
+    return vec4(0.0, 0.0, 0.0, 1.0); // TEMPORARY FOR TESTING
+
+    const vec4 solid_src_light = vec4(0.01, 0.01, 0.01, 1.0);
+
+    // bkg independent rendering
+    switch (type | 0x80) {
+        case CellType_bkg: return vec4(0.1, 0.1, 0.1, 1.0);
+        case CellType_soil: return solid_src_light;
+        case CellType_gold: return solid_src_light;
+        case CellType_rock: return solid_src_light;
+        case CellType_water: return vec4(0.025, 0.05, 0.1, 1.0);
+        case CellType_acid: return vec4(0.5, 0.999, 0.3, 1.0);
+        case CellType_sand: return solid_src_light;
+    }
+
+    return solid_src_light;
+}
+
+vec4 getAttenuation(uint code) {
+    uint type = code & 0xff;
+
+    const vec4 air = vec4(1.0);
+
+    // bkg dependent rendering
+    switch (type) {
+        case CellType_air: return air;
+    }
+
+    const vec4 solid_src_light = vec4(0.9, 0.9, 0.9, 1.0);
+
+    // bkg independent rendering
+    switch (type | 0x80) {
+        case CellType_bkg: return air;
+        case CellType_soil: return solid_src_light;
+        case CellType_gold: return solid_src_light;
+        case CellType_rock: return solid_src_light;
+        case CellType_water: return vec4(0.94, 0.98, 0.999, 1.0);
+        case CellType_acid: return vec4(0.5, 0.999, 0.3, 1.0);
+        case CellType_sand: return solid_src_light;
+    }
+
+    return solid_src_light;
+}
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+
+    uint code = imageLoad(img_in_encoded, coord).r;
+
+    vec4 color = getColor(code);
+    vec4 emission = getEmission(code);
+    vec4 attenuation = getAttenuation(code);
+
+    imageStore(img_out_albedo, coord, color);
+    imageStore(img_out_emission, coord, emission);
+    imageStore(img_out_attenuation, coord, attenuation);
+
+    vec4 spread_prev = imageLoad(img_in_spread, coord);
+    imageStore(img_out_spread, coord - ubo.camera_diff, spread_prev);
+}

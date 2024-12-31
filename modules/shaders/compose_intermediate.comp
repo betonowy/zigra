@@ -1,0 +1,67 @@
+#version 450
+
+#include <ubo.glsl>
+#include <unpack.glsl>
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0, std140) uniform UBO_DEF ubo;
+layout(set = 0, binding = 1, rgba16f) uniform writeonly image2D img_im;
+layout(set = 0, binding = 2, rgba16f) uniform readonly image2D img_bkg;
+layout(set = 0, binding = 3, rgba16f) uniform readonly image2D img_albedo;
+layout(set = 1, binding = 0, rgba16f) uniform readonly image2D img_lightmap;
+// TODO add emission map
+// TODO add game ui
+
+const float hdr_main_mix_factor = 0.55;
+const float hdr_main_exp_multiplier = 1.65;
+const float hdr_main_poly_param = 6.0;
+const float hdr_side_poly_param = 2.0;
+const float hdr_exposure = 1.0;
+const float hdr_highlight_factor = 8.0;
+
+float f_mainPoly(float x) {
+    float x_qb = x * x * x;
+    return x_qb / (x_qb + (1.0 / hdr_main_poly_param));
+}
+
+float f_sidePoly(float x) {
+    float x_sq = x * x;
+    float x_qu = x_sq * x_sq;
+    return x_qu / (x_qu + hdr_side_poly_param);
+}
+
+float f_mainExp(float x) { return 1.0 - exp(-x * hdr_main_exp_multiplier); }
+
+float f_main(float x) { return mix(f_mainPoly(x), f_mainExp(x), hdr_main_mix_factor); }
+
+float f_side(float x) { return f_sidePoly(x); }
+
+vec3 remapColor(vec3 in_col) {
+    in_col *= hdr_exposure;
+
+    vec3 r = vec3(f_main(in_col.r), f_side(in_col.r), f_side(in_col.r));
+    vec3 g = vec3(f_side(in_col.g), f_main(in_col.g), f_side(in_col.g));
+    vec3 b = vec3(f_side(in_col.b), f_side(in_col.b), f_main(in_col.b));
+
+    vec3 factor = vec3(hdr_highlight_factor);
+
+    return pow(pow(r, factor) + pow(g, factor) + pow(b, factor), 1.0 / factor);
+}
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 landscape_coord = coord + ivec2((ubo.landscape_size - ubo.target_size) >> 1);
+
+    vec4 bkg_color = imageLoad(img_bkg, coord);
+    vec4 albedo = imageLoad(img_albedo, landscape_coord);
+    vec4 lightmap = imageLoad(img_lightmap, landscape_coord);
+
+    vec4 bkg_diffuse = bkg_color * unpack4xf16(ubo.ambient_color_4xf16);
+    vec4 diffuse = albedo * sqrt(lightmap);
+
+    vec4 color = mix(bkg_color, diffuse, albedo.a);
+    vec4 remapped = vec4(remapColor(color.rgb), color.a);
+
+    imageStore(img_im, coord, remapped);
+}

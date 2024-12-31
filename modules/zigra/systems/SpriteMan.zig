@@ -5,13 +5,12 @@ const tracy = @import("tracy");
 
 const root = @import("../root.zig");
 const systems = @import("../systems.zig");
-const vk_types = @import("Vulkan/Ctx/types.zig");
 const common = @import("common.zig");
 
 const SpriteRef = struct {
     type: SpriteType,
     id_transform: u32,
-    id_vk_sprite: u32,
+    id_vk_sprite: systems.Vulkan.Atlas.TextureReference,
     depth: f32 = 0.1,
 };
 
@@ -46,15 +45,20 @@ pub fn render(self: *@This(), m: *root.Modules) anyerror!void {
 
     while (iterator.next()) |sprite_ref| {
         const transform = &transforms[sprite_ref.id_transform];
-        const depth = sprite_ref.depth;
+        // const depth = sprite_ref.depth;
         const pos = transform.visualPos(time_drift);
         const rot = transform.visualRot(time_drift);
 
-        try m.vulkan.pushCmdVertices(&createSprite(m, pos, -rot, depth, sprite_ref.id_vk_sprite));
+        try m.vulkan.pushWorldVertices(&createSprite(m, pos, -rot, sprite_ref.id_vk_sprite));
     }
 }
 
-fn createSprite(m: *root.Modules, pos: @Vector(2, f32), rot: f32, depth: f32, sprite_id: u32) [6]vk_types.VertexData {
+fn createSprite(
+    m: *root.Modules,
+    pos: @Vector(2, f32),
+    rot: f32,
+    sprite_id: systems.Vulkan.Atlas.TextureReference,
+) [6]systems.Vulkan.WorldVertex {
     const rect = m.vulkan.impl.atlas.getRectById(sprite_id);
 
     const cos = @cos(rot);
@@ -71,40 +75,44 @@ fn createSprite(m: *root.Modules, pos: @Vector(2, f32), rot: f32, depth: f32, sp
     const p2 = -vx + vy + pos;
     const p3 = vx + vy + pos;
 
-    const v0 = vk_types.VertexData{
-        .point = .{ p0[0], p0[1], depth },
-        .color = .{ 1, 1, 1, 1 },
+    const v0 = systems.Vulkan.WorldVertex{
+        .pos = .{ p0[0], p0[1] },
+        .col = .{ 1, 1, 1, 1 },
         .uv = .{
             @floatFromInt(rect.offset.x),
             @floatFromInt(rect.offset.y),
         },
+        .tex_ref = .{ sprite_id.layer, sprite_id.index },
     };
 
-    const v1 = vk_types.VertexData{
-        .point = .{ p1[0], p1[1], depth },
-        .color = .{ 1, 1, 1, 1 },
+    const v1 = systems.Vulkan.WorldVertex{
+        .pos = .{ p1[0], p1[1] },
+        .col = .{ 1, 1, 1, 1 },
         .uv = .{
             @floatFromInt(rect.offset.x + @as(i32, @intCast(rect.extent.width))),
             @floatFromInt(rect.offset.y),
         },
+        .tex_ref = .{ sprite_id.layer, sprite_id.index },
     };
 
-    const v2 = vk_types.VertexData{
-        .point = .{ p2[0], p2[1], depth },
-        .color = .{ 1, 1, 1, 1 },
+    const v2 = systems.Vulkan.WorldVertex{
+        .pos = .{ p2[0], p2[1] },
+        .col = .{ 1, 1, 1, 1 },
         .uv = .{
             @floatFromInt(rect.offset.x),
             @floatFromInt(rect.offset.y + @as(i32, @intCast(rect.extent.height))),
         },
+        .tex_ref = .{ sprite_id.layer, sprite_id.index },
     };
 
-    const v3 = vk_types.VertexData{
-        .point = .{ p3[0], p3[1], depth },
-        .color = .{ 1, 1, 1, 1 },
+    const v3 = systems.Vulkan.WorldVertex{
+        .pos = .{ p3[0], p3[1] },
+        .col = .{ 1, 1, 1, 1 },
         .uv = .{
             @floatFromInt(rect.offset.x + @as(i32, @intCast(rect.extent.width))),
             @floatFromInt(rect.offset.y + @as(i32, @intCast(rect.extent.height))),
         },
+        .tex_ref = .{ sprite_id.layer, sprite_id.index },
     };
 
     return .{ v0, v1, v2, v1, v2, v3 };

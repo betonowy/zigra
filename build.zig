@@ -47,6 +47,10 @@ pub fn build(b: *std.Build) !void {
     const mod_la = b.createModule(.{ .root_source_file = b.path("modules/la/root.zig") });
     const mod_util = b.createModule(.{ .root_source_file = b.path("modules/util/root.zig") });
     mod_util.addImport("la", mod_la);
+    const mod_zvk = b.createModule(.{ .root_source_file = b.path("modules/zvk/root.zig") });
+    mod_zvk.addImport("vk", mod_vk);
+    mod_zvk.addImport("util", mod_util);
+    mod_zvk.addImport("la", mod_la);
 
     const mod_options = options.createModule();
     const mod_stb = thirdparty.stb.module(b, mod_util);
@@ -89,6 +93,8 @@ pub fn build(b: *std.Build) !void {
     mod_zigra.addImport("tracy", mod_tracy);
     mod_zigra.addImport("enet", mod_enet);
     mod_zigra.addImport("zaudio", mod_zaudio);
+    mod_zigra.addImport("zvk", mod_zvk);
+    // shaders.addImports(mod_zigra, shaders.objects(b));
 
     const exe = b.addExecutable(.{
         .name = "zigra",
@@ -127,6 +133,9 @@ pub fn build(b: *std.Build) !void {
 
     const run_step = b.step("run", "Run zigra");
     run_step.dependOn(&run_cmd.step);
+
+    const check = b.step("check", "Check build");
+    check.dependOn(&exe.step);
 
     const test_ctx = tests.Ctx{
         .b = b,

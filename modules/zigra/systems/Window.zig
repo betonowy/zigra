@@ -5,7 +5,8 @@ const glfw = @import("glfw");
 const lifetime = @import("lifetime");
 const root = @import("../root.zig");
 const util = @import("util");
-const Vulkan = @import("Vulkan.zig");
+const zvk = @import("zvk");
+const vk = @import("vk");
 
 const common = @import("common.zig");
 
@@ -29,7 +30,7 @@ cb_key_root: CbKeyParent = .{},
 cb_char_root: CbCharParent = .{},
 cbs_ctx_glfw: GlfwCbCtx = .{},
 
-cbs_vulkan: Vulkan.WindowCallbacks = .{
+cbs_vulkan: zvk.WindowCallbacks = .{
     .p_create_window_surface = &vkCbCreateWindowSurface,
     .p_get_framebuffer_size = &vkCbGetFramebufferSize,
     .p_get_required_instance_extensions = &vkCbGetRequiredInstanceExtensions,
@@ -141,11 +142,11 @@ fn glfwCbError(error_code: glfw.ErrorCode, description: [:0]const u8) void {
     std.log.err("glfw: {}: {s}\n", .{ error_code, description });
 }
 
-fn vkCbCreateWindowSurface(child_ptr: *const Vulkan.WindowCallbacks, instance: Vulkan.vk.Instance) anyerror!Vulkan.vk.SurfaceKHR {
+fn vkCbCreateWindowSurface(child_ptr: *const zvk.WindowCallbacks, instance: vk.Instance) anyerror!vk.SurfaceKHR {
     const self: *const @This() = @fieldParentPtr("cbs_vulkan", child_ptr);
-    var surface: Vulkan.vk.SurfaceKHR = undefined;
+    var surface: vk.SurfaceKHR = undefined;
 
-    const result = @as(Vulkan.vk.Result, @enumFromInt(
+    const result = @as(vk.Result, @enumFromInt(
         glfw.createWindowSurface(instance, self.window, null, &surface),
     ));
 
@@ -154,13 +155,13 @@ fn vkCbCreateWindowSurface(child_ptr: *const Vulkan.WindowCallbacks, instance: V
     return surface;
 }
 
-fn vkCbGetFramebufferSize(child_ptr: *const Vulkan.WindowCallbacks) Vulkan.vk.Extent2D {
+fn vkCbGetFramebufferSize(child_ptr: *const zvk.WindowCallbacks) vk.Extent2D {
     const self: *const @This() = @fieldParentPtr("cbs_vulkan", child_ptr);
     const size = self.window.getFramebufferSize();
     return .{ .width = size.width, .height = size.height };
 }
 
-fn vkCbGetRequiredInstanceExtensions(_: *const Vulkan.WindowCallbacks) anyerror![][*:0]const u8 {
+fn vkCbGetRequiredInstanceExtensions(_: *const zvk.WindowCallbacks) anyerror![][*:0]const u8 {
     return glfw.getRequiredInstanceExtensions() orelse blk: {
         const err = glfw.mustGetError();
         std.log.err("Failed to get required vulkan instance extensions: {s}", .{err.description});
@@ -168,7 +169,7 @@ fn vkCbGetRequiredInstanceExtensions(_: *const Vulkan.WindowCallbacks) anyerror!
     };
 }
 
-fn vkCbWaitEvents(_: *const Vulkan.WindowCallbacks) void {
+fn vkCbWaitEvents(_: *const zvk.WindowCallbacks) void {
     glfw.waitEvents();
 }
 

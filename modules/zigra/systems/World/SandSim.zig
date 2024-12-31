@@ -65,10 +65,10 @@ test "cell_types:are_unique" {
     }
 }
 
-pub const CellMatrix align(@alignOf(@Vector(16, u8))) = [tile_size][tile_size]Cell;
+pub const CellMatrix = [tile_size][tile_size]Cell;
 
 pub const Tile = extern struct {
-    matrix: CellMatrix,
+    matrix: CellMatrix align(16),
     coord: @Vector(2, i32),
     touch_count: u32,
     solid_count: u16,
