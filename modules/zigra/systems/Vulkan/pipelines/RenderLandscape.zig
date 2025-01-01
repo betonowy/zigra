@@ -122,9 +122,9 @@ pub fn createFrameSet(self: @This(), frame: FrameResources) !zvk.DescriptorSet {
 }
 
 pub fn cmdRender(self: @This(), frame: *Frame, resources: Resources) !void {
-    frame.cmd.cmdBindPipeline(.compute, self.pipeline);
+    frame.cmds.comp.cmdBindPipeline(.compute, self.pipeline);
 
-    try frame.cmd.cmdBindDescriptorSets(.compute, self.layout, .{
+    try frame.cmds.comp.cmdBindDescriptorSets(.compute, self.layout, .{
         .slice = &.{
             frame.sets.render_landscape,
             resources.set_lm_b,
@@ -132,55 +132,25 @@ pub fn cmdRender(self: @This(), frame: *Frame, resources: Resources) !void {
         },
     }, .{});
 
-    const target_extent = frame.images.render_albedo.options.extent;
+    const target_extent = frame.images.render_landscape_albedo.options.extent;
 
-    frame.cmd.cmdDispatch(.{
+    frame.cmds.comp.cmdDispatch(.{
         .target_size = .{ target_extent[0], target_extent[1], 1 },
         .local_size = .{ 16, 16, 1 },
     });
 
-    frame.cmd.cmdPipelineBarrier(.{
-        .image = &.{
-            frame.images.render_albedo.barrier(.{
-                .src_access_mask = .{ .shader_write_bit = true },
-                .src_stage_mask = .{ .compute_shader_bit = true },
-                .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
-                .dst_stage_mask = .{ .compute_shader_bit = true, .fragment_shader_bit = true },
-                .src_layout = .general,
-                .dst_layout = .color_attachment_optimal,
-            }),
-            frame.images.render_emission.barrier(.{
-                .src_access_mask = .{ .shader_write_bit = true },
-                .src_stage_mask = .{ .compute_shader_bit = true },
-                .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
-                .dst_stage_mask = .{ .compute_shader_bit = true, .fragment_shader_bit = true },
-                .src_layout = .general,
-                .dst_layout = .general,
-            }),
-            frame.images.render_attenuation.barrier(.{
-                .src_access_mask = .{ .shader_write_bit = true },
-                .src_stage_mask = .{ .compute_shader_bit = true },
-                .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
-                .dst_stage_mask = .{ .compute_shader_bit = true, .fragment_shader_bit = true },
-                .src_layout = .general,
-                .dst_layout = .general,
-            }),
-            resources.image_lm_b.barrier(.{
-                .src_access_mask = .{ .shader_read_bit = true },
-                .src_stage_mask = .{ .compute_shader_bit = true },
-                .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
-                .dst_stage_mask = .{ .compute_shader_bit = true, .fragment_shader_bit = true },
-                .src_layout = .general,
-                .dst_layout = .general,
-            }),
-            resources.image_lm_a.barrier(.{
-                .src_access_mask = .{ .shader_write_bit = true },
-                .src_stage_mask = .{ .compute_shader_bit = true },
-                .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
-                .dst_stage_mask = .{ .compute_shader_bit = true, .fragment_shader_bit = true },
-                .src_layout = .general,
-                .dst_layout = .general,
-            }),
-        },
+    frame.cmds.comp.cmdPipelineBarrier(.{
+        // .image = &.{
+        //     frame.images.render_landscape_albedo.barrier(.{
+        //         .src_access_mask = .{ .shader_write_bit = true },
+        //         .src_stage_mask = .{ .compute_shader_bit = true },
+        //         .src_queue = self.device.queue_compute,
+        //         .dst_queue = self.device.queue_graphics,
+        //     }),
+        // },
+        .memory = &.{.{
+            .src_stage_mask = .{ .compute_shader_bit = true },
+            .dst_stage_mask = .{ .compute_shader_bit = true },
+        }},
     });
 }

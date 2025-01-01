@@ -6,6 +6,8 @@ const QueueFamily = @import("QueueFamily.zig");
 const Device = @import("Device.zig");
 const Surface = @import("Surface.zig");
 
+const log = std.log.scoped(.zvk_PhysicalDevice);
+
 allocator: std.mem.Allocator,
 handle: vk.PhysicalDevice,
 vki: *const vk_api.Instance,
@@ -16,7 +18,7 @@ pub fn properties(self: @This()) vk.PhysicalDeviceProperties2 {
     return props;
 }
 
-pub fn graphicsComputeQueueFamily(self: @This()) !QueueFamily {
+pub fn graphicsQueueFamily(self: @This()) !QueueFamily {
     var index_count: u32 = undefined;
 
     self.vki.getPhysicalDeviceQueueFamilyProperties(self.handle, &index_count, null);
@@ -29,6 +31,44 @@ pub fn graphicsComputeQueueFamily(self: @This()) !QueueFamily {
 
     for (queue_families, 0..) |queue_family, i| {
         if (queue_family.queue_flags.graphics_bit and queue_family.queue_flags.compute_bit) {
+            log.info("Found general purpose graphics queue: #{}", .{i});
+            return .{ .index = @intCast(i), .flags = queue_family.queue_flags };
+        }
+    }
+
+    return error.QueueFamilyNotFound;
+}
+
+pub fn computeQueueFamily(self: @This()) !QueueFamily {
+    var index_count: u32 = undefined;
+
+    self.vki.getPhysicalDeviceQueueFamilyProperties(self.handle, &index_count, null);
+
+    var arena = std.heap.ArenaAllocator.init(self.allocator);
+    defer arena.deinit();
+
+    const queue_families = try arena.allocator().alloc(vk.QueueFamilyProperties, index_count);
+    self.vki.getPhysicalDeviceQueueFamilyProperties(self.handle, &index_count, queue_families.ptr);
+
+    for (queue_families, 0..) |queue_family, i| {
+        const flags = queue_family.queue_flags;
+        if (!flags.graphics_bit and !flags.transfer_bit and flags.compute_bit) {
+            log.info("Found solo compute queue: #{}", .{i});
+            return .{ .index = @intCast(i), .flags = queue_family.queue_flags };
+        }
+    }
+
+    for (queue_families, 0..) |queue_family, i| {
+        const flags = queue_family.queue_flags;
+        if (!flags.graphics_bit and flags.transfer_bit and flags.compute_bit) {
+            log.info("Found compute+transfer queue (used as compute queue): #{}", .{i});
+            return .{ .index = @intCast(i), .flags = queue_family.queue_flags };
+        }
+    }
+
+    for (queue_families, 0..) |queue_family, i| {
+        if (queue_family.queue_flags.graphics_bit and queue_family.queue_flags.compute_bit) {
+            log.info("Found general purpose graphics queue (to be used as compute queue): #{}", .{i});
             return .{ .index = @intCast(i), .flags = queue_family.queue_flags };
         }
     }
@@ -49,6 +89,7 @@ pub fn presentQueueFamily(self: @This(), surface: Surface) !QueueFamily {
 
     for (queue_families, 0..) |queue_family, i| {
         if (try self.vki.getPhysicalDeviceSurfaceSupportKHR(self.handle, @intCast(i), surface.handle) == vk.TRUE) {
+            log.info("Found present queue: #{}", .{i});
             return .{ .index = @intCast(i), .flags = queue_family.queue_flags };
         }
     }

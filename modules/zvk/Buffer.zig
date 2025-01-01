@@ -9,7 +9,7 @@ pub const InitOptions = struct {
     size: vk.DeviceSize,
     usage: vk.BufferUsageFlags,
     sharing_mode: vk.SharingMode = .exclusive,
-    properties: vk.MemoryPropertyFlags,
+    properties: vk.MemoryPropertyFlags = .{ .device_local_bit = true },
 };
 
 options: InitOptions,
@@ -50,7 +50,7 @@ pub const CreateStagingBuffer = struct {
 
 pub fn createStagingBuffer(self: @This(), options: CreateStagingBuffer) !@This() {
     return init(self.device, .{
-        .properties = .{ .host_visible_bit = true, .host_coherent_bit = true },
+        .properties = .{ .host_visible_bit = true },
         .sharing_mode = self.options.sharing_mode,
         .size = self.options.size,
         .usage = options.usage,
@@ -103,6 +103,16 @@ pub fn resizeFast(self: *@This(), new_size: u64) !void {
     self.* = try init(self.device, self.options);
 }
 
+pub fn flush(self: @This(), offset: u64, size: u64) !void {
+    _ = self.map orelse return;
+
+    try self.device.api.flushMappedMemoryRanges(self.device.handle, 1, &.{.{
+        .memory = self.memory,
+        .offset = offset,
+        .size = size,
+    }});
+}
+
 pub const BarrierOptions = struct {
     src_stage_mask: vk.PipelineStageFlags2 = .{},
     src_access_mask: vk.AccessFlags2 = .{},
@@ -110,14 +120,11 @@ pub const BarrierOptions = struct {
     dst_access_mask: vk.AccessFlags2 = .{},
     offset: ?u64 = null,
     size: ?u64 = null,
-    src_qf_index: ?Queue = null,
-    dst_qf_index: ?Queue = null,
+    src_queue: Queue,
+    dst_queue: Queue,
 };
 
 pub fn barrier(self: @This(), options: BarrierOptions) vk.BufferMemoryBarrier2 {
-    const src_qf = if (options.src_qf_index) |q| q.family.index else null;
-    const dst_qf = if (options.dst_qf_index) |q| q.family.index else null;
-
     return vk.BufferMemoryBarrier2{
         .buffer = self.handle,
         .src_stage_mask = options.src_stage_mask,
@@ -126,8 +133,8 @@ pub fn barrier(self: @This(), options: BarrierOptions) vk.BufferMemoryBarrier2 {
         .dst_access_mask = options.dst_access_mask,
         .offset = options.offset orelse 0,
         .size = options.size orelse self.options.size,
-        .src_queue_family_index = src_qf orelse self.device.queue_gpu_comp.family.index,
-        .dst_queue_family_index = dst_qf orelse self.device.queue_gpu_comp.family.index,
+        .src_queue_family_index = options.src_queue.family.index,
+        .dst_queue_family_index = options.dst_queue.family.index,
     };
 }
 

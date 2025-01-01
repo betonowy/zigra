@@ -122,7 +122,7 @@ pub fn cmdRender(self: @This(), frame: *Frame) !void {
         frame.images.render_dui.options.extent[1],
     };
 
-    try frame.cmd.cmdBeginRendering(.{
+    try frame.cmds.gfx_present.cmdBeginRendering(.{
         .render_area = .{ .offset = .{ 0, 0 }, .extent = extent },
         .color_attachments = &.{.{
             .view = .{ .handle = frame.views.render_dui.handle, .device = undefined },
@@ -133,21 +133,21 @@ pub fn cmdRender(self: @This(), frame: *Frame) !void {
         }},
     });
 
-    frame.cmd.cmdBindPipeline(.graphics, self.pipeline);
+    frame.cmds.gfx_present.cmdBindPipeline(.graphics, self.pipeline);
 
-    try frame.cmd.cmdBindDescriptorSets(.graphics, self.layout, .{
+    try frame.cmds.gfx_present.cmdBindDescriptorSets(.graphics, self.layout, .{
         .slice = &.{frame.sets.render_dui},
     }, .{});
 
-    try frame.cmd.cmdViewport(&.{.{ .size = @floatFromInt(extent) }});
-    try frame.cmd.cmdScissor(&.{.{ .size = extent }});
+    try frame.cmds.gfx_present.cmdViewport(&.{.{ .size = @floatFromInt(extent) }});
+    try frame.cmds.gfx_present.cmdScissor(&.{.{ .size = extent }});
 
     for (frame.dbs.dui.blocks.items) |blk| {
         switch (blk) {
-            .scissor => |s| try frame.cmd.cmdScissor(&.{
+            .scissor => |s| try frame.cmds.gfx_present.cmdScissor(&.{
                 .{ .offset = s.offset, .size = s.extent },
             }),
-            .triangles => |draw| frame.cmd.cmdDraw(.{
+            .triangles => |draw| frame.cmds.gfx_present.cmdDraw(.{
                 .first_vertex = draw.begin,
                 .vertices = draw.len,
                 .instances = 1,
@@ -155,9 +155,9 @@ pub fn cmdRender(self: @This(), frame: *Frame) !void {
         }
     }
 
-    frame.cmd.cmdEndRendering();
+    frame.cmds.gfx_present.cmdEndRendering();
 
-    frame.cmd.cmdPipelineBarrier(.{
+    frame.cmds.gfx_present.cmdPipelineBarrier(.{
         .image = &.{frame.images.render_dui.barrier(.{
             .src_access_mask = .{ .color_attachment_write_bit = true },
             .src_stage_mask = .{ .color_attachment_output_bit = true },
@@ -165,6 +165,8 @@ pub fn cmdRender(self: @This(), frame: *Frame) !void {
             .dst_stage_mask = .{ .fragment_shader_bit = true },
             .src_layout = .color_attachment_optimal,
             .dst_layout = .shader_read_only_optimal,
+            .src_queue = self.device.queue_graphics,
+            .dst_queue = self.device.queue_graphics,
         })},
     });
 }

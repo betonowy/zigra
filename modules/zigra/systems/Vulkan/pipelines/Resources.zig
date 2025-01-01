@@ -106,23 +106,19 @@ pub fn cmdPrepare(self: *@This(), frame: *Frame) void {
 }
 
 fn cmdFirstFrame(self: *@This(), frame: *Frame) void {
-    frame.cmd.cmdPipelineBarrier(.{
+    frame.cmds.comp.cmdPipelineBarrier(.{
         .image = &.{
             self.image_lm_a.barrier(.{
-                .src_access_mask = .{ .memory_write_bit = true },
-                .dst_access_mask = .{ .memory_read_bit = true },
-                .src_stage_mask = .{ .all_commands_bit = true },
-                .dst_stage_mask = .{ .all_commands_bit = true },
                 .src_layout = .undefined,
                 .dst_layout = .general,
+                .src_queue = self.device.queue_compute,
+                .dst_queue = self.device.queue_compute,
             }),
             self.image_lm_b.barrier(.{
-                .src_access_mask = .{ .memory_write_bit = true },
-                .dst_access_mask = .{ .memory_read_bit = true },
-                .src_stage_mask = .{ .all_commands_bit = true },
-                .dst_stage_mask = .{ .all_commands_bit = true },
                 .src_layout = .undefined,
                 .dst_layout = .general,
+                .src_queue = self.device.queue_compute,
+                .dst_queue = self.device.queue_compute,
             }),
         },
     });

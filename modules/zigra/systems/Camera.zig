@@ -99,7 +99,9 @@ pub fn update(self: *@This(), m: *root.Modules) !void {
     const transform = self.getCameraTransform(m);
     const pos = transform.visualPos(m.time.tickDrift());
     m.vulkan.setCameraPosition(@intFromFloat(pos));
-    m.audio.mixer.setListenerPos(pos) catch log.warn("Failed to push setListenerPos", .{});
+    m.audio.mixer.setListenerPos(pos) catch {
+        // log.warn("Failed to push setListenerPos", .{});
+    };
 }
 
 pub fn getCameraTransform(self: *@This(), m: *root.Modules) *systems.Transform.Data {

@@ -74,13 +74,15 @@ pub fn init(
         log.info("Selected: {s}, vendor ID: 0x{x}", .{ p.properties.device_name, p.properties.vendor_id });
     }
 
-    const gpu_compute_queue_family = try physical_device.graphicsComputeQueueFamily();
+    const graphics_queue_family = try physical_device.graphicsQueueFamily();
+    const compute_queue_family = try physical_device.computeQueueFamily();
     const present_queue_family = try physical_device.presentQueueFamily(surface);
 
     const device = try zvk.Device.init(
         instance,
         physical_device,
-        gpu_compute_queue_family,
+        graphics_queue_family,
+        compute_queue_family,
         present_queue_family,
     );
     errdefer device.deinit();
@@ -103,7 +105,14 @@ pub fn init(
     }, .{});
     errdefer atlas.deinit();
 
-    const swapchain = try zvk.Swapchain.init(instance, physical_device, device, surface);
+    const swapchain = try zvk.Swapchain.init(
+        instance,
+        physical_device,
+        device,
+        surface,
+        graphics_queue_family,
+        present_queue_family,
+    );
     errdefer swapchain.deinit();
 
     // TODO some of these parameters should be runtime configurable
@@ -154,7 +163,8 @@ pub fn currentFrameDataPtr(self: *@This()) *Frame {
 }
 
 pub fn waitForFreeFrame(self: *@This()) !void {
-    try self.currentFrameDataPtr().fence_busy.wait();
+    const fences = self.currentFrameDataPtr().fences;
+    try fences.gfx_present.wait();
 }
 
 pub fn updateHostData(self: *@This()) void {
@@ -183,45 +193,59 @@ pub fn updateHostData(self: *@This()) void {
 
 pub fn process(self: *@This()) !void {
     const frame = self.currentFrameDataPtr();
-    defer frame.end();
 
     const swapchain_image_index = try self.swapchain.acquireNextImage() orelse {
         try self.recreateSwapchainAndFrameData();
         return;
     };
 
-    try frame.cmd.reset();
-    try frame.cmd.begin(.{ .flags = .{ .one_time_submit_bit = true } });
-    {
-        try frame.cmdBeginFrame();
+    // TODO configure at runtime
+    const extra_lm_loops = 5;
 
-        // TODO configure at runtime
-        const extra_lm_loops = 5;
+    try frame.begin(self.atlas, self.pipelines);
 
-        self.pipelines.resources.cmdPrepare(frame);
-        try self.pipelines.render_dui.cmdRender(frame);
-        try self.pipelines.render_landscape.cmdRender(frame, self.pipelines.resources);
-        try self.pipelines.process_lightmap.cmdRender(frame, self.pipelines.resources, extra_lm_loops);
-        try self.pipelines.render_world.cmdRender(frame);
-        try self.pipelines.render_bkg.cmdRender(frame);
-        try self.pipelines.compose_intermediate.cmdRender(frame, self.pipelines.resources);
+    self.pipelines.resources.cmdPrepare(frame);
+    try self.pipelines.render_world.cmdRender(frame);
+    try self.pipelines.render_landscape.cmdRender(frame, self.pipelines.resources);
+    try self.pipelines.render_bkg.cmdRender(frame);
+    try self.pipelines.process_lightmap.cmdRender(frame, self.pipelines.resources, extra_lm_loops);
+    try self.pipelines.compose_intermediate.cmdRender(frame, self.pipelines.resources);
+    try self.pipelines.render_dui.cmdRender(frame);
 
-        self.swapchain.cmdImageAcquireBarrier(frame.cmd, swapchain_image_index);
-        try self.pipelines.compose_present.cmdRender(frame, self.swapchain, swapchain_image_index);
-        self.swapchain.cmdImagePresentBarrier(frame.cmd, swapchain_image_index);
-    }
-    try frame.cmd.end();
+    self.swapchain.cmdImageAcquireBarrier(frame.cmds.gfx_present, swapchain_image_index);
+    try self.pipelines.compose_present.cmdRender(frame, self.swapchain, swapchain_image_index);
+    self.swapchain.cmdImagePresentBarrier(frame.cmds.gfx_present, swapchain_image_index);
 
-    try frame.fence_busy.reset();
+    try frame.end();
 
-    try self.device.queue_gpu_comp.submit(.{
-        .cmds = &.{frame.cmd},
+    try self.device.queue_graphics.submit(.{
+        .cmds = &.{frame.cmds.gfx_render},
+        .signal = &.{frame.semaphores.low_render_ready},
+    });
+
+    try self.device.queue_compute.submit(.{
+        .cmds = &.{frame.cmds.comp},
+        .signal = &.{frame.semaphores.lm_ready},
+    });
+
+    try self.device.queue_graphics.submit(.{
+        .cmds = &.{frame.cmds.gfx_present},
+        .wait = &.{
+            .{
+                .sem = self.swapchain.getSemAcq(),
+                .stage = .{ .color_attachment_output_bit = true },
+            },
+            .{
+                .sem = frame.semaphores.low_render_ready,
+                .stage = .{ .color_attachment_output_bit = true },
+            },
+            .{
+                .sem = frame.semaphores.lm_ready,
+                .stage = .{ .compute_shader_bit = true },
+            },
+        },
         .signal = &.{self.swapchain.getSemFin()},
-        .wait = &.{.{
-            .sem = self.swapchain.getSemAcq(),
-            .stage = .{ .color_attachment_output_bit = true },
-        }},
-        .fence = frame.fence_busy,
+        .fence = frame.fences.gfx_present,
     });
 
     if (!try self.swapchain.present(swapchain_image_index)) {
@@ -237,7 +261,7 @@ pub fn recreateSwapchainAndFrameData(self: *@This()) !void {
     try self.swapchain.recreate();
 
     for (&self.frames) |*frame| {
-        try frame.recreate(self.atlas, self.pipelines, .{
+        try frame.recreateFull(self.atlas, self.pipelines, .{
             .lm_margin = .{ lm_margin_len, lm_margin_len },
             .target_size = .{ frame_target_width, frame_target_height },
             .window_size = self.swapchain.extent,

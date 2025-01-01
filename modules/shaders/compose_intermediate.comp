@@ -8,7 +8,8 @@ layout(local_size_x = 16, local_size_y = 16) in;
 layout(set = 0, binding = 0, std140) uniform UBO_DEF ubo;
 layout(set = 0, binding = 1, rgba16f) uniform writeonly image2D img_im;
 layout(set = 0, binding = 2, rgba16f) uniform readonly image2D img_bkg;
-layout(set = 0, binding = 3, rgba16f) uniform readonly image2D img_albedo;
+layout(set = 0, binding = 3, rgba16f) uniform readonly image2D img_landscape_albedo;
+layout(set = 0, binding = 4, rgba16f) uniform readonly image2D img_world_albedo;
 layout(set = 1, binding = 0, rgba16f) uniform readonly image2D img_lightmap;
 // TODO add emission map
 // TODO add game ui
@@ -54,8 +55,11 @@ void main() {
     ivec2 landscape_coord = coord + ivec2((ubo.landscape_size - ubo.target_size) >> 1);
 
     vec4 bkg_color = imageLoad(img_bkg, coord);
-    vec4 albedo = imageLoad(img_albedo, landscape_coord);
+    vec4 landscape_albedo = imageLoad(img_landscape_albedo, landscape_coord);
+    vec4 world_albedo = imageLoad(img_world_albedo, landscape_coord);
     vec4 lightmap = imageLoad(img_lightmap, landscape_coord);
+
+    vec4 albedo = mix(landscape_albedo, world_albedo, world_albedo.a);
 
     vec4 bkg_diffuse = bkg_color * unpack4xf16(ubo.ambient_color_4xf16);
     vec4 diffuse = albedo * sqrt(lightmap);

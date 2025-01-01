@@ -3,7 +3,7 @@ const std = @import("std");
 const zvk = @import("zvk");
 const spv = @import("spv");
 
-const Atlas2 = @import("../Atlas.zig");
+const Atlas = @import("../Atlas.zig");
 const Frame = @import("../Frame.zig");
 const Ubo = @import("../Ubo.zig");
 
@@ -17,7 +17,7 @@ pub fn init(device: *zvk.Device) !@This() {
     const descriptor_pool = try zvk.DescriptorPool.init(device, .{
         .flags = .{ .free_descriptor_set_bit = true },
         .max_sets = 2,
-        .n_combined_image_samplers = Atlas2.max_layers,
+        .n_combined_image_samplers = Atlas.max_layers,
         .n_storage_images = 1,
         .n_uniform_buffers = 1,
     });
@@ -33,7 +33,7 @@ pub fn init(device: *zvk.Device) !@This() {
             .binding = 1,
             .stage_flags = .{ .compute_bit = true },
             .type = .combined_image_sampler,
-            .count = Atlas2.max_layers,
+            .count = Atlas.max_layers,
         },
         .{
             .binding = 2,
@@ -75,7 +75,7 @@ pub fn deinit(self: @This()) void {
 pub const FrameResources = struct {
     sampler: zvk.Sampler,
     bkg: zvk.ImageView,
-    atlas: Atlas2,
+    atlas: Atlas,
     ubo: Ubo,
 };
 
@@ -104,27 +104,21 @@ pub fn createFrameSet(self: @This(), frame: FrameResources) !zvk.DescriptorSet {
 }
 
 pub fn cmdRender(self: @This(), frame: *Frame) !void {
-    frame.cmd.cmdBindPipeline(.compute, self.pipeline);
+    frame.cmds.gfx_render.cmdBindPipeline(.compute, self.pipeline);
 
-    try frame.cmd.cmdBindDescriptorSets(.compute, self.layout, .{
+    try frame.cmds.gfx_render.cmdBindDescriptorSets(.compute, self.layout, .{
         .slice = &.{frame.sets.render_bkg},
     }, .{});
 
     const target_extent = frame.images.render_bkg.options.extent;
 
-    frame.cmd.cmdDispatch(.{
+    frame.cmds.gfx_render.cmdDispatch(.{
         .target_size = .{ target_extent[0], target_extent[1], 1 },
         .local_size = .{ 16, 16, 1 },
     });
 
-    frame.cmd.cmdPipelineBarrier(.{
-        .image = &.{frame.images.render_bkg.barrier(.{
-            .src_access_mask = .{ .shader_write_bit = true },
-            .src_stage_mask = .{ .compute_shader_bit = true },
-            .dst_access_mask = .{ .shader_read_bit = true },
-            .dst_stage_mask = .{ .fragment_shader_bit = true },
-            .src_layout = .general,
-            .dst_layout = .general,
-        })},
-    });
+    frame.cmds.gfx_render.cmdPipelineBarrier(.{ .memory = &.{.{
+        .src_stage_mask = .{ .compute_shader_bit = true },
+        .dst_stage_mask = .{ .compute_shader_bit = true },
+    }} });
 }

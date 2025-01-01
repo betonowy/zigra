@@ -12,14 +12,13 @@ handle: vk.Queue,
 family: QueueFamily,
 
 pub const Submit = struct {
-    fence: Fence,
+    fence: ?Fence = null,
     cmds: []const CommandBuffer = &.{},
     signal: []const Semaphore = &.{},
     wait: []const struct {
         sem: Semaphore,
         stage: vk.PipelineStageFlags = .{ .all_commands_bit = true },
     } = &.{},
-    stage_mask: vk.PipelineStageFlags = .{},
 };
 
 pub fn submit(self: @This(), info: Submit) !void {
@@ -45,5 +44,5 @@ pub fn submit(self: @This(), info: Submit) !void {
         .wait_semaphore_count = @intCast(wait_semaphores.len),
         .p_wait_semaphores = wait_semaphores.constSlice().ptr,
         .p_wait_dst_stage_mask = wait_stages.constSlice().ptr,
-    }}, info.fence.handle);
+    }}, if (info.fence) |f| f.handle else .null_handle);
 }

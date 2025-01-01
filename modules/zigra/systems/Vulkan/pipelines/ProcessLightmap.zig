@@ -105,7 +105,7 @@ pub fn createFrameSet(self: @This(), frame: FrameResources) !zvk.DescriptorSet {
 }
 
 pub fn cmdRender(self: @This(), frame: *Frame, resources: Resources, extra_loops: usize) !void {
-    frame.cmd.cmdBindPipeline(.compute, self.pipeline);
+    frame.cmds.comp.cmdBindPipeline(.compute, self.pipeline);
 
     try self.cmdLoopProcess(frame, .{
         .set_in = resources.set_lm_a,
@@ -139,7 +139,7 @@ const LoopProcess = struct {
 };
 
 fn cmdLoopProcess(self: @This(), frame: *Frame, data: LoopProcess) !void {
-    try frame.cmd.cmdBindDescriptorSets(.compute, self.layout, .{
+    try frame.cmds.comp.cmdBindDescriptorSets(.compute, self.layout, .{
         .slice = &.{
             frame.sets.process_lightmap,
             data.set_in,
@@ -147,29 +147,13 @@ fn cmdLoopProcess(self: @This(), frame: *Frame, data: LoopProcess) !void {
         },
     }, .{});
 
-    frame.cmd.cmdDispatch(.{
+    frame.cmds.comp.cmdDispatch(.{
         .target_size = data.image_in.options.extent,
         .local_size = .{ 16, 16, 1 },
     });
 
-    frame.cmd.cmdPipelineBarrier(.{
-        .image = &.{
-            data.image_in.barrier(.{
-                .src_access_mask = .{ .shader_read_bit = true },
-                .src_stage_mask = .{ .compute_shader_bit = true },
-                .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
-                .dst_stage_mask = .{ .compute_shader_bit = true },
-                .src_layout = .general,
-                .dst_layout = .general,
-            }),
-            data.image_out.barrier(.{
-                .src_access_mask = .{ .shader_write_bit = true },
-                .src_stage_mask = .{ .compute_shader_bit = true },
-                .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
-                .dst_stage_mask = .{ .compute_shader_bit = true },
-                .src_layout = .general,
-                .dst_layout = .general,
-            }),
-        },
-    });
+    frame.cmds.comp.cmdPipelineBarrier(.{ .memory = &.{.{
+        .src_stage_mask = .{ .compute_shader_bit = true },
+        .dst_stage_mask = .{ .compute_shader_bit = true },
+    }} });
 }

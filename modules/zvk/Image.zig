@@ -62,7 +62,10 @@ pub fn deinit(self: @This()) void {
     self.device.api.destroyImage(self.device.handle, self.handle, null);
 }
 
-pub const CreateStagingImage = struct { layers: ?u32 = null };
+pub const CreateStagingImage = struct {
+    layers: ?u32 = null,
+    usage: ?vk.ImageUsageFlags = null,
+};
 
 pub fn createStagingImage(self: @This(), options: CreateStagingImage) !@This() {
     return init(self.device, .{
@@ -71,9 +74,9 @@ pub fn createStagingImage(self: @This(), options: CreateStagingImage) !@This() {
         .format = self.options.format,
         .tiling = .linear,
         .initial_layout = .preinitialized,
-        .usage = .{ .transfer_src_bit = true },
+        .usage = options.usage orelse .{ .transfer_src_bit = true },
         .flags = self.options.flags,
-        .property = .{ .host_visible_bit = true, .host_coherent_bit = true },
+        .property = .{ .host_visible_bit = true },
         .aspect_mask = self.options.aspect_mask,
     });
 }
@@ -100,8 +103,8 @@ pub const BarrierOptions = struct {
     src_layout: vk.ImageLayout = .undefined,
     dst_layout: vk.ImageLayout = .undefined,
     subresource_range: Range = .{},
-    src_qf_index: ?Queue = null,
-    dst_qf_index: ?Queue = null,
+    src_queue: Queue,
+    dst_queue: Queue,
 
     pub const Range = struct {
         aspect_mask: vk.ImageAspectFlags = .{ .color_bit = true },
@@ -113,10 +116,7 @@ pub const BarrierOptions = struct {
 };
 
 pub fn barrier(self: @This(), options: BarrierOptions) vk.ImageMemoryBarrier2 {
-    const src_qf = if (options.src_qf_index) |q| q.family.index else null;
-    const dst_qf = if (options.dst_qf_index) |q| q.family.index else null;
-
-    return vk.ImageMemoryBarrier2{
+    return .{
         .src_stage_mask = options.src_stage_mask,
         .src_access_mask = options.src_access_mask,
         .dst_stage_mask = options.dst_stage_mask,
@@ -130,8 +130,8 @@ pub fn barrier(self: @This(), options: BarrierOptions) vk.ImageMemoryBarrier2 {
             .layer_count = options.subresource_range.layer_count,
             .level_count = options.subresource_range.level_count,
         },
-        .src_queue_family_index = src_qf orelse self.device.queue_gpu_comp.family.index,
-        .dst_queue_family_index = dst_qf orelse self.device.queue_gpu_comp.family.index,
+        .src_queue_family_index = options.src_queue.family.index,
+        .dst_queue_family_index = options.dst_queue.family.index,
         .image = self.handle,
     };
 }

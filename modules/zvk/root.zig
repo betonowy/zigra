@@ -7,6 +7,7 @@ pub const DescriptorPool = @import("DescriptorPool.zig");
 pub const DescriptorSet = @import("DescriptorSet.zig");
 pub const DescriptorSetLayout = @import("DescriptorSetLayout.zig");
 pub const Device = @import("Device.zig");
+pub const Event = @import("Event.zig");
 pub const Fence = @import("Fence.zig");
 pub const Image = @import("Image.zig");
 pub const ImageView = @import("ImageView.zig");

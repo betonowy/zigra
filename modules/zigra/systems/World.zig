@@ -58,7 +58,7 @@ pub fn render(self: *@This(), m: *root.Modules) anyerror!void {
     var t = common.systemTrace(@This(), @src(), m);
     defer t.end();
 
-    const landscape = &m.vulkan.impl.currentFrameDataPtr().images.landscape_encoded_host;
+    const landscape = &m.vulkan.impl.currentFrameDataPtr().images.landscape_encoded;
 
     const mem = landscape.map orelse try landscape.mapMemory();
     const size = landscape.options.extent;
@@ -69,18 +69,6 @@ pub fn render(self: *@This(), m: *root.Modules) anyerror!void {
             la.splatT(2, i32, 2),
         .size = .{ size[0], size[1] },
     }, m.time.tickDelay(), mem);
-
-    // for (self.sand_sim.particles.items) |particle| {
-    //     const point_a = particle.pos - particle.vel * @as(@Vector(2, f32), @splat(m.time.tickDelay()));
-    //     const point_b = particle.pos;
-
-    //     try m.vulkan.pushCmdLine(.{
-    //         .points = .{ point_a, point_b },
-    //         .color = .{ 0.0125, 0.025, 0.5, 1.0 },
-    //         .depth = 0.01,
-    //         .alpha_gradient = .{ 1.0, 1.0 },
-    //     });
-    // }
 }
 
 pub fn netRecv(self: *@This(), m: *root.Modules, data: []const u8) !void {

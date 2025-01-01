@@ -36,7 +36,7 @@ pub const TextureLayer = struct {
         errdefer view.deinit();
 
         const cmd_pool = try zvk.CommandPool.init(device, .{
-            .queue_family = device.queue_gpu_comp.family,
+            .queue_family = device.queue_graphics.family,
             .flags = .{ .reset_command_buffer_bit = true },
         });
 
@@ -84,6 +84,8 @@ pub const TextureLayer = struct {
                 staging_image.barrier(.{
                     .src_layout = .preinitialized,
                     .dst_layout = .transfer_src_optimal,
+                    .src_queue = self.device.queue_graphics,
+                    .dst_queue = self.device.queue_graphics,
                 }),
                 self.image.barrier(.{
                     .src_stage_mask = .{ .all_commands_bit = true },
@@ -92,6 +94,8 @@ pub const TextureLayer = struct {
                     .dst_access_mask = .{ .memory_write_bit = true },
                     .src_layout = .undefined,
                     .dst_layout = .transfer_dst_optimal,
+                    .src_queue = self.device.queue_graphics,
+                    .dst_queue = self.device.queue_graphics,
                 }),
             },
         });
@@ -121,6 +125,8 @@ pub const TextureLayer = struct {
                 .dst_access_mask = .{ .shader_read_bit = true },
                 .src_layout = .transfer_dst_optimal,
                 .dst_layout = .shader_read_only_optimal,
+                .src_queue = self.device.queue_graphics,
+                .dst_queue = self.device.queue_graphics,
                 .subresource_range = .{
                     .base_array_layer = 0,
                     .layer_count = 1,
@@ -133,7 +139,7 @@ pub const TextureLayer = struct {
         const fence = try zvk.Fence.init(self.cmd.device, false);
         defer fence.deinit();
 
-        try self.device.queue_gpu_comp.submit(.{ .cmds = &.{self.cmd}, .fence = fence });
+        try self.device.queue_graphics.submit(.{ .cmds = &.{self.cmd}, .fence = fence });
         try fence.wait();
 
         defer self.last_index += 1;
@@ -164,8 +170,7 @@ pub const TextureLayer = struct {
     }
 };
 
-pub fn init(device: *zvk.Device, paths: []const []const u8, decoder: anytype) !@This() {
-    _ = decoder; // autofix
+pub fn init(device: *zvk.Device, paths: []const []const u8, _: anytype) !@This() {
     var extents = std.ArrayList(struct { extent: @Vector(2, u32), count: u32 }).init(device.allocator);
     defer extents.deinit();
 

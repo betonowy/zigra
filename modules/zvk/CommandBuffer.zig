@@ -6,12 +6,13 @@ const vk = @import("vk");
 
 const Buffer = @import("Buffer.zig");
 const CommandPool = @import("CommandPool.zig");
+const DescriptorSet = @import("DescriptorSet.zig");
 const Device = @import("Device.zig");
+const Event = @import("Event.zig");
 const Image = @import("Image.zig");
+const ImageView = @import("ImageView.zig");
 const Pipeline = @import("Pipeline.zig");
 const PipelineLayout = @import("PipelineLayout.zig");
-const DescriptorSet = @import("DescriptorSet.zig");
-const ImageView = @import("ImageView.zig");
 
 device: *Device,
 pool: vk.CommandPool,
@@ -369,4 +370,42 @@ pub fn cmdViewport(self: @This(), in: []const Viewport) !void {
     });
 
     self.device.api.cmdSetViewport(self.handle, 0, @intCast(out.len), out.constSlice().ptr);
+}
+
+pub const CmdSetEvent = struct {
+    flags: vk.DependencyFlags = .{},
+    memory: []const vk.MemoryBarrier2 = &.{},
+    buffer: []const vk.BufferMemoryBarrier2 = &.{},
+    image: []const vk.ImageMemoryBarrier2 = &.{},
+};
+
+pub fn cmdSetEvent(self: @This(), event: Event, info: CmdSetEvent) void {
+    self.device.api.cmdSetEvent2(self.handle, event.handle, &.{
+        .dependency_flags = info.flags,
+        .memory_barrier_count = @intCast(info.memory.len),
+        .p_memory_barriers = info.memory.ptr,
+        .buffer_memory_barrier_count = @intCast(info.buffer.len),
+        .p_buffer_memory_barriers = info.buffer.ptr,
+        .image_memory_barrier_count = @intCast(info.image.len),
+        .p_image_memory_barriers = info.image.ptr,
+    });
+}
+
+pub const CmdWaitEvent = struct {
+    flags: vk.DependencyFlags = .{},
+    memory: []const vk.MemoryBarrier2 = &.{},
+    buffer: []const vk.BufferMemoryBarrier2 = &.{},
+    image: []const vk.ImageMemoryBarrier2 = &.{},
+};
+
+pub fn cmdWaitEvent(self: @This(), event: Event, info: CmdWaitEvent) void {
+    self.device.api.cmdWaitEvents2(self.handle, 1, &.{event.handle}, &.{.{
+        .dependency_flags = info.flags,
+        .memory_barrier_count = @intCast(info.memory.len),
+        .p_memory_barriers = info.memory.ptr,
+        .buffer_memory_barrier_count = @intCast(info.buffer.len),
+        .p_buffer_memory_barriers = info.buffer.ptr,
+        .image_memory_barrier_count = @intCast(info.image.len),
+        .p_image_memory_barriers = info.image.ptr,
+    }});
 }

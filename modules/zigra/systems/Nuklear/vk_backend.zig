@@ -96,8 +96,8 @@ pub fn renderText(_: *nk.Context, cmd: *const nk.CommandText, m: *root.Modules) 
             },
         };
 
-        try m.vulkan.pushGuiTriangle(vertices[0..3]);
-        try m.vulkan.pushGuiTriangle(vertices[1..4]);
+        try m.vulkan.pushGuiVertices(vertices[0..3]);
+        try m.vulkan.pushGuiVertices(vertices[1..4]);
     }
 }
 
@@ -138,8 +138,8 @@ pub fn renderRectFilled(_: *nk.Context, cmd: *const nk.CommandRectFilled, m: *ro
         v.uv = @splat(std.math.nan(f32));
     }
 
-    try m.vulkan.pushGuiTriangle(vertices[0..3]);
-    try m.vulkan.pushGuiTriangle(vertices[1..4]);
+    try m.vulkan.pushGuiVertices(vertices[0..3]);
+    try m.vulkan.pushGuiVertices(vertices[1..4]);
 }
 
 fn renderRectEdge(
@@ -158,8 +158,8 @@ fn renderRectEdge(
         .{ .col = color, .pos = p_b + c_b, .uv = @splat(std.math.nan(f32)), .tex_ref = undefined },
     };
 
-    try m.vulkan.pushGuiTriangle(edge[0..3]);
-    try m.vulkan.pushGuiTriangle(edge[1..4]);
+    try m.vulkan.pushGuiVertices(edge[0..3]);
+    try m.vulkan.pushGuiVertices(edge[1..4]);
 }
 
 pub fn renderRect(nk_ctx: *nk.Context, cmd: *const nk.CommandRect, m: *root.Modules) !void {
@@ -207,7 +207,7 @@ pub fn renderTriangleFilled(_: *nk.Context, cmd: *const nk.CommandTriangleFilled
         },
     };
 
-    try m.vulkan.pushGuiTriangle(vertices[0..]);
+    try m.vulkan.pushGuiVertices(vertices[0..]);
 }
 
 pub fn renderLine(_: *nk.Context, cmd: *const nk.CommandLine, m: *root.Modules) !void {
@@ -248,8 +248,8 @@ pub fn renderLine(_: *nk.Context, cmd: *const nk.CommandLine, m: *root.Modules) 
         },
     };
 
-    try m.vulkan.pushGuiTriangle(vertices[0..3]);
-    try m.vulkan.pushGuiTriangle(vertices[1..4]);
+    try m.vulkan.pushGuiVertices(vertices[0..3]);
+    try m.vulkan.pushGuiVertices(vertices[1..4]);
 }
 
 pub fn renderCircleFilled(_: *nk.Context, cmd: *const nk.CommandCircleFilled, m: *root.Modules) !void {
@@ -301,7 +301,7 @@ pub fn renderCircleFilled(_: *nk.Context, cmd: *const nk.CommandCircleFilled, m:
             },
         };
 
-        try m.vulkan.pushGuiTriangle(vertices[0..]);
+        try m.vulkan.pushGuiVertices(vertices[0..]);
     }
 }
 
@@ -341,6 +341,6 @@ pub fn renderImage(_: *nk.Context, cmd: *const nk.CommandImage, m: *root.Modules
         },
     };
 
-    try m.vulkan.pushGuiTriangle(vertices[0..3]);
-    try m.vulkan.pushGuiTriangle(vertices[1..4]);
+    try m.vulkan.pushGuiVertices(vertices[0..3]);
+    try m.vulkan.pushGuiVertices(vertices[1..4]);
 }

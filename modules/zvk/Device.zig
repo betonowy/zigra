@@ -16,28 +16,43 @@ allocator: std.mem.Allocator,
 api: vk_api.Device,
 handle: vk.Device,
 pd: PhysicalDevice,
-queue_gpu_comp: Queue,
+queue_graphics: Queue,
+queue_compute: Queue,
 queue_present: Queue,
 
 pub fn init(
     instance: *const Instance,
     pd: PhysicalDevice,
-    gpu_comp_qf: QueueFamily,
+    graphics_qf: QueueFamily,
+    compute_qf: QueueFamily,
     present_qf: QueueFamily,
 ) !*@This() {
     const basic_priority = [_]f32{1.0};
-    const queue_create_infos = [_]vk.DeviceQueueCreateInfo{
+
+    var queue_create_infos = std.BoundedArray(vk.DeviceQueueCreateInfo, 3){};
+
+    queue_create_infos.appendSliceAssumeCapacity(&.{
         .{
-            .queue_family_index = gpu_comp_qf.index,
+            .queue_family_index = graphics_qf.index,
             .queue_count = 1,
             .p_queue_priorities = &basic_priority,
         },
         .{
-            .queue_family_index = present_qf.index,
+            .queue_family_index = compute_qf.index,
             .queue_count = 1,
             .p_queue_priorities = &basic_priority,
         },
-    };
+    });
+
+    if (present_qf.index != graphics_qf.index) {
+        queue_create_infos.appendSliceAssumeCapacity(&.{
+            .{
+                .queue_family_index = present_qf.index,
+                .queue_count = 1,
+                .p_queue_priorities = &basic_priority,
+            },
+        });
+    }
 
     const vulkan_12_features = vk.PhysicalDeviceVulkan12Features{
         .runtime_descriptor_array = vk.TRUE,
@@ -56,8 +71,8 @@ pub fn init(
     const required_device_extensions = [_][*:0]const u8{"VK_KHR_swapchain"};
 
     const device = try instance.vki.createDevice(pd.handle, &.{
-        .p_queue_create_infos = &queue_create_infos,
-        .queue_create_info_count = 1,
+        .p_queue_create_infos = queue_create_infos.constSlice().ptr,
+        .queue_create_info_count = @intCast(queue_create_infos.len),
         .p_enabled_features = &.{ .sampler_anisotropy = vk.TRUE },
         .enabled_extension_count = @intCast(required_device_extensions.len),
         .pp_enabled_extension_names = &required_device_extensions,
@@ -73,7 +88,8 @@ pub fn init(
 
     const p_self = try instance.allocator.create(@This());
 
-    const queue_gpu_comp = api.getDeviceQueue(device, gpu_comp_qf.index, 0);
+    const queue_graphics = api.getDeviceQueue(device, graphics_qf.index, 0);
+    const queue_compute = api.getDeviceQueue(device, compute_qf.index, 0);
     const queue_present = api.getDeviceQueue(device, present_qf.index, 0);
 
     p_self.* = .{
@@ -81,7 +97,8 @@ pub fn init(
         .api = api,
         .allocator = instance.allocator,
         .pd = pd,
-        .queue_gpu_comp = .{ .device = p_self, .family = gpu_comp_qf, .handle = queue_gpu_comp },
+        .queue_graphics = .{ .device = p_self, .family = graphics_qf, .handle = queue_graphics },
+        .queue_compute = .{ .device = p_self, .family = compute_qf, .handle = queue_compute },
         .queue_present = .{ .device = p_self, .family = present_qf, .handle = queue_present },
     };
 

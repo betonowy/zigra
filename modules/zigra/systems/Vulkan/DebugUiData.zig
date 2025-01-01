@@ -6,7 +6,6 @@ const shader_io = @import("shader_io.zig");
 
 vertices: std.ArrayList(shader_io.Vertex),
 blocks: std.ArrayList(GuiBlock),
-
 buffer: DrawBuffer.Type(shader_io.Vertex),
 
 pub const GuiBlock = union(enum) {
@@ -28,7 +27,7 @@ pub fn init(device: *zvk.Device) !@This() {
     return .{
         .vertices = std.ArrayList(shader_io.Vertex).init(device.allocator),
         .blocks = std.ArrayList(GuiBlock).init(device.allocator),
-        .buffer = try DrawBuffer.init(shader_io.Vertex, device, 0x10000),
+        .buffer = try DrawBuffer.init(shader_io.Vertex, device, 256),
     };
 }
 
@@ -38,7 +37,7 @@ pub fn deinit(self: @This()) void {
     self.buffer.deinit();
 }
 
-pub fn pushTriangles(self: *@This(), data: []const shader_io.Vertex) !void {
+pub fn pushVertices(self: *@This(), data: []const shader_io.Vertex) !void {
     const last_ptr = switch (self.blocks.items.len) {
         else => &self.blocks.items[self.blocks.items.len - 1],
         0 => null,
@@ -91,7 +90,8 @@ pub fn clear(self: *@This()) void {
     self.vertices.clearRetainingCapacity();
 }
 
-pub fn cmdUpdateHostToDevice(self: *@This(), cmd_buf: zvk.CommandBuffer) !void {
-    try self.buffer.bufferData(self.vertices.items);
-    try self.buffer.cmdUpdateHostToDevice(cmd_buf);
+pub fn bufferData(self: *@This()) !bool {
+    const invalidated = try self.buffer.bufferData(self.vertices.items);
+    try self.buffer.flush(0, self.buffer.buffer.options.size);
+    return invalidated;
 }

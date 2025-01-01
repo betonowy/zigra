@@ -99,7 +99,7 @@ pub fn createFrameSet(self: @This(), frame: FrameResources) !zvk.DescriptorSet {
         frame.ubo.getDescriptorSetWrite(ds, 0),
         frame.im.getDescriptorSetWrite(ds, .{
             .binding = 1,
-            .layout = .general,
+            .layout = .shader_read_only_optimal,
             .type = .combined_image_sampler,
             .sampler = frame.sampler,
         }),
@@ -115,7 +115,7 @@ pub fn createFrameSet(self: @This(), frame: FrameResources) !zvk.DescriptorSet {
 }
 
 pub fn cmdRender(self: @This(), frame: *Frame, swapchain: zvk.Swapchain, image_index: u32) !void {
-    try frame.cmd.cmdBeginRendering(.{
+    try frame.cmds.gfx_present.cmdBeginRendering(.{
         .render_area = .{ .offset = .{ 0, 0 }, .extent = swapchain.extent },
         .color_attachments = &.{.{
             .view = .{ .handle = swapchain.views[image_index], .device = undefined },
@@ -126,26 +126,15 @@ pub fn cmdRender(self: @This(), frame: *Frame, swapchain: zvk.Swapchain, image_i
         }},
     });
 
-    frame.cmd.cmdBindPipeline(.graphics, self.pipeline);
+    frame.cmds.gfx_present.cmdBindPipeline(.graphics, self.pipeline);
 
-    try frame.cmd.cmdBindDescriptorSets(.graphics, self.layout, .{
+    try frame.cmds.gfx_present.cmdBindDescriptorSets(.graphics, self.layout, .{
         .slice = &.{frame.sets.compose_present},
     }, .{});
 
-    try frame.cmd.cmdScissor(&.{.{ .size = swapchain.extent }});
-    try frame.cmd.cmdViewport(&.{.{ .size = @floatFromInt(swapchain.extent) }});
-    frame.cmd.cmdDraw(.{ .vertices = 3, .instances = 1 });
+    try frame.cmds.gfx_present.cmdScissor(&.{.{ .size = swapchain.extent }});
+    try frame.cmds.gfx_present.cmdViewport(&.{.{ .size = @floatFromInt(swapchain.extent) }});
+    frame.cmds.gfx_present.cmdDraw(.{ .vertices = 3, .instances = 1 });
 
-    frame.cmd.cmdEndRendering();
-
-    frame.cmd.cmdPipelineBarrier(.{
-        .image = &.{frame.images.render_bkg.barrier(.{
-            .src_access_mask = .{ .shader_write_bit = true },
-            .src_stage_mask = .{ .compute_shader_bit = true },
-            .dst_access_mask = .{ .shader_read_bit = true },
-            .dst_stage_mask = .{ .compute_shader_bit = true },
-            .src_layout = .general,
-            .dst_layout = .general,
-        })},
-    });
+    frame.cmds.gfx_present.cmdEndRendering();
 }

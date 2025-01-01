@@ -118,45 +118,45 @@ pub fn createFrameSet(self: @This(), frame: FrameResources) !zvk.DescriptorSet {
 
 pub fn cmdRender(self: @This(), frame: *Frame) !void {
     const extent = @Vector(2, u32){
-        frame.images.render_albedo.options.extent[0],
-        frame.images.render_albedo.options.extent[1],
+        frame.images.render_world_albedo.options.extent[0],
+        frame.images.render_world_albedo.options.extent[1],
     };
 
-    try frame.cmd.cmdBeginRendering(.{
+    try frame.cmds.gfx_render.cmdBeginRendering(.{
         .render_area = .{ .offset = .{ 0, 0 }, .extent = extent },
         .color_attachments = &.{.{
-            .view = .{ .handle = frame.views.render_albedo.handle, .device = undefined },
-            .load_op = .load,
+            .view = .{ .handle = frame.views.render_world_albedo.handle, .device = undefined },
+            .load_op = .clear,
             .store_op = .store,
             .clear_value = .{ .color = .{ .float_32 = .{ 0, 0, 0, 0 } } },
             .layout = .color_attachment_optimal,
         }},
     });
 
-    frame.cmd.cmdBindPipeline(.graphics, self.pipeline);
+    frame.cmds.gfx_render.cmdBindPipeline(.graphics, self.pipeline);
 
-    try frame.cmd.cmdBindDescriptorSets(.graphics, self.layout, .{
+    try frame.cmds.gfx_render.cmdBindDescriptorSets(.graphics, self.layout, .{
         .slice = &.{frame.sets.render_world},
     }, .{});
 
-    try frame.cmd.cmdViewport(&.{.{ .size = @floatFromInt(extent) }});
-    try frame.cmd.cmdScissor(&.{.{ .size = extent }});
+    try frame.cmds.gfx_render.cmdViewport(&.{.{ .size = @floatFromInt(extent) }});
+    try frame.cmds.gfx_render.cmdScissor(&.{.{ .size = extent }});
 
-    frame.cmd.cmdDraw(.{
+    frame.cmds.gfx_render.cmdDraw(.{
         .vertices = @intCast(frame.dbs.world.vertices.items.len),
         .instances = 1,
     });
 
-    frame.cmd.cmdEndRendering();
+    frame.cmds.gfx_render.cmdEndRendering();
 
-    frame.cmd.cmdPipelineBarrier(.{
-        .image = &.{frame.images.render_albedo.barrier(.{
+    frame.cmds.gfx_render.cmdPipelineBarrier(.{
+        .image = &.{frame.images.render_world_albedo.barrier(.{
             .src_access_mask = .{ .color_attachment_write_bit = true },
             .src_stage_mask = .{ .color_attachment_output_bit = true },
-            .dst_access_mask = .{ .shader_read_bit = true },
-            .dst_stage_mask = .{ .fragment_shader_bit = true },
             .src_layout = .color_attachment_optimal,
             .dst_layout = .general,
+            .src_queue = self.device.queue_graphics,
+            .dst_queue = self.device.queue_graphics,
         })},
     });
 }

@@ -77,19 +77,19 @@ pub fn setCameraPosition(self: *@This(), pos: @Vector(2, i32)) void {
 pub const BkgEntry = shader_io.Ubo.Background.Entry;
 
 pub fn pushBkgEntry(self: *@This(), entry: BkgEntry) !void {
-    try self.impl.scheduleBkgEntry(entry);
+    try self.impl.upload_bkg_layers.append(entry);
 }
 
 pub const WorldVertex = shader_io.Vertex;
 
 pub fn pushWorldVertices(self: *@This(), vertices: []const WorldVertex) !void {
-    try self.impl.currentFrameDataPtr().dbs.world.pushTriangles(vertices);
+    try self.impl.currentFrameDataPtr().dbs.world.pushVertices(vertices);
 }
 
 pub const GuiVertex = shader_io.Vertex;
 
-pub fn pushGuiTriangle(self: *@This(), data: []const GuiVertex) !void {
-    try self.impl.currentFrameDataPtr().dbs.dui.pushTriangles(data);
+pub fn pushGuiVertices(self: *@This(), data: []const GuiVertex) !void {
+    try self.impl.currentFrameDataPtr().dbs.dui.pushVertices(data);
 }
 
 pub const GuiScissor = @import("Vulkan/DebugUiData.zig").GuiBlock.Scissor;

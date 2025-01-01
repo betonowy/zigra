@@ -29,6 +29,9 @@ surface: Surface,
 format: vk.Format,
 extent: @Vector(2, u32),
 
+graphics_qf: QueueFamily,
+present_qf: QueueFamily,
+
 images: []vk.Image,
 views: []vk.ImageView,
 
@@ -42,6 +45,8 @@ pub fn init(
     pd: PhysicalDevice,
     device: *Device,
     surface: Surface,
+    graphics_qf: QueueFamily,
+    present_qf: QueueFamily,
 ) !@This() {
     var arena = std.heap.ArenaAllocator.init(instance.allocator);
     defer arena.deinit();
@@ -103,9 +108,6 @@ pub fn init(
     if (sc_query.capabilities.max_image_count > 0) {
         image_count = @min(image_count, sc_query.capabilities.max_image_count);
     }
-
-    const graphics_qf = try pd.graphicsComputeQueueFamily();
-    const present_qf = try pd.presentQueueFamily(surface);
 
     const is_one_queue = graphics_qf.index == present_qf.index;
     const indices = [_]u32{ graphics_qf.index, present_qf.index };
@@ -187,6 +189,8 @@ pub fn init(
         .sem_finished = sem_finished_owned,
         .instance = instance,
         .surface = surface,
+        .graphics_qf = graphics_qf,
+        .present_qf = present_qf,
     };
 }
 
@@ -255,7 +259,15 @@ pub fn present(self: *@This(), image_index: u32) !bool {
 
 pub fn recreate(self: *@This()) !void {
     self.deinit();
-    self.* = try init(self.instance, self.device.pd, self.device, self.surface);
+
+    self.* = try init(
+        self.instance,
+        self.device.pd,
+        self.device,
+        self.surface,
+        self.graphics_qf,
+        self.present_qf,
+    );
 }
 
 pub fn cmdImageAcquireBarrier(self: *@This(), cmd: CommandBuffer, image_index: u32) void {
@@ -273,8 +285,8 @@ pub fn cmdImageAcquireBarrier(self: *@This(), cmd: CommandBuffer, image_index: u
             .layer_count = vk.REMAINING_MIP_LEVELS,
             .level_count = vk.REMAINING_ARRAY_LAYERS,
         },
-        .src_queue_family_index = self.device.queue_gpu_comp.family.index,
-        .dst_queue_family_index = self.device.queue_gpu_comp.family.index,
+        .src_queue_family_index = self.device.queue_graphics.family.index,
+        .dst_queue_family_index = self.device.queue_graphics.family.index,
         .image = self.images[image_index],
     };
 
@@ -296,8 +308,8 @@ pub fn cmdImagePresentBarrier(self: *@This(), cmd: CommandBuffer, image_index: u
             .layer_count = vk.REMAINING_MIP_LEVELS,
             .level_count = vk.REMAINING_ARRAY_LAYERS,
         },
-        .src_queue_family_index = self.device.queue_gpu_comp.family.index,
-        .dst_queue_family_index = self.device.queue_gpu_comp.family.index,
+        .src_queue_family_index = self.device.queue_graphics.family.index,
+        .dst_queue_family_index = self.device.queue_graphics.family.index,
         .image = self.images[image_index],
     };
 
