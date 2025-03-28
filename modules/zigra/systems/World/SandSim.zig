@@ -1121,7 +1121,7 @@ test "Minimal lifetime" {
         try std.testing.expectEqual(4, count);
 
         var tiles: [4]*Tile = undefined;
-        const filled = try self.fillTilesFromArea(extent, tiles[0..]);
+        const filled = self.fillTilesFromArea(extent, tiles[0..]);
         try std.testing.expectEqual(4, filled.len);
     }
     {
@@ -1134,28 +1134,28 @@ test "Minimal lifetime" {
 
         try self.loadFromBuffer(.{ .coord = .{ -16, -16 }, .size = .{ 24, 24 } }, buffer[0..]);
         {
-            const tile = (try self.fillTilesFromArea(.{ .coord = .{ -16, -16 }, .size = .{ 16, 16 } }, &tiles))[0];
+            const tile = (self.fillTilesFromArea(.{ .coord = .{ -16, -16 }, .size = .{ 16, 16 } }, &tiles))[0];
 
             try std.testing.expectEqual(0, tile.liquid_count);
             try std.testing.expectEqual(0, tile.powder_count);
             try std.testing.expectEqual(16 * 16 / 2, tile.solid_count);
         }
         {
-            const tile = (try self.fillTilesFromArea(.{ .coord = .{ 0, -16 }, .size = .{ 8, 16 } }, &tiles))[0];
+            const tile = (self.fillTilesFromArea(.{ .coord = .{ 0, -16 }, .size = .{ 8, 16 } }, &tiles))[0];
 
             try std.testing.expectEqual(0, tile.liquid_count);
             try std.testing.expectEqual(0, tile.powder_count);
             try std.testing.expectEqual(8 * 16 / 2, tile.solid_count);
         }
         {
-            const tile = (try self.fillTilesFromArea(.{ .coord = .{ -16, 0 }, .size = .{ 16, 8 } }, &tiles))[0];
+            const tile = (self.fillTilesFromArea(.{ .coord = .{ -16, 0 }, .size = .{ 16, 8 } }, &tiles))[0];
 
             try std.testing.expectEqual(0, tile.liquid_count);
             try std.testing.expectEqual(0, tile.powder_count);
             try std.testing.expectEqual(16 * 8 / 2, tile.solid_count);
         }
         {
-            const tile = (try self.fillTilesFromArea(.{ .coord = .{ 0, 0 }, .size = .{ 8, 8 } }, &tiles))[0];
+            const tile = (self.fillTilesFromArea(.{ .coord = .{ 0, 0 }, .size = .{ 8, 8 } }, &tiles))[0];
 
             try std.testing.expectEqual(0, tile.liquid_count);
             try std.testing.expectEqual(0, tile.powder_count);

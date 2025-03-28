@@ -22,7 +22,7 @@ test "isVector" {
 
 pub fn isMatrix(T: type) bool {
     return switch (@typeInfo(T)) {
-        .array => |array| if (array.sentinel == null) isVector(array.child) else false,
+        .array => |array| if (array.sentinel_ptr == null) isVector(array.child) else false,
         else => false,
     };
 }

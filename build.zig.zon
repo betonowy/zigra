@@ -1,7 +1,7 @@
 .{
     .name = .zigra,
     .version = "0.1.0",
-    .minimum_zig_version = "0.14.0-dev.2457+82f35c518",
+    .minimum_zig_version = "0.15.0-dev.137+db7db4802",
     .fingerprint = 0x594a20e5179875ad,
     .dependencies = .{
         .mach_glfw = .{

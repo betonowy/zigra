@@ -16,7 +16,7 @@ pub fn init(device: *zvk.Device, swapchain: zvk.Swapchain) !@This() {
     const descriptor_pool = try zvk.DescriptorPool.init(device, .{
         .flags = .{ .free_descriptor_set_bit = true },
         .max_sets = 2,
-        .n_combined_image_samplers = 1,
+        .n_combined_image_samplers = 2,
         .n_uniform_buffers = 1,
     });
     errdefer descriptor_pool.deinit();

@@ -15,7 +15,7 @@ pub fn UnwrapOptionals(comptime T: type) type {
             else => {},
             .optional => |opt| {
                 tmp_field.type = opt.child;
-                tmp_field.default_value = null;
+                tmp_field.default_value_ptr = null;
             },
         }
     }
