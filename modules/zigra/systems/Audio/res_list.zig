@@ -8,4 +8,7 @@ pub const sounds = [_][]const u8{
 
 pub const music = [_][]const u8{
     "music/t01.ogg",
+    "music/spiral.xm",
+    "music/frontier.xm",
+    "music/good_morning.xm",
 };

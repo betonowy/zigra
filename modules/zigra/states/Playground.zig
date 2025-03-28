@@ -44,7 +44,7 @@ pub fn enter(self: *@This(), _: *root.Sequencer, m: *root.Modules) !void {
     self.id_channel = try m.net.registerChannel(systems.Net.Channel.init(self));
     errdefer m.net.unregisterChannel(self.id_channel);
 
-    const id_sound = m.audio.streams_slut.get("music/t01.ogg") orelse unreachable;
+    const id_sound = m.audio.streams_slut.get("music/frontier.xm") orelse unreachable;
     try m.audio.mixer.playMusic(id_sound);
 
     _ = try m.background.createId(.{

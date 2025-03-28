@@ -1,10 +1,12 @@
 const std = @import("std");
 const stb = @import("stb");
+const modplug = @import("modplug");
 
 pub const Stream = struct {
     variant: union(enum) {
         mem: MemoryStream,
         file: FileStream,
+        module: ModuleStream,
     },
 
     pub const InitOptions = struct {
@@ -12,6 +14,10 @@ pub const Stream = struct {
     };
 
     pub fn initFromFile(allocator: std.mem.Allocator, path: []const u8, options: InitOptions) !@This() {
+        if (std.mem.endsWith(u8, path, ".xm")) {
+            return .{ .variant = .{ .module = try ModuleStream.initFromFile(allocator, path) } };
+        }
+
         if (options.stream) {
             return .{ .variant = .{ .file = try FileStream.initFromFile(allocator, path) } };
         } else {
@@ -23,6 +29,7 @@ pub const Stream = struct {
         switch (self.variant) {
             .mem => |*m| m.deinit(),
             .file => |*f| f.deinit(),
+            .module => |*m| m.deinit(),
         }
     }
 
@@ -30,6 +37,7 @@ pub const Stream = struct {
         return switch (self.variant) {
             .mem => |*m| m.reader(),
             .file => |*f| f.reader(),
+            .module => |*m| m.reader(),
         };
     }
 
@@ -37,12 +45,14 @@ pub const Stream = struct {
         variant: union(enum) {
             mem: MemoryStream.Reader,
             file: FileStream.Reader,
+            module: ModuleStream.Reader,
         },
 
         pub fn deinit(self: *@This()) void {
             switch (self.variant) {
                 .mem => |*m| m.deinit(),
                 .file => |*f| f.deinit(),
+                .module => |*m| m.deinit(),
             }
         }
 
@@ -50,6 +60,7 @@ pub const Stream = struct {
             return switch (self.variant) {
                 .mem => |*m| m.seek(sample),
                 .file => |*f| f.seek(sample),
+                .module => |*m| m.seek(sample),
             };
         }
 
@@ -61,6 +72,7 @@ pub const Stream = struct {
             return switch (self.variant) {
                 .mem => |*m| m.readMono(samples),
                 .file => |*f| f.readMono(samples),
+                .module => |*m| m.readMono(samples),
             };
         }
 
@@ -68,6 +80,7 @@ pub const Stream = struct {
             return switch (self.variant) {
                 .mem => |*m| m.readStereo(samples),
                 .file => |*f| f.readStereo(samples),
+                .module => |*m| m.readStereo(samples),
             };
         }
 
@@ -75,6 +88,7 @@ pub const Stream = struct {
             return switch (self.variant) {
                 .mem => |*m| m.channels(),
                 .file => |*f| f.channels(),
+                .module => |*m| m.channels(),
             };
         }
     };
@@ -224,13 +238,46 @@ const FileStream = struct {
     };
 };
 
-// TODO libxm is probably a good enough candidate to implement that
-//
-// const XmStream = struct {
-//     xm_stream: void,
+const ModuleStream = struct {
+    file: modplug.File,
+    users: usize = 0,
 
-//     pub fn initFromFile(allocator: std.mem.Allocator, path: []const u8) !@This() {
-//         _ = allocator; // autofix
-//         _ = path; // autofix
-//     }
-// };
+    pub fn initFromFile(allocator: std.mem.Allocator, path: []const u8) !@This() {
+        return .{ .file = try modplug.File.init(allocator, path) };
+    }
+
+    pub fn deinit(self: @This()) void {
+        if (self.users > 0) unreachable;
+        self.file.deinit();
+    }
+
+    pub fn reader(self: *@This()) Stream.Reader {
+        if (self.users != 0) unreachable;
+        self.users += 1;
+        return .{ .variant = .{ .module = .{ .parent = self } } };
+    }
+
+    pub const Reader = struct {
+        parent: *ModuleStream,
+
+        pub fn deinit(self: *@This()) void {
+            self.parent.users -= 1;
+        }
+
+        pub fn seek(self: *@This(), sample: usize) !void {
+            try self.parent.file.seek(sample);
+        }
+
+        pub fn readMono(self: *@This(), samples: []f32) []f32 {
+            return self.parent.file.readMono(samples);
+        }
+
+        pub fn readStereo(self: *@This(), samples: []@Vector(2, f32)) []@Vector(2, f32) {
+            return self.parent.file.readStereo(samples);
+        }
+
+        pub fn channels(self: *const @This()) u8 {
+            return self.parent.file.channels();
+        }
+    };
+};

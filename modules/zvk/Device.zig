@@ -81,10 +81,10 @@ pub fn init(
         .p_next = &dynamic_rendering_feature,
     }, null);
     errdefer vk_api.Device
-        .loadNoFail(device, instance.vki.dispatch.vkGetDeviceProcAddr)
+        .load(device, instance.vki.dispatch.vkGetDeviceProcAddr.?)
         .destroyDevice(device, null);
 
-    const api = try vk_api.Device.load(device, instance.vki.dispatch.vkGetDeviceProcAddr);
+    const api = vk_api.Device.load(device, instance.vki.dispatch.vkGetDeviceProcAddr.?);
 
     const p_self = try instance.allocator.create(@This());
 

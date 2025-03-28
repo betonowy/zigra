@@ -42,7 +42,7 @@ pub fn init(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    const vkb = try vk_api.Base.load(get_proc_addr);
+    const vkb = vk_api.Base.load(get_proc_addr);
 
     const debug_extension = "VK_EXT_debug_utils";
 
@@ -80,19 +80,19 @@ pub fn init(
         .pp_enabled_layer_names = layers.items.ptr,
         .p_application_info = &.{
             .p_application_name = "Zigra",
-            .application_version = vk.makeApiVersion(0, 0, 1, 0),
+            .application_version = @bitCast(vk.makeApiVersion(0, 0, 1, 0)),
             .p_engine_name = "Zigra",
-            .engine_version = vk.makeApiVersion(0, 0, 1, 0),
-            .api_version = vk.API_VERSION_1_3,
+            .engine_version = @bitCast(vk.makeApiVersion(0, 0, 1, 0)),
+            .api_version = @bitCast(vk.API_VERSION_1_3),
         },
     }, if (info.vk_allocator) |vka| &vka.cbs else null);
-    errdefer vk_api.Instance.loadNoFail(instance, get_proc_addr).destroyInstance(instance, null);
+    errdefer vk_api.Instance.load(instance, get_proc_addr).destroyInstance(instance, null);
 
     const vki = try allocator.create(vk_api.Instance);
     errdefer allocator.destroy(vki);
 
-    vki.* = try vk_api.Instance.load(instance, get_proc_addr);
-    const vk_debug_msg = if (options.request_debug_utils) try vk_api.DebugMsg.load(instance, get_proc_addr) else null;
+    vki.* = vk_api.Instance.load(instance, get_proc_addr);
+    const vk_debug_msg = if (options.request_debug_utils) vk_api.DebugMsg.load(instance, get_proc_addr) else null;
 
     const p_self = try allocator.create(@This());
     errdefer allocator.destroy(p_self);

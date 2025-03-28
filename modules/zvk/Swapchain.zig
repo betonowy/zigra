@@ -160,7 +160,7 @@ pub fn init(
     errdefer sem_finished.deinit();
     errdefer for (sem_finished.items) |sem| sem.deinit();
 
-    for (views.items.len) |_| {
+    for (0..views.items.len) |_| {
         sem_acquired.appendAssumeCapacity(try Semaphore.init(device, .{}));
         sem_finished.appendAssumeCapacity(try Semaphore.init(device, .{}));
     }

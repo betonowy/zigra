@@ -74,13 +74,15 @@ pub fn build(b: *std.Build) !void {
     mod_lifetime.addImport("tracy", mod_tracy);
     mod_lifetime.addImport("options", mod_options);
 
+    const lib_modplug = thirdparty.modplug.lib(b, optimize, target);
+
     const step_gen_glsl = gen_glsl.step(b);
     const step_gen_spv = gen_spv.step(b, step_gen_glsl);
     const mod_spv = gen_spv.module(b);
 
     const mod_zigra = b.createModule(.{ .root_source_file = b.path("modules/zigra/root.zig") });
     mod_zigra.addIncludePath(b.path("thirdparty/stb"));
-    mod_zigra.addImport("glfw", dep_glfw.module("mach-glfw"));
+    mod_zigra.addImport("glfw", dep_glfw.module("glfw"));
     mod_zigra.addImport("vk", mod_vk);
     mod_zigra.addImport("options", mod_options);
     mod_zigra.addImport("nuklear", mod_nuklear);
@@ -94,7 +96,7 @@ pub fn build(b: *std.Build) !void {
     mod_zigra.addImport("enet", mod_enet);
     mod_zigra.addImport("zaudio", mod_zaudio);
     mod_zigra.addImport("zvk", mod_zvk);
-    // shaders.addImports(mod_zigra, shaders.objects(b));
+    mod_zigra.addImport("modplug", lib_modplug.root_module);
 
     const exe = b.addExecutable(.{
         .name = "zigra",

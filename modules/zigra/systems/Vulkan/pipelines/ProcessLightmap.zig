@@ -114,7 +114,7 @@ pub fn cmdRender(self: @This(), frame: *Frame, resources: Resources, extra_loops
         .image_out = resources.image_lm_b,
     });
 
-    for (extra_loops) |_| {
+    for (0..extra_loops) |_| {
         try self.cmdLoopProcess(frame, .{
             .set_in = resources.set_lm_b,
             .set_out = resources.set_lm_a,

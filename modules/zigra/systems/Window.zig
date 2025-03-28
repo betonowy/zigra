@@ -147,7 +147,7 @@ fn vkCbCreateWindowSurface(child_ptr: *const zvk.WindowCallbacks, instance: vk.I
     var surface: vk.SurfaceKHR = undefined;
 
     const result = @as(vk.Result, @enumFromInt(
-        glfw.createWindowSurface(instance, self.window, null, &surface),
+        glfw.createWindowSurface(instance, self.window, @as(?*anyopaque, null), &surface),
     ));
 
     if (result != .success) return error.GlfwCreateWindowSurface;

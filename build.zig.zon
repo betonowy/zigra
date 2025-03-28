@@ -1,31 +1,36 @@
 .{
-    .name = "zigra",
+    .name = .zigra,
     .version = "0.1.0",
     .minimum_zig_version = "0.14.0-dev.2457+82f35c518",
+    .fingerprint = 0x594a20e5179875ad,
     .dependencies = .{
         .mach_glfw = .{
-            .url = "https://github.com/slimsag/mach-glfw/archive/affdd6ae6f2ac2c3b9162784bdad345c561eeeea.tar.gz",
-            .hash = "122022ea6df16700e521078c20d7d01f894c6f967e6c6ce1ea166426b4fc61667de3",
+            .url = "https://github.com/falsepattern/zig-glfw/archive/d7d336a606040cac8dde395a33ac5b02bd8d5c6d.tar.gz",
+            .hash = "glfw-0.3.0-YPzX96IuBQAxnlG-CIYgD6I-I47XwiJHRmjkKP--t_zv",
         },
         .vulkan_zig = .{
-            .url = "https://github.com/Snektron/vulkan-zig/archive/dd6e61d68954a2eaa476044305dc227081a8d3fe.tar.gz",
-            .hash = "122064f889ea10097a67fc28744fe95d0bfde9af252de147a9b90aa55cecfc30c01c",
+            .url = "https://github.com/Snektron/vulkan-zig/archive/40ad90a912eafb81581a121e585688fbbd7d8ddf.tar.gz",
+            .hash = "vulkan-0.0.0-r7Ytx1JTAwC3R0cfA3SxaWPGJa6p3EUw3OTXTgSPr_hF",
         },
         .vulkan_headers = .{
-            .url = "https://github.com/KhronosGroup/Vulkan-Headers/archive/6a74a7d65cafa19e38ec116651436cce6efd5b2e.tar.gz",
-            .hash = "1220f45c472e3545ce53b43687d0dc16e439351864e88eecf7b94000fa3b03b88bcc",
+            .url = "https://github.com/KhronosGroup/Vulkan-Headers/archive/78c359741d855213e8685278eb81bb62599f8e56.tar.gz",
+            .hash = "N-V-__8AACB_5wGs-y5qd13Yj8jv9y-TYDqGSLequ4D1lt7g",
         },
         .tracy = .{
             .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.11.0.tar.gz",
-            .hash = "1220ec41abde94730af701ba9da16ba3f10bb7d0b62a0b7fdebe10b0aad515e302a6",
+            .hash = "N-V-__8AAMBnlQHsQavelHMK9wG6naFro_ELt9C2Kgt_3r4Q",
         },
         .zpl_enet = .{
-            .url = "https://github.com/zpl-c/enet/archive/dfe906c400a2d68c61f7b5f40f51f7566503a6f6.tar.gz",
-            .hash = "12204747026d010e1498a2d2a63fdf5c1d0d27a0bf8427a543e32889f025d1283acf",
+            .url = "https://github.com/zpl-c/enet/archive/90471c70234299808f5cb983c0009afbad3e71fa.tar.gz",
+            .hash = "N-V-__8AAMLyBADa8ORhUejySKg-yOf9YnHTH7lYkC-ec5-t",
         },
         .zaudio = .{
-            .url = "https://github.com/zig-gamedev/zaudio/archive/7c8a86c1b7a44b906e5de5f3ee18cdd0b8de018b.tar.gz",
-            .hash = "1220423c756c4d6f58d9465a597c2b9f982d929a56fa5ceab4b7626d0ea2685bcd6c",
+            .url = "https://github.com/zig-gamedev/zaudio/archive/fda144641276dd54ddabe2b77f5807fff7eda036.tar.gz",
+            .hash = "zaudio-0.11.0-dev-_M-91iBkPwDaOhCWkRhekq9IxJ_hM70TWQRru1vCitlC",
+        },
+        .modplug = .{
+            .url = "https://github.com/Konstanty/libmodplug/archive/d1b97ed0020bc620a059d3675d1854b40bd2608d.tar.gz",
+            .hash = "N-V-__8AAE6FDQBNzCp_49UGgIPPz2pKBMnU6rx3LvCjjyMu",
         },
     },
     .paths = .{

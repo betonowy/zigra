@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 
 pub const File = struct {
     const SliceType = switch (implType()) {
-        .posix => []align(std.mem.page_size) const u8,
+        .posix => []align(std.heap.page_size_min) const u8,
         .windows => []const u8,
     };
 

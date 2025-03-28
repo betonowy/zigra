@@ -112,7 +112,7 @@ const apis: []const vk.ApiInfo = &.{
     },
 };
 
-pub const Base = vk.BaseWrapper(apis);
-pub const DebugMsg = vk.InstanceWrapper(debug_apis);
-pub const Instance = vk.InstanceWrapper(apis);
-pub const Device = vk.DeviceWrapper(apis);
+pub const Base = vk.BaseWrapper;
+pub const DebugMsg = vk.InstanceWrapper;
+pub const Instance = vk.InstanceWrapper;
+pub const Device = vk.DeviceWrapper;

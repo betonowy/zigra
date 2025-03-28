@@ -192,7 +192,7 @@ pub fn Sequencer(T: type) type {
                 .pointer => |p| {
                     if (p.is_const) @compileError("pointer must be non-const");
                     switch (p.size) {
-                        .One => out.* = OpaqueState(T).initFrom(@field(new, field.name)),
+                        .one => out.* = OpaqueState(T).initFrom(@field(new, field.name)),
                         else => @compileError("pointer must be a pointer to a single item"),
                     }
                 },

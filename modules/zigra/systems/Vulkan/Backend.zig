@@ -128,7 +128,7 @@ pub fn init(
     var frames = std.BoundedArray(Frame, frame_len){};
     errdefer for (frames.constSlice()) |f| f.deinit();
 
-    for (frames.buffer.len) |_| frames.appendAssumeCapacity(
+    for (0..frames.buffer.len) |_| frames.appendAssumeCapacity(
         try Frame.init(device, atlas, pipelines, frame_options),
     );
 

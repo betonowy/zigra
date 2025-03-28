@@ -67,6 +67,7 @@ pub const Write = struct {
         sample_weight_image_qcom: void,
         block_match_image_qcom: void,
         mutable_ext: void,
+        partitioned_acceleration_structure_nv: void,
     };
 
     pub const Images = std.BoundedArray(struct {
